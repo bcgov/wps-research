@@ -17,7 +17,15 @@
 
 <div style="padding:16px 24px;display:flex;flex-direction:column;gap:20px">
 
-    <!-- Pending IPs -->
+    <!-- Pending IPs — REMOVED, kept for reference.
+         There is no approval step any more: access is open by default
+         and every address is recorded automatically, so nothing can
+         ever be "waiting". The only code that still writes
+         state.pending_ips sits in _check_ip(), which now runs on admin
+         paths alone, where the visitor is already an authenticated
+         admin. Restore this block if an approval workflow ever comes
+         back.
+
     <div class="admin-card">
         <h3>Pending IPs</h3>
         <p class="admin-desc">Users waiting for approval</p>
@@ -29,18 +37,26 @@
         </table>
         <p class="empty-msg" id="pending-empty">No pending requests</p>
     </div>
+    -->
 
-    <!-- Approved IPs -->
+    <!-- Known addresses -->
     <div class="admin-card">
-        <h3>Approved IPs</h3>
-        <p class="admin-desc">Users with access</p>
+        <h3>Known addresses</h3>
+        <p class="admin-desc">Every address that has used this server.
+            Access is open by default, so this is a record of use, not
+            a permission list — revoke or block an address to close the
+            gate on it.</p>
         <table class="admin-table">
             <thead><tr>
-                <th>IP Address</th><th>Username</th><th>Role</th><th>Approved By</th><th>Since</th><th>Actions</th>
+                <th>IP Address</th><th>Browser</th><th>Role</th><th>Requests</th><th>First use</th><th>Most recent use</th><th>Actions</th>
             </tr></thead>
             <tbody id="approved-body"></tbody>
         </table>
-        <p class="empty-msg" id="approved-empty">No approved IPs</p>
+        <p class="empty-msg" id="approved-empty">No addresses recorded yet</p>
+        <div style="margin-top:10px;text-align:right">
+            <button class="btn btn-danger" id="btn-clear-known"
+                    onclick="clearKnownAddresses()">Clear list</button>
+        </div>
     </div>
 
     <!-- Revoked IPs -->
@@ -159,6 +175,33 @@ async function unhideFire(fn) {
     loadData();
 }
 
+// Clear the record of addresses seen.
+//
+// Only the RECORD: revocations and blocks are separate lists and are
+// deliberately left alone, because clearing this must not quietly
+// readmit anyone. Addresses reappear here as they are used again.
+async function clearKnownAddresses() {
+    if (!confirm('Clear the list of known addresses?\n\n'
+                 + 'This erases the record of who has used the server. '
+                 + 'Revoked and blocked addresses are NOT affected, and '
+                 + 'addresses will reappear here as they are used '
+                 + 'again.')) {
+        return;
+    }
+    try {
+        const r = await fetch('/api/admin/known/clear',
+                              {method: 'POST',
+                               headers: {'X-Requested-With': 'fetch'}});
+        if (!r.ok) {
+            alert('Could not clear the list: HTTP ' + r.status);
+            return;
+        }
+        await loadData();
+    } catch (err) {
+        alert('Could not clear the list: ' + err.message);
+    }
+}
+
 async function ipAction(action, ip) {
     await fetch(`/api/admin/ip/${action}`, {
         method: 'POST',
@@ -173,8 +216,11 @@ async function loadData() {
         const r = await fetch('/api/admin/ips');
         const data = await r.json();
 
-        // Pending
+        // Pending list removed with its panel (see the commented-out
+        // block above). Guarded rather than deleted so restoring the
+        // panel is all that is needed to bring it back.
         const pb = document.getElementById('pending-body');
+        if (pb) {
         const pe = document.getElementById('pending-empty');
         const pending = Object.entries(data.pending || {});
         pb.innerHTML = '';
@@ -195,28 +241,36 @@ async function loadData() {
             pb.appendChild(tr);
         }
 
-        // Approved
+        }
+
+        // Known addresses
         const ab = document.getElementById('approved-body');
         const ae = document.getElementById('approved-empty');
         const approved = Object.entries(data.approved || {});
         ab.innerHTML = '';
         ae.style.display = approved.length ? 'none' : 'block';
+        // Newest use first: the question being asked of this table is
+        // usually "who is on right now", not "who was first".
+        approved.sort((a, b) => String(b[1].last_seen || '')
+            .localeCompare(String(a[1].last_seen || '')));
         for (const [ip, info] of approved) {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><strong>${esc(ip)}</strong></td>
-                <td>${esc(info.username)}</td>
+                <td title="${esc(info.user_agent || '')}">${esc(info.browser || '')}</td>
                 <td>${esc(info.role)}</td>
-                <td>${esc(info.approved_by)}</td>
-                <td>${esc(info.timestamp)}</td>
+                <td>${esc(info.hits != null ? info.hits : '')}</td>
+                <td>${esc(info.first_seen || info.timestamp || '')}</td>
+                <td>${esc(info.last_seen || '')}</td>
                 <td>
                     <button class="btn btn-danger" style="font-size:11px;padding:2px 8px"
                         onclick="ipAction('revoke','${esc(ip)}')">Revoke</button>
+                    <button class="btn" style="font-size:11px;padding:2px 8px"
+                        onclick="ipAction('block','${esc(ip)}')">Block</button>
                 </td>`;
             ab.appendChild(tr);
         }
 
-        // Blocked
         // Revoked: addresses an admin has closed the gate on.
         const rb = document.getElementById('revoked-body');
         const re_ = document.getElementById('revoked-empty');

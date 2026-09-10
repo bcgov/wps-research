@@ -139,18 +139,33 @@ class FireListRoutes:
 
     # -- Page handlers --
 
-    def handle_fire_list(self):
+    def _nav_links(self):
+        """Admin and Logout links for the page header.
+
+        Logout is shown ONLY to an admin: ordinary use needs no login,
+        so offering to log out invites people to clear a session they
+        do not have. Admin is shown to EVERYONE, because that button is
+        how someone reaches the password prompt -- hiding it would
+        leave the admin area with no route in.
+        """
         is_admin = (getattr(self, '_role', '') == 'admin')
         admin_link = ('<a href="/admin" class="btn" '
                       'style="font-size:11px;padding:3px 10px">'
-                      'Admin</a>'
-                      if is_admin else '')
+                      'Admin</a>')
+        logout_link = ('<a href="/logout" class="btn btn-secondary" '
+                       'style="font-size:11px;padding:3px 10px">'
+                       'Logout</a>' if is_admin else '')
+        return is_admin, admin_link, logout_link
+
+    def handle_fire_list(self):
+        is_admin, admin_link, logout_link = self._nav_links()
         years_sorted = sorted(state.rasters_by_year)
         html = render_template('fire_list.html', {
             'raster_name': os.path.basename(state.raster_path),
             'polygon_name': '(user-drawn bbox)',
             'n_fires': str(len(state.fires)),
             'admin_link': admin_link,
+            'logout_link': logout_link,
             'all_years_json': json.dumps(years_sorted),
             'active_year_json': json.dumps(int(state.active_year)),
             'is_admin_json': json.dumps(bool(is_admin)),
@@ -174,6 +189,7 @@ class FireListRoutes:
             threading.Thread(
                 target=_save_fire_state, daemon=True).start()
         html = render_template('fire_mapping.html', {
+            'logout_link': self._nav_links()[2],
             'fire_numbe': fire_numbe,
             'fire_numbe_json': json.dumps(fire_numbe),
             'fire_year': str(fire.fire_year),
@@ -494,6 +510,7 @@ class FireListRoutes:
         years_sorted = sorted(state.rasters_by_year)
         active = int(state.active_year)
         html = render_template('new_fire.html', {
+            'logout_link': self._nav_links()[2],
             'active_year': str(active),
             'all_years_json': json.dumps(years_sorted),
             'active_year_json': json.dumps(active),

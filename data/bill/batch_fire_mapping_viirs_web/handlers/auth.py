@@ -307,6 +307,28 @@ class AuthRoutes:
             'waiting': waiting,
         })
 
+    def handle_api_admin_known_clear(self):
+        """Erase the record of addresses seen.
+
+        The RECORD only. Revocations and blocks are separate lists and
+        are left untouched: clearing a log of who has visited must not
+        quietly readmit someone an admin deliberately shut out.
+        """
+        if getattr(self, '_role', '') != 'admin':
+            self._send_json({'error': 'Admin access required'}, 403)
+            return
+        with state.lock:
+            removed = len(state.approved_ips)
+            state.approved_ips.clear()
+            # Pending is vestigial, but clearing it here keeps the two
+            # from drifting if an approval flow ever returns.
+            state.pending_ips.clear()
+        _save_ip_list()
+        sys.stderr.write(
+            f'[access] known-address list cleared by admin '
+            f'({removed} entr{"y" if removed == 1 else "ies"})\n')
+        self._send_json({'status': 'ok', 'removed': removed})
+
     def handle_api_admin_ip_action(self, action):
         if getattr(self, '_role', '') != 'admin':
             self._send_json({'error': 'Admin only'}, 403)

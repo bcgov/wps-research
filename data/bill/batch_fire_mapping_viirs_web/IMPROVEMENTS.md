@@ -385,3 +385,44 @@ lost with the ramdisk.
    `cache_retention.py`, which currently sweeps only `.web_cache`.
 4. `purge_other_aoi_stacks()` is defined and never called; nothing
    reclaims `/ram` during a run.
+
+## Access control: what is recorded, and what else could be
+
+Recorded per address today, in `<out_root>/access_control.yaml` (SSD,
+alongside the other durable state):
+
+- IP address
+- Browser family and major version, plus the raw User-Agent
+- Role (`user`, or `admin` once an admin session is seen)
+- Request count
+- First use and most recent use
+- Whether the entry was automatic or an explicit admin approval
+
+### Could be collected — NOT implemented, listed for a decision
+
+Cheap, already in the request:
+
+- **Operating system** — parsed from the same User-Agent as the browser.
+- **Accept-Language** — a rough locale, useful for nothing much here.
+- **Referer** — how someone arrived; almost always internal.
+- **Screen size / device pixel ratio** — needs one line of JS, and would
+  tell us whether the split view is being used on laptops or large
+  displays. Genuinely useful for layout decisions.
+
+Meaningful for operations:
+
+- **Which fires each address opened**, and when. Answers "who was
+  looking at C50929 yesterday" without any login.
+- **Actions taken** — mapped, accepted, erased, downloaded — as a light
+  audit trail per address.
+- **Session duration** and requests per session, from the existing
+  first/last timestamps plus a gap threshold.
+- **Failed admin login attempts per address**, which is the one item
+  here with a security rationale; the rate limiter already counts them
+  but does not keep them.
+
+Worth thinking about before adding any of it: with no login, an IP is a
+proxy for a person and a shared VPN egress may cover several people, so
+per-address history is suggestive rather than attributable. Anything
+resembling an audit trail should probably be an explicit decision with
+the team rather than a side effect of debugging telemetry.

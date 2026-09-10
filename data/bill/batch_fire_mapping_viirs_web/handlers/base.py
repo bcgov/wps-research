@@ -296,6 +296,8 @@ class BaseHandler:
          'handle_api_serial_cancel'),
         (re.compile(r'^/api/admin/ip/(?P<action>approve|block|revoke|restore|unrevoke|unblock)$'),
          'handle_api_admin_ip_action'),
+        (re.compile(r'^/api/admin/known/clear$'),
+         'handle_api_admin_known_clear'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),
          'handle_api_unhide'),
@@ -559,6 +561,39 @@ class BaseHandler:
     # costing almost nothing.
     _IP_TOUCH_INTERVAL = 300
 
+    # Browser families worth naming, in the order they must be tested:
+    # several send more than one of these tokens, and the FIRST match
+    # here is the one that identifies the browser rather than the
+    # engine it is built on. Edge before Chrome, Chrome before Safari.
+    _UA_RULES = (
+        ('Edg/', 'Edge'),
+        ('OPR/', 'Opera'),
+        ('Chrome/', 'Chrome'),
+        ('Firefox/', 'Firefox'),
+        ('Version/', 'Safari'),
+    )
+
+    def _browser_name(self) -> str:
+        """Readable 'Name version' from the User-Agent header.
+
+        A full UA string is unreadable in a table; the family and major
+        version answer the question actually being asked, which is what
+        someone is using to reach the server. The raw string is kept
+        alongside for anything this misses.
+        """
+        ua = self.headers.get('User-Agent') or ''
+        if not ua:
+            return ''
+        for token, name in self._UA_RULES:
+            i = ua.find(token)
+            if i < 0:
+                continue
+            ver = ua[i + len(token):].split(' ')[0].split('.')[0]
+            return f'{name} {ver}'.strip() if ver.isdigit() else name
+        # Not a browser we know: keep something identifiable rather
+        # than an empty cell.
+        return ua.split(' ')[0][:40]
+
     def _track_ip(self, role: str) -> bool:
         """Record this address and say whether it may proceed.
 
@@ -598,11 +633,31 @@ class BaseHandler:
                         'first_seen': now_iso,
                         'last_seen': now_iso,
                         'timestamp': now_iso,
+                        'browser': self._browser_name(),
+                        'user_agent': (self.headers.get('User-Agent')
+                                       or '')[:300],
+                        'hits': 1,
                     }
                     save_needed = True
                     sys.stderr.write(f'[access] new address {ip}\n')
                 else:
                     entry['last_seen'] = now_iso
+                    try:
+                        entry['hits'] = int(entry.get('hits', 0)) + 1
+                    except (TypeError, ValueError):
+                        entry['hits'] = 1
+                    # Keep the browser current: the same address can be
+                    # a different machine tomorrow, and the last one
+                    # seen is the useful answer.
+                    b = self._browser_name()
+                    if b and entry.get('browser') != b:
+                        entry['browser'] = b
+                        entry['user_agent'] = (
+                            self.headers.get('User-Agent') or '')[:300]
+                        save_needed = True
+                    if not entry.get('first_seen'):
+                        entry['first_seen'] = entry.get('timestamp',
+                                                        now_iso)
                     if role == 'admin':
                         entry['role'] = 'admin'
                     last = entry.get('_last_saved', 0)
