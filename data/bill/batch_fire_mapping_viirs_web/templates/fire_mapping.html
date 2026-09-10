@@ -3996,6 +3996,69 @@ function fmtShortDur(sec) {
     return r ? `${m}m ${r}s` : `${m}m`;
 }
 
+// Progress for a run of builds, with an ETA that learns as it goes.
+//
+// A multi-date build is several minutes per date, so a line that only
+// says "2 of 5" leaves the operator unable to tell a slow build from a
+// stuck one. This ticks every second with the current date's elapsed
+// time, and once one build has finished it can say how long the rest
+// should take -- estimated from THIS fire's builds rather than a
+// guess, because build time depends on the AOI size and how many zips
+// each date needs.
+function makeBuildProgress(el, total, label) {
+    let done = 0;
+    let durations = [];
+    let curStart = 0;
+    let curDate = '';
+    let timer = null;
+
+    function fmt(sec) {
+        if (!isFinite(sec) || sec < 0) return '--';
+        if (sec < 60) return `${Math.round(sec)}s`;
+        const m = Math.floor(sec / 60);
+        const r = Math.round(sec - m * 60);
+        return r ? `${m}m ${r}s` : `${m}m`;
+    }
+
+    function paint() {
+        if (!el || !curStart) return;
+        const elapsed = (Date.now() - curStart) / 1000;
+        let line = `${label} ${curDate} \u2014 ${done + 1} of ${total}`
+            + ` \u00b7 ${fmt(elapsed)}`;
+        if (durations.length) {
+            const avg = durations.reduce((a, b) => a + b, 0)
+                / durations.length;
+            // Remaining = the rest of this one (never negative) plus a
+            // full average for each build not yet started.
+            const rest = Math.max(0, avg - elapsed)
+                + avg * Math.max(0, total - done - 1);
+            line += ` \u00b7 about ${fmt(rest)} left`;
+        }
+        el.textContent = line;
+    }
+
+    return {
+        start(date) {
+            curDate = date;
+            curStart = Date.now();
+            paint();
+            if (timer) clearInterval(timer);
+            timer = setInterval(paint, 1000);
+        },
+        finish() {
+            if (curStart) durations.push((Date.now() - curStart) / 1000);
+            done += 1;
+            if (timer) { clearInterval(timer); timer = null; }
+        },
+        stop() {
+            if (timer) { clearInterval(timer); timer = null; }
+        },
+        note(text) {
+            if (el) el.textContent = text;
+        },
+    };
+}
+
 // Which question the date dialog is currently asking.
 let _datePickerMode = 'l2';
 let _mrapRows = [];
@@ -4181,12 +4244,11 @@ async function applyMrapDateSelection() {
         // serialises work per fire anyway, so firing them together
         // would only queue them behind each other with no progress
         // shown; sequentially, each one reports as it lands.
+        const bp = makeBuildProgress(prog, all.length,
+                                     'Building MRAP composite');
         for (let i = 0; i < all.length - 1; i++) {
             const d2 = all[i];
-            if (prog) {
-                prog.textContent = `Building MRAP composite ${d2} `
-                    + `(${i + 1} of ${all.length}) ...`;
-            }
+            bp.start(d2);
             try {
                 await fetch(
                     `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
@@ -4201,11 +4263,9 @@ async function applyMrapDateSelection() {
                 log(`[products] MRAP ${d2} failed: ${e2.message}`,
                     'error');
             }
+            bp.finish();
         }
-        if (prog && all.length > 1) {
-            prog.textContent = `Building MRAP composite ${date} `
-                + `(${all.length} of ${all.length}) ...`;
-        }
+        bp.start(date);
         const parts = parseProductKey(key);
         // The display follows immediately, as with any other switch;
         // the server is told in the same call because this one may
@@ -4225,6 +4285,7 @@ async function applyMrapDateSelection() {
             }
             return;
         }
+        bp.stop();
         leftProduct = data.user_product_key || data.product_key || key;
         currentPostSource = 'mrap';
         currentL2Date = '';
@@ -4244,6 +4305,7 @@ async function applyMrapDateSelection() {
         log(`[products] could not apply MRAP ${date}: ${err.message}`,
             'error');
     } finally {
+        try { bp.stop(); } catch (_) {}
         _dateApplying = false;
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     }
@@ -4295,12 +4357,11 @@ async function applyDateSelection() {
         // server serialises per fire, so issuing them together would
         // just queue them invisibly; sequentially each reports as it
         // lands and the last one stays displayed.
+        const bp = makeBuildProgress(prog, extras.length + 1,
+                                     'Building L2 composite from');
         for (let i = 0; i < extras.length; i++) {
             const d2 = extras[i];
-            if (prog) {
-                prog.textContent = `Building the L2 composite from `
-                    + `${d2} (${i + 1} of ${extras.length + 1}) ...`;
-            }
+            bp.start(d2);
             try {
                 for (;;) {
                     const r2 = await fetch(
@@ -4327,11 +4388,9 @@ async function applyDateSelection() {
             } catch (e2) {
                 log(`[products] L2 ${d2} failed: ${e2.message}`, 'error');
             }
+            bp.finish();
         }
-        if (prog && extras.length) {
-            prog.textContent = `Building the L2 composite from ${date} `
-                + `(${extras.length + 1} of ${extras.length + 1}) ...`;
-        }
+        bp.start(date);
         let r, j;
         for (;;) {
             r = await fetch(
@@ -4477,6 +4536,9 @@ async function applyDateSelection() {
         closeDatePicker();
     } finally {
         clearInterval(poll);
+        // The batch ticker and the per-build poller both write this
+        // line; stopping the ticker here leaves one owner.
+        try { bp.stop(); } catch (_) {}
         _dateApplying = false;
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     }
