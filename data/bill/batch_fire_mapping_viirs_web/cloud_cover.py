@@ -30,7 +30,15 @@ from datetime import date, datetime, timedelta
 
 BUCKET = 'sentinel-products-ca-mirror'
 S3_BASE_URL = f'https://{BUCKET}.s3.amazonaws.com'
-L2A_PREFIX = 'Sentinel-2/S2MSI2A'
+LEVEL_PREFIXES = {
+    'L1C': 'Sentinel-2/S2MSI1C',
+    'L2A': 'Sentinel-2/S2MSI2A',
+}
+LEVEL_METADATA = {
+    'L1C': 'MTD_MSIL1C.xml',
+    'L2A': 'MTD_MSIL2A.xml',
+}
+L2A_PREFIX = LEVEL_PREFIXES['L2A']
 
 # Parallelism for the mirror. The original script defaults to 8 and
 # accepts --workers; here it is a module constant because the caller is
@@ -48,6 +56,16 @@ _inflight: dict = {}
 # Live progress per key, so the dialog can say what is happening rather
 # than leaving the operator to guess whether anything is running at all.
 _progress: dict = {}
+# What the last completed run did. Kept AFTER the run finishes: a fast
+# failure clears _progress within a second, so without this the dialog
+# polls forever against an empty progress dict and reports nothing --
+# which is indistinguishable from a feature that does not work.
+_last_run: dict = {}
+
+
+def last_run(key: str) -> dict:
+    with _lock:
+        return dict(_last_run.get(key) or {})
 
 
 def progress(key: str) -> dict:
@@ -136,7 +154,14 @@ def _read_vsi(vsi_path: str) -> bytes:
         gdal.VSIFCloseL(f)
 
 
-def _cloud_for_product(s3_path: str) -> float:
+def tile_matches_utm_zone(tile_id: str, utm_zone) -> bool:
+    """As in the original: prefix match, case-insensitive, '' = keep."""
+    if not utm_zone:
+        return True
+    return (tile_id or '').upper().startswith(str(utm_zone).upper())
+
+
+def _cloud_for_product(s3_path: str, level: str = 'L2A') -> float:
     """Read one product's cloud percentage straight out of the ZIP.
 
     Same trick as the original: GDAL's /vsizip//vsicurl/ reads the one
@@ -146,7 +171,8 @@ def _cloud_for_product(s3_path: str) -> float:
     zip_name = s3_path.split('/')[-1]
     path_no_bucket = s3_path[len(BUCKET) + 1:]
     url = f'{S3_BASE_URL}/{path_no_bucket}'
-    vsi = f'/vsizip//vsicurl/{url}/{_safe_folder(zip_name)}/MTD_MSIL2A.xml'
+    meta = LEVEL_METADATA.get(level, LEVEL_METADATA['L2A'])
+    vsi = f'/vsizip//vsicurl/{url}/{_safe_folder(zip_name)}/{meta}'
     return _extract_cloud_from_xml(_read_vsi(vsi).decode('utf-8'))
 
 
@@ -159,21 +185,69 @@ def _tile_of(product_path: str) -> str:
     return ''
 
 
-def _products_for_day(day: str, tiles) -> list:
-    """L2A products on the mirror for one day, restricted to *tiles*."""
+def _list_via_http(prefix: str) -> list:
+    """List one prefix using the bucket's public REST API.
+
+    The original script uses s3fs. Depending on it here would make a
+    missing package silently disable the whole feature on a server that
+    is otherwise fine, so this speaks to the same bucket over plain
+    HTTP and keeps s3fs as a fallback rather than a requirement.
+    """
+    import urllib.parse
+    import urllib.request
+    keys = []
+    token = ''
+    for _ in range(20):                      # bounded: ~20k objects
+        q = {'list-type': '2', 'prefix': prefix, 'max-keys': '1000'}
+        if token:
+            q['continuation-token'] = token
+        url = f'{S3_BASE_URL}/?{urllib.parse.urlencode(q)}'
+        with urllib.request.urlopen(url, timeout=60) as r:
+            body = r.read()
+        root = ET.fromstring(body)
+        ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
+        for c in root.findall('.//s3:Contents/s3:Key', ns):
+            if c.text:
+                keys.append(c.text)
+        trunc = root.find('.//s3:IsTruncated', ns)
+        nxt = root.find('.//s3:NextContinuationToken', ns)
+        if (trunc is None or (trunc.text or '').lower() != 'true'
+                or nxt is None or not nxt.text):
+            break
+        token = nxt.text
+    return keys
+
+
+def _list_via_s3fs(prefix: str) -> list:
     import s3fs
     fs = s3fs.S3FileSystem(anon=True)
-    prefix = f'{BUCKET}/{L2A_PREFIX}/{day[:4]}/{day[4:6]}/{day[6:8]}/'
+    return [k[len(BUCKET) + 1:] if k.startswith(BUCKET + '/') else k
+            for k in fs.ls(f'{BUCKET}/{prefix}')]
+
+
+def _products_for_day(day: str, tiles, level: str = 'L2A',
+                      utm_zone=None) -> list:
+    """Products on the mirror for one day, restricted to *tiles*."""
+    root = LEVEL_PREFIXES.get(level, L2A_PREFIX)
+    prefix = f'{root}/{day[:4]}/{day[4:6]}/{day[6:8]}/'
+    keys = None
+    first_err = None
+    for lister in (_list_via_http, _list_via_s3fs):
+        try:
+            keys = lister(prefix)
+            break
+        except Exception as exc:
+            if first_err is None:
+                first_err = f'{type(exc).__name__}: {exc}'
+    if keys is None:
+        raise RuntimeError(f'listing {day}: {first_err}')
     out = []
-    try:
-        for obj in fs.ls(prefix):
-            if not obj.endswith('.zip'):
-                continue
-            t = _tile_of(obj)
-            if t and t in tiles:
-                out.append(obj)
-    except Exception as exc:
-        raise RuntimeError(f'listing {day}: {exc}')
+    for key in keys:
+        if not key.endswith('.zip'):
+            continue
+        t = _tile_of(key)
+        if t and t in tiles and tile_matches_utm_zone(t, utm_zone):
+            out.append(f'{BUCKET}/{key}')
     return out
 
 
@@ -204,19 +278,22 @@ def cached_percentages(cache_root: str, tiles, days) -> dict:
 
 
 def fetch_percentages(cache_root: str, tiles, days,
-                      log=None) -> dict:
+                      log=None, level: str = 'L2A',
+                      workers: int = None, single_thread: bool = False,
+                      use_cache: bool = True, utm_zone=None) -> dict:
     """Fill in whatever is missing, then return everything known.
 
     Incremental by construction: a (tile, day) already in the cache is
     never fetched again, so opening the dialog a second time costs
     nothing and adding one new date costs only that date.
     """
-    tiles = sorted(set(t for t in (tiles or []) if t))
+    tiles = sorted(set(t for t in (tiles or []) if t
+                       and tile_matches_utm_zone(t, utm_zone)))
     days = sorted(set(d for d in (days or []) if d), reverse=True)
     if not tiles or not days:
         return {}
 
-    data = _load(cache_root)
+    data = _load(cache_root) if use_cache else {}
     now = time.time()
 
     # What still needs looking up.
@@ -253,7 +330,8 @@ def fetch_percentages(cache_root: str, tiles, days,
     def _one_day(day):
         found = {}
         try:
-            products = _products_for_day(day, tiles)
+            products = _products_for_day(day, tiles, level=level,
+                                         utm_zone=utm_zone)
         except Exception as exc:
             return day, None, str(exc)
         if not products:
@@ -261,15 +339,36 @@ def fetch_percentages(cache_root: str, tiles, days,
         for s3_path in products:
             t = _tile_of(s3_path)
             try:
-                found[t] = _cloud_for_product(s3_path)
+                found[t] = _cloud_for_product(s3_path, level=level)
             except Exception as exc:
                 sys.stderr.write(
                     f'[cloud] {os.path.basename(s3_path)}: {exc}\n')
         return day, found, None
 
     results = []
+    n_workers = int(workers or N_WORKERS)
+    if single_thread:
+        # The original's --single-thread, kept for the same reason:
+        # a failing mirror is far easier to diagnose without a pool
+        # swallowing the order of events.
+        for d in todo:
+            try:
+                r = _one_day(d)
+                results.append(r)
+                with _lock:
+                    pr = _progress.get(pkey)
+                    if pr is not None:
+                        pr['done'] = int(pr.get('done', 0)) + 1
+                        pr['day'] = r[0]
+                        if r[2]:
+                            pr['errors'] = int(pr.get('errors', 0)) + 1
+            except Exception as exc:
+                sys.stderr.write(f'[cloud] {d} failed: {exc}\n')
+        n_workers = 0
     try:
-        with ThreadPoolExecutor(max_workers=N_WORKERS) as ex:
+        with ThreadPoolExecutor(max_workers=max(1, n_workers)) as ex:
+            if n_workers == 0:
+                raise StopIteration
             futs = {ex.submit(_one_day, d): d for d in todo}
             for fut in as_completed(futs):
                 try:
@@ -289,6 +388,8 @@ def fetch_percentages(cache_root: str, tiles, days,
                         if pr is not None:
                             pr['done'] = int(pr.get('done', 0)) + 1
                             pr['errors'] = int(pr.get('errors', 0)) + 1
+    except StopIteration:
+        pass                       # single-threaded run already done
     except Exception as exc:
         sys.stderr.write(f'[cloud] pool failed: {exc}\n')
 
@@ -312,8 +413,25 @@ def fetch_percentages(cache_root: str, tiles, days,
         _save(cache_root, data)
         if log:
             log(f'[cloud] cached {changed} tile-day value(s)')
+    ok_days = sum(1 for _d, f, e in results if not e and f)
+    empty_days = sum(1 for _d, f, e in results if not e and not f)
+    err_days = [(d, e) for d, f, e in results if e]
     with _lock:
         _progress.pop(pkey, None)
+        _last_run[pkey] = {
+            'finished_at': time.time(),
+            'attempted': len(todo),
+            'with_data': ok_days,
+            'no_products': empty_days,
+            'failed': len(err_days),
+            'error': (err_days[0][1] if err_days else ''),
+        }
+    if err_days and log:
+        log(f'[cloud] {len(err_days)} of {len(todo)} day(s) failed; '
+            f'first: {err_days[0][1][:160]}')
+    if log:
+        log(f'[cloud] done: {ok_days} day(s) with data, '
+            f'{empty_days} with no products, {len(err_days)} failed')
     return cached_percentages(cache_root, tiles, days)
 
 

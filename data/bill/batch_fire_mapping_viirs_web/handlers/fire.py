@@ -481,20 +481,35 @@ class FireRoutes:
             have = _cc.cached_percentages(root, tiles, days)
             missing = [d for d in days if d not in have]
             key = ','.join(tiles)
-            if missing:
+            running = _cc.is_fetching(key)
+            last = _cc.last_run(key)
+            # Start a fill only if one is not already running AND the
+            # last attempt is not a fresh failure. Retrying instantly
+            # against a mirror that just refused every request produces
+            # nothing except a poll loop -- which is exactly what the
+            # dialog was doing.
+            recent_fail = bool(
+                last and last.get('failed')
+                and not last.get('with_data')
+                and (time.time() - float(last.get('finished_at', 0))
+                     < 120))
+            if missing and not running and not recent_fail:
                 _cc.fetch_in_background(
                     root, tiles, missing, key,
                     log=lambda m: sys.stderr.write(m + '\n'))
+                running = True
             self._send_json({
                 'cover': {d: round(v, 1) for d, v in have.items()},
-                'pending': bool(missing) or _cc.is_fetching(key),
+                # Keep polling only while work is actually running.
+                'pending': bool(running),
                 'missing': len(missing),
                 'tiles': tiles,
-                # What the retrieval is doing right now, so the dialog
-                # can report progress instead of showing an empty
-                # column and leaving the operator to wonder whether
-                # anything is running.
+                # What the retrieval is doing right now, and how the
+                # last attempt ended -- a fast failure clears progress
+                # within a second, so without the second the dialog has
+                # nothing to report.
                 'progress': _cc.progress(key),
+                'last_run': last,
             })
         except Exception as exc:
             sys.stderr.write(f'[cloud] {fire_numbe}: {exc}\n')

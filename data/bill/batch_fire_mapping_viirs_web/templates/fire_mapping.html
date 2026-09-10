@@ -3888,6 +3888,7 @@ async function loadCloudCover(days) {
 
         const known = Object.keys(j.cover || {}).length;
         const pr = j.progress || {};
+        const lr = j.last_run || {};
         if (j.error) {
             setCloudStatus(`Cloud cover: ${j.error}`, 'error');
         } else if (pr.total) {
@@ -3903,10 +3904,21 @@ async function loadCloudCover(days) {
         } else if (j.pending) {
             setCloudStatus('Reading cloud cover from the Sentinel-2 '
                            + 'mirror ...');
+        } else if (lr.failed && !lr.with_data) {
+            // The run finished and produced nothing. Say why, with the
+            // server's own message: "no cloud cover" on its own gives
+            // the operator nothing to act on.
+            setCloudStatus(
+                `Cloud cover unavailable: ${lr.failed} of `
+                + `${lr.attempted} day(s) failed. ${lr.error || ''}`.trim(),
+                'error');
         } else if (known) {
+            const noneTag = lr.no_products
+                ? ` · ${lr.no_products} day(s) had no products` : '';
+            const failTag = lr.failed ? ` · ${lr.failed} failed` : '';
             setCloudStatus(`Cloud cover: ${known} date(s), averaged over `
                            + `${(j.tiles || []).length} tile(s) covering `
-                           + `this AOI`, 'done');
+                           + `this AOI${noneTag}${failTag}`, 'done');
         } else {
             setCloudStatus('No cloud cover available for these dates',
                            'error');
