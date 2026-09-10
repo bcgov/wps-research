@@ -851,7 +851,11 @@ function cacheKeyFor(viewKey, pane) {
     // depends only on the post source.
     const modePart = (viewKey === 'hint') ? `:${currentHintMode}` : '';
     const stamp = (viewKey === 'hint') ? _hintStamp : _previewStamp;
-    const src = (pane === 'right') ? rightPostSource : currentPostSource;
+    // Derive the source from the pane's PRODUCT, so the two can never
+    // describe different things in the same request.
+    const _pk0 = paneProductKey(pane);
+    const src = _pk0 ? parseProductKey(_pk0).source
+        : ((pane === 'right') ? rightPostSource : currentPostSource);
     // Source FIRST and always present, including for hints: a hint
     // image is a mask over that source's post-fire preview, so the two
     // sources' hints are different pictures and must not share a key.
@@ -1386,7 +1390,10 @@ async function _onPostSourceChangeInner() {
                 if (chk.ok) {
                     const cj = await chk.json();
                     if (cj && cj.post_source) actual = cj.post_source;
-                    if (cj && cj.product_key) leftProduct = cj.product_key;
+                    if (cj && (cj.user_product_key || cj.product_key)) {
+                        leftProduct = cj.user_product_key
+                            || cj.product_key;
+                    }
                 }
             } catch (_) { /* keep the assumption */ }
             currentPostSource = actual;
@@ -1410,7 +1417,8 @@ async function _onPostSourceChangeInner() {
         // including the source.
         currentPostSource = src;
         currentL2Date = _wantDate;
-        leftProduct = (data && data.product_key) ? data.product_key : _key;
+        leftProduct = (data && (data.user_product_key || data.product_key))
+            || _key;
         if (typeof data.l2_start_date === 'string') {
             currentL2Date = data.l2_start_date;
         }
@@ -1449,15 +1457,17 @@ async function _onPostSourceChangeInner() {
         // switched to, and await it so nothing paints the previous
         // product's vectors in between.
         await loadFireOverlays();
-        // Warm BOTH sources, not just the current one. The server has
-        // already built and stashed both (see the prebuild in the
-        // worker), so the other source's previews are sitting on disk
-        // ready to serve -- fetching them now is what makes the first
-        // toggle instant instead of showing "rebuilding".
-        for (const src of ['l2', 'mrap']) {
-            warmSourceCache(src);
-            warmHintCache(src);
-        }
+        // Warm only the product now in use.
+        //
+        // Warming the OTHER source asks the server for previews it may
+        // not have, and the preview endpoint answers by switching the
+        // fire to that product, rendering, and switching back. Doing
+        // that after every switch made each one slower AND gave any
+        // concurrent refresh a window in which the fire was pointed at
+        // the product the operator had just left. The other products
+        // are warmed when they are actually selected.
+        warmSourceCache(src);
+        warmHintCache(src);
         if (data.tiles && data.tiles.length) {
             const parts = Object.entries(data.tile_dates || {})
                 .map(([t, d]) => `${t}@${d}`).join(', ');
@@ -1838,7 +1848,7 @@ async function prepareFire(padding) {
         currentPostSource = data.post_source || 'l2';
         currentL2Date = data.l2_start_date || '';
         rightL2Date = currentL2Date;
-        leftProduct = data.product_key || '';
+        leftProduct = data.user_product_key || data.product_key || '';
         rightProduct = leftProduct;
         try { refreshSourceSelectors(data.products); } catch (_) {}
         try { installSourceSelectGuard(); } catch (_) {}
@@ -2870,8 +2880,11 @@ async function loadDatePlot() {
     if (!box) return;
 
     // Only meaningful for L2: MRAP is a single composite with no
-    // per-acquisition structure.
-    if (currentPostSource !== 'l2') {
+    // per-acquisition structure. Decided from the loaded PRODUCT, so a
+    // stale source variable cannot hide the panel.
+    const _plotSrc = parseProductKey(currentProductKey()).source
+        || currentPostSource;
+    if (_plotSrc !== 'l2') {
         box.style.display = 'none';
         if (_datePlotPoll) { clearInterval(_datePlotPoll); _datePlotPoll = null; }
         return;
@@ -2894,6 +2907,8 @@ async function loadDatePlot() {
     } catch (_) { /* handled below */ }
 
     if (data && data.dates && data.dates.length) {
+        log(`[date_plot] ${data.dates.length} acquisition(s), grid `
+            + `${data.width || '?'}x${data.height || '?'}`, 'dim');
         _datePlot = data;
         box.style.display = '';
         if (cv) cv.style.display = '';
@@ -2958,8 +2973,32 @@ function drawDatePlot() {
     const cv = document.getElementById('date-plot');
     const legend = document.getElementById('date-plot-legend');
     if (!cv || !_datePlot) return;
-    const W = _datePlot.width, H = _datePlot.height;
-    if (!W || !H) return;
+    let W = _datePlot.width, H = _datePlot.height;
+    if (!W || !H) {
+        // Recover the grid from the polygons themselves rather than
+        // drawing nothing. A silent return here is why the panel could
+        // show a legend with no plot beside it.
+        let mx = 0, my = 0;
+        for (const d of (_datePlot.dates || [])) {
+            for (const poly of (d.polys || d.polygons || [])) {
+                for (const pt of (poly || [])) {
+                    if (Array.isArray(pt)) {
+                        mx = Math.max(mx, pt[0] || 0);
+                        my = Math.max(my, pt[1] || 0);
+                    }
+                }
+            }
+        }
+        if (mx > 0 && my > 0) {
+            W = Math.ceil(mx); H = Math.ceil(my);
+            log(`[date_plot] no dimensions in the data; derived `
+                + `${W}x${H} from the polygons`, 'dim');
+        } else {
+            log('[date_plot] cannot draw: the coverage data carries no '
+                + 'dimensions and no usable polygons', 'error');
+            return;
+        }
+    }
 
     // Fit the AOI's aspect into the panel width. The panel is far
     // taller than wide, so width is the binding constraint; height
@@ -3694,8 +3733,16 @@ function restoreUiState(ui, kgcParams) {
         }
         if (ui.left_view) leftView = ui.left_view;
         if (ui.right_view) rightView = ui.right_view;
-        if (ui.left_src) currentPostSource = ui.left_src;
-        if (ui.right_src) rightPostSource = ui.right_src;
+        // Sources are NOT restored here.
+        //
+        // This runs inside applySavedUiState, which already decides the
+        // products: the left pane follows the server (it owns what is
+        // loaded and what gets classified) and the right pane follows
+        // its saved product key. Writing a bare source here as well
+        // left currentPostSource disagreeing with leftProduct -- the
+        // preview URL then carried one product's source and another
+        // product's key, which is precisely the kind of split state
+        // that made the left selector unpredictable.
     } catch (err) {
         log(`[ui] could not restore the saved view: ${err.message}`,
             'dim');
@@ -4492,8 +4539,13 @@ async function syncProductsFromServer(why) {
             rebuildSourceSelectors();
             return;
         }
-        if (typeof j.product_key === 'string' && j.product_key) {
-            leftProduct = j.product_key;
+        // Follow what the OPERATOR chose. product_key is whatever is
+        // loaded this instant, and the preview endpoint briefly points
+        // the fire at other products while rendering them -- adopting
+        // that is what made the selector flip back on its own.
+        const _auth = j.user_product_key || j.product_key;
+        if (typeof _auth === 'string' && _auth) {
+            leftProduct = _auth;
         }
         if (typeof j.post_source === 'string') {
             currentPostSource = j.post_source;

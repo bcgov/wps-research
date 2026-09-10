@@ -206,7 +206,11 @@ class FireListRoutes:
                         getattr(f, 'recommended_override', None)),
                     'is_new': bool(getattr(f, 'is_new', False)),
                     'error_msg': f.error_msg,
-                    'sub_stage': (f.progress.get('stage', '')
+                    # The readable name ("Reading Sentinel-2 data"),
+                    # falling back to the internal key so an older
+                    # progress dict still shows something.
+                    'sub_stage': ((f.progress.get('stage_label')
+                                   or f.progress.get('stage', ''))
                                   if f.progress else ''),
                     'sub_stage_idx': (f.progress.get('stage_idx', 0)
                                       if f.progress else 0),
@@ -221,6 +225,8 @@ class FireListRoutes:
                     # has stopped progressing.
                     'eta_s': (f.progress.get('eta_s')
                               if f.progress else None),
+                    'progress_fraction': (f.progress.get('fraction')
+                                          if f.progress else None),
                     'elapsed_s': (f.progress.get('elapsed_s')
                                   if f.progress else None),
                     'last_change_at': (f.progress.get('last_change_at')

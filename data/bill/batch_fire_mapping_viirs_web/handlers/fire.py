@@ -271,6 +271,11 @@ class FireRoutes:
             # Which product the fire is actually on, so the selector
             # can show it without the client re-deriving it.
             'product_key': self._loaded_product_key(fire),
+            # The product the operator selected. Differs from
+            # product_key only while a background render has the fire
+            # pointed elsewhere; the selector follows THIS.
+            'user_product_key': (getattr(fire, 'user_product', '')
+                                 or self._loaded_product_key(fire)),
             # Report what the USER is on, not the transient value the
             # background prebuild may currently be sitting at -- that
             # race made a new fire open on MRAP instead of L2.
@@ -361,6 +366,17 @@ class FireRoutes:
         if _product:
             fire.user_post_source = source
             result = switch_post_source(fire, source, product=_product)
+            if result.get('ok'):
+                # What the OPERATOR chose, as opposed to what happens to
+                # be loaded. The preview endpoint builds other products
+                # by switching the fire there and back, so the loaded
+                # product is briefly something nobody asked for -- and a
+                # client refresh landing in that window would adopt it
+                # and appear to revert the selection.
+                from ..prepare import product_key_for_path
+                fire.user_product = (
+                    product_key_for_path(getattr(fire, 'crop_bin', ''))
+                    or _product)
         else:
             result = switch_post_source(fire, source, l2_date=_date)
         if result.get('ok'):
@@ -379,6 +395,9 @@ class FireRoutes:
             result['l2_start_date'] = getattr(fire, 'l2_start_date',
                                               '') or ''
             result['product_key'] = self._loaded_product_key(fire)
+            result['user_product_key'] = (
+                getattr(fire, 'user_product', '')
+                or result['product_key'])
         except Exception as exc:
             sys.stderr.write(f'[products] not attached to switch '
                              f'response: {exc}\n')
@@ -413,7 +432,8 @@ class FireRoutes:
         fire = state.fires[fire_numbe]
         if getattr(fire, 'post_source', 'l2') != 'l2':
             self._send_json({'dates': [], 'width': 0, 'height': 0,
-                             'reason': 'not applicable to MRAP'})
+                             'reason': 'not applicable to MRAP',
+                             'product': self._loaded_product_key(fire)})
             return
         try:
             from ..l2_recent import date_polygons_path
@@ -424,6 +444,27 @@ class FireRoutes:
                 return
             with open(path, encoding='utf-8') as f:
                 payload = json.loads(f.read())
+            # Sidecars written by older builds may carry the polygons
+            # without the grid they are drawn on. The client cannot
+            # scale them without it and silently draws nothing, so fill
+            # it in from the crop the sidecar sits beside.
+            if not payload.get('width') or not payload.get('height'):
+                try:
+                    from osgeo import gdal
+                    ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+                    if ds is not None:
+                        payload['width'] = ds.RasterXSize
+                        payload['height'] = ds.RasterYSize
+                        ds = None
+                        sys.stderr.write(
+                            f'[date_plot] {fire_numbe}: sidecar had no '
+                            f'dimensions; filled from the crop '
+                            f'({payload["width"]}x'
+                            f'{payload["height"]})\n')
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[date_plot] {fire_numbe}: could not recover '
+                        f'dimensions: {exc}\n')
             # Recover the platform for sidecars written before it was
             # recorded, and persist so the work is done once.
             payload, changed = self._backfill_date_sats(fire, payload)

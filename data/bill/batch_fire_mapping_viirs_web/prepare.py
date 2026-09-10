@@ -1631,15 +1631,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
                   or state.raster_path)
 
     def _cb(detail, frac):
-        try:
-            fire.progress = {
-                'stage': 'cropping', 'stage_idx': 5, 'total_stages': 5,
-                'detail': f'{source.upper()} stack: {detail}',
-                'fraction': max(0.0, min(1.0, float(frac))),
-                'updated_at': time.time(),
-            }
-        except Exception:
-            pass
+        set_prep_stage(fire, stage_for_stack_detail(detail),
+                       detail=f'{source.upper()}: {detail}', frac=frac)
 
     # Selecting a product that already exists is a repoint, not a build.
     #
@@ -1776,6 +1769,9 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             pass
     else:
         try:
+            set_prep_stage(fire, 'previews',
+                           detail='rendering the display layers',
+                           frac=0.1)
             views = generate_all_previews(
                 fire.crop_bin, fire.cache_dir, fire.fire_numbe)
             try:
@@ -1802,6 +1798,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             fire.viirs_bin and os.path.isfile(fire.viirs_bin)):
         mode = 'redwins_post'
     if mode in DERIVED_HINT_MODES:
+        set_prep_stage(fire, 'hint',
+                       detail=f'deriving the {mode} hint', frac=0.2)
         rw_path, rw_err = build_derived_hint_for_fire(fire, mode)
         if rw_path and getattr(fire, 'restrict_hint_bcws', False):
             # Clip the chosen hint to the BCWS perimeter, so
@@ -2017,17 +2015,8 @@ def ensure_fire_stack_present(fire: FireInfo) -> dict:
         '-- regenerating from source imagery ...')
 
     def _cb(detail, frac):
-        try:
-            fire.progress = {
-                'stage': 'cropping',
-                'stage_idx': 5,
-                'total_stages': 5,
-                'detail': f'Rebuilding AOI stack: {detail}',
-                'fraction': max(0.0, min(1.0, float(frac))),
-                'updated_at': time.time(),
-            }
-        except Exception:
-            pass
+        set_prep_stage(fire, stage_for_stack_detail(detail),
+                       detail=f'rebuilding: {detail}', frac=frac)
 
     info = ensure_aoi_stack(
         fire.fire_numbe, fire.bbox_native, progress_cb=_cb,
@@ -2186,17 +2175,10 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     from .aoi_stack import ensure_aoi_stack, AoiStackError
 
     def _stack_progress(detail, frac):
-        try:
-            fire.progress = {
-                'stage': 'cropping',
-                'stage_idx': 5,
-                'total_stages': 5,
-                'detail': f'AOI stack: {detail}',
-                'fraction': max(0.0, min(1.0, float(frac))),
-                'updated_at': time.time(),
-            }
-        except Exception:
-            pass
+        # The builder's own message decides which named step this is,
+        # so the header and the detail always describe the same thing.
+        set_prep_stage(fire, stage_for_stack_detail(detail),
+                       detail=str(detail or ''), frac=frac)
 
     try:
         stack_info = ensure_aoi_stack(
@@ -2919,3 +2901,103 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
 
     threading.Thread(target=_run, daemon=True,
                      name='startup-products').start()
+
+
+# ---------------------------------------------------------------------
+# Preparation progress
+# ---------------------------------------------------------------------
+# One named stage list, with weights reflecting how long each step
+# actually takes. Reporting every step as "5 of 5" told the operator
+# nothing about where in the process a fire was, and left whatever text
+# the last callback happened to write sitting there while something
+# else ran -- which is how the detail line came to describe a step that
+# had finished minutes earlier.
+
+PREP_STAGES = [
+    ('locating', 'Locating imagery', 0.04),
+    ('extracting', 'Reading Sentinel-2 data', 0.56),
+    ('compositing', 'Building the AOI composite', 0.20),
+    ('previews', 'Rendering preview imagery', 0.12),
+    ('hint', 'Computing the hint layer', 0.08),
+]
+_PREP_INDEX = {k: i for i, (k, _l, _w) in enumerate(PREP_STAGES)}
+
+
+def prep_stage_label(key: str) -> str:
+    for k, label, _w in PREP_STAGES:
+        if k == key:
+            return label
+    return key or ''
+
+
+def set_prep_stage(fire, key: str, detail: str = '', frac: float = 0.0,
+                   kind: str = 'prepare') -> None:
+    """Record which preparation step a fire is on, and how far in.
+
+    ``detail`` is written fresh every call, so it can never outlive the
+    step that produced it. The overall fraction is the weighted
+    position across all stages, which makes the ETA reflect the WHOLE
+    job rather than the current step -- the previous version restarted
+    its estimate at each step and so promised "nearly done" repeatedly.
+    """
+    try:
+        idx = _PREP_INDEX.get(key, 0)
+        frac = max(0.0, min(1.0, float(frac or 0.0)))
+        done = sum(w for _k, _l, w in PREP_STAGES[:idx])
+        overall = done + PREP_STAGES[idx][2] * frac
+        overall = max(0.0, min(0.999, overall))
+
+        prev = getattr(fire, 'progress', None) or {}
+        started = prev.get('started_at')
+        if not started or prev.get('kind') != kind:
+            started = time.time()
+        now = time.time()
+        elapsed = max(0.0, now - float(started))
+
+        # ETA from the weighted position. Held back until enough of the
+        # job has happened to mean anything: a guess made two seconds
+        # in is noise, and showing it invites the operator to trust it.
+        eta = None
+        if overall >= 0.04 and elapsed >= 5.0:
+            eta = max(0.0, elapsed * (1.0 - overall) / overall)
+
+        changed = (prev.get('stage') != key
+                   or prev.get('detail') != detail)
+        fire.progress = {
+            'kind': kind,
+            'stage': key,
+            'stage_label': prep_stage_label(key),
+            'stage_idx': idx + 1,
+            'total_stages': len(PREP_STAGES),
+            'detail': detail or '',
+            'fraction': overall,
+            'stage_fraction': frac,
+            'started_at': started,
+            'updated_at': now,
+            'elapsed_s': elapsed,
+            'eta_s': eta,
+            'last_change_at': (now if changed
+                               else prev.get('last_change_at', now)),
+        }
+    except Exception:
+        pass
+
+
+def stage_for_stack_detail(detail: str) -> str:
+    """Map an aoi_stack progress message onto a preparation stage.
+
+    The builder reports what it is doing in prose; this is where that
+    prose becomes a step the operator can recognise. Unknown text keeps
+    the composite stage rather than inventing a new one.
+    """
+    d = (detail or '').lower()
+    if ('tile' in d and ('find' in d or 'intersect' in d)) \
+            or 'searching' in d or 'locating' in d:
+        return 'locating'
+    if ('zip' in d or 'extract' in d or 'read' in d
+            or 'jp2' in d or 'band' in d or 'download' in d):
+        return 'extracting'
+    if ('warp' in d or 'mosaic' in d or 'composite' in d
+            or 'stack' in d or 'header' in d or 'writ' in d):
+        return 'compositing'
+    return 'compositing'
