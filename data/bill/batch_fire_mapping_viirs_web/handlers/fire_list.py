@@ -386,6 +386,20 @@ class FireListRoutes:
                     for f in glob.glob(os.path.join(
                             RAM_DIR, f'*_stack_{_safe}_{_h}*')):
                         own.append(f)
+                    # The durable copies too, or the next start-up
+                    # restores everything this delete just removed and
+                    # the fire's old dated products reappear in the
+                    # selector. Deleting means starting fresh.
+                    try:
+                        from ..durable import store_dir
+                        _sd = store_dir()
+                        if _sd and os.path.isdir(_sd):
+                            for f in glob.glob(os.path.join(
+                                    _sd, f'*_stack_{_safe}_{_h}*')):
+                                own.append(f)
+                    except Exception as exc:
+                        sys.stderr.write(
+                            f'[remove] durable purge: {exc}\n')
                 except Exception as exc:
                     sys.stderr.write(
                         f'[remove] stack purge: {exc}\n')

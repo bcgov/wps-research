@@ -1681,15 +1681,19 @@ async function prepareFire(padding) {
         // already put that image on screen by now.
         // Queue the CURRENT source first so the views the user is most
         // likely to touch arrive soonest, then the other source.
-        // Only the product being displayed.
+        // Warm the displayed product first, then every other product
+        // that is ALREADY BUILT, newest first.
         //
-        // Warming the OTHER one asks the server for previews it may not
-        // have, and it answers by switching the fire there, rendering,
-        // and switching back. Doing that while the page is still
-        // loading is how the first view could arrive as "not
-        // available" -- the product moved under it mid-request.
+        // Only built products: asking for one that does not exist makes
+        // the server switch the fire there and render, which is the
+        // churn that used to move products under a loading pane.
+        // Fetching previews that are already on disk is just a copy,
+        // so switching afterwards is instant instead of showing
+        // "preparing".
         warmSourceCache(currentPostSource);
         warmHintCache(currentPostSource);
+        setTimeout(() => { try { warmAllProducts(); } catch (_) {} },
+                   1500);
         // Drain only after the foreground image has landed, so warming
         // never competes with what the user is waiting to see.
         waitForFirstPaint().then(drainWarmQueue);
@@ -4281,29 +4285,14 @@ async function applyMrapDateSelection() {
         // Progress counts only what will actually be built.
         const bp = makeBuildProgress(prog, Math.max(1, toBuild.length),
                                      'Building MRAP composite');
-        for (let i = 0; i < all.length - 1; i++) {
-            const d2 = all[i];
-            if (already.has(`mrap_p${d2}`)) continue;
-            bp.start(d2);
-            try {
-                await fetch(
-                    `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json',
-                                  'X-Requested-With': 'fetch'},
-                        body: JSON.stringify({source: 'mrap',
-                                              product: `mrap_p${d2}`}),
-                    });
-                log(`[products] built MRAP composite ${d2}`, 'dim');
-                // Offer it NOW. Waiting until the whole batch finishes
-                // meant a product that exists on disk was absent from
-                // both selectors until the page was reloaded.
-                await syncProductsFromServer(`built ${d2}`);
-            } catch (e2) {
-                log(`[products] MRAP ${d2} failed: ${e2.message}`,
-                    'error');
-            }
-            bp.finish();
+        // Hand the extras to the server: it keeps building them after
+        // this dialog closes, and after the operator moves to another
+        // fire and starts a batch there.
+        const extraKeys = toBuild.filter((d) => d !== date)
+            .map((d) => `mrap_p${d}`);
+        if (extraKeys.length) {
+            bp.stop();
+            await queueProductBuilds(extraKeys, 'MRAP composite');
         }
         bp.start(date);
         const parts = parseProductKey(key);
@@ -4414,37 +4403,11 @@ async function applyDateSelection() {
         // lands and the last one stays displayed.
         const bp = makeBuildProgress(prog, extras.length + 1,
                                      'Building L2 composite from');
-        for (let i = 0; i < extras.length; i++) {
-            const d2 = extras[i];
-            bp.start(d2);
-            try {
-                for (;;) {
-                    const r2 = await fetch(
-                        `/api/fire/${encodeURIComponent(FIRE)}/l2_date`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json',
-                                      'X-Requested-With': 'fetch'},
-                            body: JSON.stringify({date: d2}),
-                        });
-                    const j2 = await r2.json().catch(() => ({}));
-                    if (r2.status === 409 && j2.busy) {
-                        await new Promise((res) => setTimeout(res, 2000));
-                        continue;
-                    }
-                    if (!r2.ok || j2.error) {
-                        log(`[products] L2 ${d2} failed: `
-                            + `${j2.error || ('HTTP ' + r2.status)}`,
-                            'error');
-                    } else {
-                        log(`[products] built L2 composite ${d2}`, 'dim');
-                        await syncProductsFromServer(`built ${d2}`);
-                    }
-                    break;
-                }
-            } catch (e2) {
-                log(`[products] L2 ${d2} failed: ${e2.message}`, 'error');
-            }
-            bp.finish();
+        // Queue the extras server-side; they survive navigation.
+        if (extras.length) {
+            bp.stop();
+            await queueProductBuilds(
+                extras.map((d) => `l2_d${d}`), 'L2 composite');
         }
         bp.start(date);
         let r, j;
@@ -4681,6 +4644,35 @@ let _dlLastState = '';
 // what makes a two-date comparison possible without disturbing the
 // classification.
 let _products = [];
+
+// Pre-fetch the current view for every built product, newest first.
+//
+// A fire marked ready should never show "being prepared": its imagery
+// is on the ramdisk, and the only reason a switch felt slow was that
+// the browser had not fetched those previews yet.
+let _warmedProducts = new Set();
+async function warmAllProducts() {
+    const mine = _products.filter((q) => q && q.key && q.built !== false);
+    for (const p of mine) {
+        if (_warmedProducts.has(p.key)) continue;
+        _warmedProducts.add(p.key);
+        const view = leftView || 'post';
+        const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/`
+            + `${encodeURIComponent(view)}?src=`
+            + `${encodeURIComponent(parseProductKey(p.key).source)}`
+            + `&prod=${encodeURIComponent(p.key)}`
+            + `&t=${_previewStamp}`;
+        try {
+            // Sequential on purpose: parallel fetches of several
+            // hundred MB compete with the pane the operator is
+            // actually looking at.
+            await fetch(url, {headers: {'X-Requested-With': 'fetch'}});
+        } catch (_) { /* a failed warm is not worth reporting */ }
+    }
+    if (mine.length) {
+        log(`[warm] pre-fetched ${mine.length} product view(s)`, 'dim');
+    }
+}
 
 function productLabel(p) {
     // The server names products; the client does not re-derive names,
@@ -4959,6 +4951,73 @@ function stepSource(pane, delta) {
     } else {
         onPostSourceChange();
     }
+}
+
+// Hand a batch of builds to the server and watch it from a distance.
+//
+// The client used to issue one blocking request per date, so closing
+// the dialog or leaving the fire abandoned everything still queued.
+// The server owns the queue now: the operator can close the dialog,
+// go to another fire, and start a batch there too.
+async function queueProductBuilds(keys, label) {
+    if (!keys || !keys.length) return {queued: 0, skipped: 0};
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/build_products`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json',
+                          'X-Requested-With': 'fetch'},
+                body: JSON.stringify({products: keys}),
+            });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            log(`[build] could not queue: ${j.error || r.status}`,
+                'error');
+            return {queued: 0, skipped: 0};
+        }
+        log(`[build] queued ${j.queued} ${label} build(s)`
+            + (j.skipped ? `; ${j.skipped} already built` : ''), 'dim');
+        startBuildWatch();
+        return j;
+    } catch (err) {
+        log(`[build] could not queue: ${err.message}`, 'error');
+        return {queued: 0, skipped: 0};
+    }
+}
+
+let _buildWatch = null;
+function startBuildWatch() {
+    if (_buildWatch) return;
+    const tick = async () => {
+        try {
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/build_status`,
+                {headers: {'X-Requested-With': 'fetch'}});
+            const j = await r.json().catch(() => ({}));
+            const prog = document.getElementById('date-picker-progress');
+            if (j.running) {
+                if (prog) {
+                    prog.style.display = '';
+                    const eta = (typeof j.eta_s === 'number')
+                        ? ` \u00b7 about ${fmtShortDur(j.eta_s)} left`
+                        : '';
+                    prog.textContent =
+                        `Building ${j.current || ''} \u2014 `
+                        + `${j.done + 1} of ${j.total}${eta}`;
+                }
+            } else {
+                clearInterval(_buildWatch);
+                _buildWatch = null;
+                if (prog) prog.textContent = 'Builds finished.';
+                if ((j.errors || []).length) {
+                    log(`[build] ${j.errors.join('; ')}`, 'error');
+                }
+                checkForNewProducts('builds finished');
+            }
+        } catch (_) {}
+    };
+    _buildWatch = setInterval(tick, 2000);
+    tick();
 }
 
 function productKeysSignature(list) {

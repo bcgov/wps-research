@@ -283,19 +283,34 @@ def recover_identity(fire, log=None) -> bool:
     if not getattr(fire, 'bbox_native', None):
         candidates = []
         cb = getattr(fire, 'crop_bin', '') or ''
-        safe = ''
-        import re
-        m = re.match(r'^\d{8}_stack_(?P<safe>.+?)_[0-9a-fA-F]{6,}',
-                     os.path.basename(cb))
-        if m:
-            safe = m.group('safe')
+
+        # The fire's OWN name decides which sidecars may be read.
+        #
+        # Never a wildcard. An earlier version derived this from
+        # crop_bin and fell back to '*_overlays.json' when crop_bin was
+        # empty -- which is precisely the state of a fire that needs
+        # recovering. That matched every fire's sidecars and took the
+        # newest, so several distinct incidents were all given one
+        # another's bounding box. Recovering nothing is correct when
+        # the fire's own files are absent; recovering somebody else's
+        # AOI is not.
+        try:
+            from .aoi_stack import sanitize_identifier
+            safe = sanitize_identifier(fire.fire_numbe)
+        except Exception:
+            safe = ''
+        if not safe:
+            sys.stderr.write(
+                f'[recover] {getattr(fire, "fire_numbe", "?")}: cannot '
+                f'determine its file prefix; not guessing a bbox\n')
+            return False
+
         for root in (os.path.dirname(cb) or '/ram', store_dir()):
             if not root or not os.path.isdir(root):
                 continue
-            pat = (f'*_stack_{safe}_*_overlays.json' if safe
-                   else '*_overlays.json')
-            candidates.extend(sorted(glob.glob(os.path.join(root, pat)),
-                                     reverse=True))
+            candidates.extend(sorted(glob.glob(os.path.join(
+                root, f'*_stack_{safe}_*_overlays.json')), reverse=True))
+        # The fire's own cache directory -- per fire by construction.
         cache = getattr(fire, 'cache_dir', '') or ''
         if cache and os.path.isdir(cache):
             candidates.extend(sorted(glob.glob(os.path.join(
@@ -303,8 +318,25 @@ def recover_identity(fire, log=None) -> bool:
         for c in candidates:
             bbox = _bbox_from_sidecar(c)
             if bbox:
+                # Sanity: a recovered box must be a real extent.
+                w = bbox[2] - bbox[0]
+                h = bbox[3] - bbox[1]
+                if w <= 0 or h <= 0 or w > 2.0e6 or h > 2.0e6:
+                    sys.stderr.write(
+                        f'[recover] {fire.fire_numbe}: ignoring '
+                        f'implausible bbox {bbox} from '
+                        f'{os.path.basename(c)}\n')
+                    continue
                 fire.bbox_native = bbox
-                changed.append(f'bbox from {os.path.basename(c)}')
+                # WGS84 copy is derived from the native box elsewhere;
+                # a stale one would disagree with what we just set.
+                try:
+                    fire.bbox_wgs84 = None
+                except Exception:
+                    pass
+                changed.append(
+                    f'bbox {tuple(round(v) for v in bbox)} from '
+                    f'{os.path.basename(c)}')
                 break
 
     # A date range can be reconstructed from the year: the accumulation

@@ -429,6 +429,131 @@ class FireRoutes:
         return os.path.join(cache, 'coverage',
                             f'{product_key}_dates.json')
 
+    def handle_api_build_products(self, fire_numbe):
+        """Queue a batch of product builds and return immediately.
+
+        The client used to drive a batch by issuing one blocking
+        request per date, which meant closing the dialog or leaving the
+        fire abandoned the rest. Building server-side means the work
+        survives navigation, and because the per-fire lock still
+        serialises it, batches for DIFFERENT fires run concurrently
+        without extra machinery.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        body = self._read_body()
+        if body is None:
+            return
+        wanted = body.get('products') or []
+        keys = [k for k in wanted
+                if isinstance(k, str)
+                and re.fullmatch(r'(mrap|l2)(_p\d{8}|_d\d{8})?', k)]
+        if not keys:
+            self._send_json({'error': 'No valid product keys'}, 400)
+            return
+
+        # Newest first, and skip anything already built: rebuilding
+        # produces an identical file at a cost of minutes.
+        have = {p['key'] for p in self._built_products(fire_numbe, fire)
+                if p.get('built')}
+        todo = [k for k in sorted(set(keys), reverse=True)
+                if k not in have]
+        skipped = len(set(keys)) - len(todo)
+
+        with state.lock:
+            jobs = getattr(state, 'product_builds', None)
+            if jobs is None:
+                jobs = state.product_builds = {}
+            cur = jobs.get(fire_numbe)
+            if cur and cur.get('running'):
+                # Merge into the run already going rather than starting
+                # a second one against the same fire.
+                cur['queue'] = list(dict.fromkeys(
+                    list(cur.get('queue', [])) + todo))
+                cur['total'] = cur['done'] + len(cur['queue'])
+                self._send_json({'queued': len(todo),
+                                 'skipped': skipped, 'merged': True})
+                return
+            jobs[fire_numbe] = {
+                'running': True, 'queue': list(todo), 'done': 0,
+                'total': len(todo), 'current': '', 'started': time.time(),
+                'durations': [], 'errors': [],
+            }
+
+        from ..prepare import switch_post_source, product_parts
+
+        def _run():
+            job = state.product_builds.get(fire_numbe) or {}
+            while True:
+                with state.lock:
+                    q = job.get('queue') or []
+                    if not q:
+                        break
+                    key = q.pop(0)
+                    job['current'] = key
+                t0 = time.time()
+                try:
+                    src = product_parts(key)[0]
+                    r = switch_post_source(fire, src, product=key)
+                    if not r.get('ok'):
+                        job['errors'].append(
+                            f'{key}: {r.get("error") or "busy"}')
+                    else:
+                        fire.user_post_source = src
+                        fire.user_product = key
+                except Exception as exc:
+                    job['errors'].append(f'{key}: {exc}')
+                    sys.stderr.write(
+                        f'[build] {fire_numbe} {key}: {exc}\n')
+                with state.lock:
+                    job['done'] = int(job.get('done', 0)) + 1
+                    job['durations'].append(time.time() - t0)
+                sys.stderr.write(
+                    f'[build] {fire_numbe}: {job["done"]}/'
+                    f'{job["total"]} ({key})\n')
+            with state.lock:
+                job['running'] = False
+                job['current'] = ''
+            try:
+                from ..persistence import _save_fire_state
+                _save_fire_state()
+                from ..durable import mirror_in_background
+                mirror_in_background()
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True,
+                         name=f'build-{fire_numbe}').start()
+        self._send_json({'queued': len(todo), 'skipped': skipped,
+                         'merged': False})
+
+    def handle_api_build_status(self, fire_numbe):
+        """Progress of the background batch, if one is running."""
+        fire_numbe = unquote(fire_numbe)
+        job = (getattr(state, 'product_builds', None) or {}).get(
+            fire_numbe)
+        if not job:
+            self._send_json({'running': False})
+            return
+        durs = list(job.get('durations') or [])
+        avg = (sum(durs) / len(durs)) if durs else 0.0
+        remaining = max(0, int(job.get('total', 0))
+                        - int(job.get('done', 0)))
+        eta = (avg * remaining) if (avg and remaining) else None
+        self._send_json({
+            'running': bool(job.get('running')),
+            'done': job.get('done', 0),
+            'total': job.get('total', 0),
+            'current': job.get('current', ''),
+            'errors': list(job.get('errors') or [])[:5],
+            'eta_s': None if eta is None else round(eta, 1),
+            'elapsed_s': round(time.time()
+                               - float(job.get('started', time.time())), 1),
+        })
+
     def handle_api_products(self, fire_numbe):
         """Just the product list -- cheap enough to poll.
 
@@ -1396,6 +1521,15 @@ class FireRoutes:
         # ?prod= names the product exactly, including which night's
         # mosaic it came from. It supersedes src+l2, which cannot
         # distinguish two MRAP composites from different nights.
+        # Warming requests are best-effort and must never BUILD.
+        #
+        # The on-demand path below renders a missing product by
+        # switching the fire to it and back. That is right when someone
+        # is waiting for that product, and wrong for a background warm:
+        # it makes the fire hop between products, which is how panes
+        # ended up showing imagery their selector had not asked for.
+        # A warm asks "is it ready?" and takes no for an answer.
+        _warm = (_q.get('warm') or [''])[0] in ('1', 'true', 'yes')
         _req_prod = (_q.get('prod') or [''])[0].strip()
         if not re.fullmatch(r'(mrap|l2)(_p\d{8}|_d\d{8})?',
                             _req_prod or ''):
@@ -1431,6 +1565,16 @@ class FireRoutes:
                 f'but the stack is {_cur_key}; treating the live '
                 f'directory as belonging to {_live_key}\n')
 
+        # nobuild=1: serve only what is already rendered.
+        #
+        # Warming every product on entry is the point -- a prepared fire
+        # should never make the operator wait -- but a warm request must
+        # never trigger the on-demand build path, which switches the
+        # fire to that product, renders, and switches back. Dozens of
+        # those at once would be far worse than the wait they are meant
+        # to remove.
+        _nobuild = (_q.get('nobuild') or [''])[0] in ('1', 'true', 'yes')
+
         if re.fullmatch(r'[A-Za-z0-9_-]+', _src or ''):
             cand = os.path.join(fire.cache_dir, f'previews_{_req_key}')
             # "Live is authoritative" only when the live pictures are
@@ -1454,6 +1598,18 @@ class FireRoutes:
                     fire, cand, view):
                 _stash_dir = cand
                 png = os.path.join(cand, f'{view}.png')
+            elif _nobuild:
+                # Not rendered yet, and the caller asked not to build.
+                self._send_json(
+                    {'error': 'not warmed', 'product': _req_key}, 409)
+                return
+            elif _warm:
+                # Not ready, and we are only warming. Say so cheaply;
+                # the client moves on to the next product.
+                self._send_json(
+                    {'warm': True, 'ready': False, 'product': _req_key},
+                    202)
+                return
             elif _req_key != _cur_key:
                 # Reached when the other source has NO stash, or has one
                 # that lacks THIS view.

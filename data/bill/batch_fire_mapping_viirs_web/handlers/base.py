@@ -211,6 +211,9 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/products$'),
          'handle_api_products'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/build_status$'),
+         'handle_api_build_status'),
 
         (re.compile(r'^/api/queue$'), 'handle_api_queue'),
         (re.compile(r'^/api/notifications$'),
@@ -307,6 +310,9 @@ class BaseHandler:
          'handle_api_admin_ip_action'),
         (re.compile(r'^/api/admin/known/clear$'),
          'handle_api_admin_known_clear'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/build_products$'),
+         'handle_api_build_products'),
         (re.compile(r'^/api/client/info$'), 'handle_api_client_info'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/unhide$'),

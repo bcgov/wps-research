@@ -350,6 +350,10 @@ class AppState:
         }
         self.cache_last_sweep: float = 0.0
         self.batch_status: Optional[dict] = None
+        # Background product builds, per fire. Server-side so a batch
+        # survives the operator closing the dialog or moving to another
+        # fire; the per-fire lock keeps separate fires concurrent.
+        self.product_builds: dict = {}
 
         self.trust_proxy: bool = False
         self.insecure_no_auth: bool = False
