@@ -2483,6 +2483,48 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     fire.status = FireStatus.READY
     _save_fire_state()
 
+    # Build the OTHER default source in the background.
+    #
+    # Preparation builds the source the fire is on; the second default
+    # product used to appear only at the next start-up, or when the
+    # operator switched and waited for it. Building it here means a new
+    # AOI offers both defaults -- L2 recent and the MRAP composite --
+    # as soon as it is ready.
+    #
+    # Deliberately via ensure_aoi_stack rather than a source switch:
+    # switching would clear the live previews and re-render them, which
+    # is exactly the churn that made a freshly prepared fire announce
+    # that it was being prepared all over again.
+    def _build_other():
+        other = ('mrap' if (getattr(fire, 'post_source', 'l2') or 'l2')
+                 == 'l2' else 'l2')
+        try:
+            if fire_numbe not in state.fires:
+                return                      # deleted while preparing
+            from .aoi_stack import ensure_aoi_stack, AoiStackError
+            info = ensure_aoi_stack(
+                fire_numbe, fire.bbox_native,
+                instance_key=getattr(state, 'shared_root', '') or '',
+                post_source=other, ref_raster=ref_raster,
+                l2_start_date='')
+            sys.stderr.write(
+                f'[prepare] {fire_numbe}: second default product '
+                f'({other}) ready: '
+                f'{os.path.basename((info or {}).get("path", ""))}\n')
+            from .durable import mirror_in_background
+            mirror_in_background()
+        except AoiStackError as exc:
+            sys.stderr.write(
+                f'[prepare] {fire_numbe}: {other} not available: '
+                f'{exc}\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[prepare] {fire_numbe}: {other} build failed: '
+                f'{type(exc).__name__}: {exc}\n')
+
+    threading.Thread(target=_build_other, daemon=True,
+                     name=f'other-src-{fire_numbe}').start()
+
 
 def _ensure_brush_comparison_in_cache(fire: 'FireInfo', cache_dir: str) -> None:
     """If the cache is missing a brush comparison PNG, try to render one
