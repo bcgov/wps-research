@@ -89,6 +89,87 @@ def _save_notes():
         sys.stderr.flush()
 
 
+def _rebased(path: str) -> str:
+    """Move a recorded path onto the CURRENT output directory.
+
+    fire_state.yaml stores absolute paths. The output directory used to
+    be named after the raster file, so it changed every night; it is
+    now named after the year, and the first start-up after that change
+    renames it. Every path recorded under the old name then points at a
+    directory that no longer exists -- so the cache looked missing,
+    crop_bin and the hint were not restored, and fires that had all
+    their data sitting on disk were sent back to be re-prepared.
+
+    Rewriting the prefix finds the data where it actually is. A path
+    that already resolves is returned untouched.
+    """
+    if not path or os.path.exists(path):
+        return path
+    try:
+        root = getattr(state, 'output_root', '') or ''
+        if not root:
+            return path
+        # Split at the '<something>_mapping_results' segment and graft
+        # the remainder onto the current root.
+        parts = path.replace('\\', '/').split('/')
+        for i, seg in enumerate(parts):
+            if seg.endswith('_mapping_results'):
+                cand = os.path.join(root, *parts[i + 1:])
+                if os.path.exists(cand):
+                    sys.stderr.write(
+                        f'[load] rebased {path} -> {cand}\n')
+                    return cand
+                return path
+    except Exception:
+        pass
+    return path
+
+
+def _carry_forward_identity(state_path: str, data: dict) -> None:
+    """Never let a save erase what identifies a fire.
+
+    The entry fields are written conditionally -- ``if fire.bbox_native:``
+    and so on -- so a save taken while a fire is only partly in memory
+    drops them from the file, and they are gone for good. That is how a
+    fire ends up reporting "no bbox or date range on record" when its
+    imagery is sitting on disk: nothing lost the data, a save lost the
+    RECORD of it.
+
+    Anything the previous file had and this save does not is put back.
+    Only identity fields, and only when absent -- a value the caller
+    actually set always wins.
+    """
+    keep = ('bbox_native', 'bbox_wgs84', 'viirs_start_date',
+            'viirs_end_date', 'fire_year', 'created_at', 'padding')
+    try:
+        import yaml            # imported locally, as elsewhere here
+        if not os.path.isfile(state_path):
+            return
+        with open(state_path, encoding='utf-8') as f:
+            prev = yaml.safe_load(f) or {}
+        if not isinstance(prev, dict):
+            return
+    except Exception:
+        # A previous file that cannot be read is not a reason to fail
+        # the save; it only means there is nothing to carry forward.
+        return
+    restored = 0
+    for fn, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        old = prev.get(fn)
+        if not isinstance(old, dict):
+            continue
+        for k in keep:
+            if k not in entry and k in old:
+                entry[k] = old[k]
+                restored += 1
+    if restored:
+        sys.stderr.write(
+            f'[save] carried forward {restored} identity field(s) the '
+            f'in-memory state was missing\n')
+
+
 def _save_ip_list():
     """Persist approved, blocked, revoked and pending IPs to disk."""
     if not state.ip_file:
@@ -280,6 +361,7 @@ def _save_fire_state():
                 data[fn] = entry
 
         state_path = os.path.join(state.output_root, 'fire_state.yaml')
+        _carry_forward_identity(state_path, data)
         _atomic_yaml_dump(state_path, data, mode=0o644)
     except Exception as exc:
         sys.stderr.write(
@@ -494,7 +576,7 @@ def _load_fire_state():
             continue
 
         # Restore cache paths — but only if they still exist on disk
-        cache_dir = entry.get('cache_dir', '')
+        cache_dir = _rebased(entry.get('cache_dir', ''))
         if cache_dir and os.path.isdir(cache_dir):
             fire.cache_dir = cache_dir
             fire.crop_bin = entry.get('crop_bin', '')
@@ -516,7 +598,8 @@ def _load_fire_state():
             fire.exclude_diff = bool(entry.get('exclude_diff', True))
             fire.diff_only = bool(entry.get('diff_only', False))
             fire.clip_to_bcws = bool(entry.get('clip_to_bcws', False))
-            fire.accepted_dir = entry.get('accepted_dir', '') or ''
+            fire.accepted_dir = _rebased(
+                entry.get('accepted_dir', '') or '')
             fire.l2_start_date = entry.get('l2_start_date', '') or ''
             fire.user_product = entry.get('user_product', '') or ''
             fire.band_override = list(entry.get('band_override', []) or [])
