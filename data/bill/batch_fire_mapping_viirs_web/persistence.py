@@ -155,11 +155,31 @@ def _carry_forward_identity(state_path: str, data: dict) -> None:
         return
     restored = 0
     for fn, entry in data.items():
-        if not isinstance(entry, dict):
+        if fn == 'deleted_fires' or not isinstance(entry, dict):
             continue
         old = prev.get(fn)
         if not isinstance(old, dict):
             continue
+
+        # A fire RECREATED under a name that was deleted is a different
+        # fire.
+        #
+        # This matches on name, so without the check a new AOI drawn
+        # over different ground would inherit the old one's bounding box
+        # and date range -- and then be prepared over the wrong
+        # extent. The creation timestamp distinguishes them: a new fire
+        # is newer than the record it would otherwise inherit from.
+        try:
+            t_new = float(entry.get('created_at') or 0)
+            t_old = float(old.get('created_at') or 0)
+        except (TypeError, ValueError):
+            t_new = t_old = 0.0
+        if t_new and t_old and t_new > t_old + 1.0:
+            sys.stderr.write(
+                f'[save] {fn}: recreated since the last save; not '
+                f'carrying forward the previous record\n')
+            continue
+
         for k in keep:
             if k not in entry and k in old:
                 entry[k] = old[k]

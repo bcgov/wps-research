@@ -351,6 +351,53 @@ class FireListRoutes:
         # and scaled copies, and kgc's memoised tables. All share the
         # stack's stem, which embeds a per-AOI hash, so this cannot
         # reach another fire's stack.
+        # Purge by IDENTITY first, regardless of crop_bin.
+        #
+        # Everything below hangs off the stack this fire is pointing
+        # at, so a fire in the error state -- which by definition has
+        # no crop_bin -- had nothing removed at all. Recreating that ID
+        # afterwards found every old product still on the ramdisk and
+        # in the durable store, and offered them in the selector as
+        # though they belonged to the new AOI.
+        #
+        # The identity hash is derived from the fire's name and the
+        # instance key, so this matches this fire's files and no other.
+        try:
+            from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                     sanitize_identifier)
+            _inst0 = getattr(state, 'shared_root', '') or ''
+            _safe0 = sanitize_identifier(fire_numbe)
+            _h0 = aoi_identity_hash(fire_numbe, _inst0)
+            _roots = [RAM_DIR]
+            try:
+                from ..durable import store_dir
+                _sd0 = store_dir()
+                if _sd0:
+                    _roots.append(_sd0)
+            except Exception:
+                pass
+            _gone = 0
+            for _root in _roots:
+                if not _root or not os.path.isdir(_root):
+                    continue
+                for f in glob.glob(os.path.join(
+                        _root, f'*_stack_{_safe0}_{_h0}*')):
+                    try:
+                        if os.path.isdir(f):
+                            shutil.rmtree(f, ignore_errors=True)
+                        else:
+                            os.remove(f)
+                        _gone += 1
+                    except OSError as exc:
+                        sys.stderr.write(
+                            f'[remove] {os.path.basename(f)}: {exc}\n')
+            if _gone:
+                sys.stderr.write(
+                    f'[remove] {fire_numbe}: purged {_gone} file(s) by '
+                    f'identity ({_safe0}_{_h0})\n')
+        except Exception as exc:
+            sys.stderr.write(f'[remove] identity purge: {exc}\n')
+
         stack = getattr(fire, 'crop_bin', '') or ''
         if stack:
             stem = os.path.splitext(stack)[0]
