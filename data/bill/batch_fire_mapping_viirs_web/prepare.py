@@ -1797,6 +1797,13 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             sys.stderr.write(f'[prepare] live preview clear failed: '
                              f'{exc}\n')
 
+    # Keep the durable copy current. Background: nothing waits on it.
+    try:
+        from .durable import mirror_in_background
+        mirror_in_background()
+    except Exception:
+        pass
+
     restored = _restore_previews(fire, source,
                                  path=getattr(fire, 'crop_bin', ''))
     if restored:

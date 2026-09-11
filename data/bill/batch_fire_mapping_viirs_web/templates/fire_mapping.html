@@ -4245,6 +4245,21 @@ async function applyMrapDateSelection() {
     // product -- so a multi-select ends on the oldest date chosen,
     // which is the one an operator is usually reaching back for.
     all.sort().reverse();
+    // Skip what already exists.
+    //
+    // Selecting five dates when two are built should build three. The
+    // existing ones still need SELECTING (the last one becomes the
+    // displayed product), but they must not be counted as work or
+    // re-run -- a rebuild of a product already on disk costs minutes
+    // and produces the identical file.
+    const already = new Set(_products
+        .filter((q) => q.built !== false).map((q) => q.key));
+    const toBuild = all.filter((d) => !already.has(`mrap_p${d}`));
+    const skipped = all.length - toBuild.length;
+    if (skipped) {
+        log(`[products] ${skipped} selected date(s) already built; `
+            + `building ${toBuild.length}`, 'dim');
+    }
     const date = all[all.length - 1];
     const key = `mrap_p${date}`;
     const row = _mrapRows.find((d) => d.date === date) || {};
@@ -4263,10 +4278,12 @@ async function applyMrapDateSelection() {
         // serialises work per fire anyway, so firing them together
         // would only queue them behind each other with no progress
         // shown; sequentially, each one reports as it lands.
-        const bp = makeBuildProgress(prog, all.length,
+        // Progress counts only what will actually be built.
+        const bp = makeBuildProgress(prog, Math.max(1, toBuild.length),
                                      'Building MRAP composite');
         for (let i = 0; i < all.length - 1; i++) {
             const d2 = all[i];
+            if (already.has(`mrap_p${d2}`)) continue;
             bp.start(d2);
             try {
                 await fetch(
@@ -4349,8 +4366,20 @@ async function applyDateSelection() {
     if (!allPicked.length) return;
     // Newest first; the last built is the one left displayed.
     allPicked.sort().reverse();
+    const alreadyL2 = new Set(_products
+        .filter((q) => q.built !== false).map((q) => q.key));
     const date = allPicked[allPicked.length - 1];
-    const extras = allPicked.slice(0, allPicked.length - 1);
+    // Only the dates not already on disk are built; the rest are
+    // already selectable and rebuilding them would produce identical
+    // files at a cost of minutes each.
+    const extras = allPicked.slice(0, allPicked.length - 1)
+        .filter((d) => !alreadyL2.has(`l2_d${d}`));
+    const skippedL2 = (allPicked.length - 1) - extras.length;
+    if (skippedL2) {
+        log(`[products] ${skippedL2} selected date(s) already built; `
+            + `building ${extras.length + (alreadyL2.has(`l2_d${date}`)
+                ? 0 : 1)}`, 'dim');
+    }
 
     _dateApplying = true;
     if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }

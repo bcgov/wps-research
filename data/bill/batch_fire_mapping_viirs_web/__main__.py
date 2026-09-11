@@ -1008,6 +1008,30 @@ def main():
 
     init_app(app_state)
 
+    # Durable stack store: recover anything the ramdisk lost.
+    #
+    # Order matters. Identity first, because a fire without a bounding
+    # box cannot be prepared at all; then stacks back from disk, so the
+    # refresh below finds them instead of rebuilding; then a mirror, so
+    # whatever exists now survives the next reboot.
+    try:
+        from . import durable as _durable
+        _durable.init(app_state)
+        _n = _durable.recover_all(log=_log)
+        if _n:
+            _log(f'  Recovered identity for {_n} fire(s) from disk')
+        with app_state.lock:
+            _fires = list(app_state.fires.values())
+        _restored = 0
+        for _f in _fires:
+            _restored += _durable.restore_fire(_f)
+        if _restored:
+            _log(f'  Restored {_restored} stack file(s) from the '
+                 f'durable store')
+        _durable.mirror_in_background(delay_s=30.0)
+    except Exception as _exc:
+        _log(f'[startup] durable store unavailable: {_exc}')
+
     # One-time rename of artefacts left under the old split L2 keys.
     #
     # Runs BEFORE the product refresh below, so that refresh sees the

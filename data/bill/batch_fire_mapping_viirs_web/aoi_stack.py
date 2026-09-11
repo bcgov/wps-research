@@ -783,6 +783,22 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     if not force and stack_is_valid(out_bin):
         return _describe(False)
 
+    # Missing from the ramdisk but kept on real disk? Copy it back.
+    #
+    # /ram is tmpfs: a reboot empties it and every stack has to be
+    # rebuilt from the source mosaics -- which costs minutes, and for a
+    # dated composite whose day's mosaic has rolled off the source
+    # directory is not possible at all. Restoring the durable copy
+    # first makes the ramdisk expendable rather than authoritative.
+    if not force:
+        try:
+            from .durable import restore_stack
+            if restore_stack(out_bin, log=log_cb) \
+                    and stack_is_valid(out_bin):
+                return _describe(False)
+        except Exception as _dexc:
+            sys.stderr.write(f'[aoi_stack] durable restore: {_dexc}\n')
+
     # Serialize builders of this exact stack. Whoever gets the lock
     # builds; anyone waiting re-checks afterwards and normally finds
     # the finished file rather than repeating the work.
