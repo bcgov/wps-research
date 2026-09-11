@@ -54,18 +54,49 @@ def store_dir() -> str:
 
 # ------------------------------------------------------------ mirroring
 
+def fire_prefix(fire) -> str:
+    """The `<name>_<hash>` that every one of this fire's files carries.
+
+    Derived from the fire's NAME, not from crop_bin.
+
+    crop_bin is empty on a fire that failed to load and stale on one
+    whose paths moved -- precisely the fires that need mirroring and
+    restoring most. Deriving the prefix from it meant those fires were
+    silently skipped: nothing was copied to disk, so nothing could be
+    restored, so every restart rebuilt them and reported "being
+    prepared" for imagery that was supposed to be safe.
+    """
+    try:
+        from .aoi_stack import aoi_identity_hash, sanitize_identifier
+        safe = sanitize_identifier(fire.fire_numbe)
+        h = aoi_identity_hash(fire.fire_numbe,
+                              getattr(state, 'shared_root', '') or '')
+        return f'{safe}_{h}'
+    except Exception as exc:
+        sys.stderr.write(f'[durable] cannot derive prefix for '
+                         f'{getattr(fire, "fire_numbe", "?")}: {exc}\n')
+        return ''
+
+
+def ram_dir_for(fire) -> str:
+    """Where this fire's stacks live on the ramdisk."""
+    cb = getattr(fire, 'crop_bin', '') or ''
+    d = os.path.dirname(cb)
+    if d and os.path.isdir(d):
+        return d
+    try:
+        from .aoi_stack import RAM_DIR
+        return RAM_DIR
+    except Exception:
+        return '/ram'
+
+
 def _fire_stack_glob(fire) -> str:
     """Glob matching every stack file belonging to *fire*."""
-    cb = getattr(fire, 'crop_bin', '') or ''
-    base = os.path.basename(cb)
-    import re
-    m = re.match(r'^\d{8}_stack_(?P<safe>.+?)_(?P<h>[0-9a-fA-F]{6,})'
-                 r'(_l2(_d\d{8})?)?\.bin$', base)
-    if m:
-        ram = os.path.dirname(cb)
-        return os.path.join(
-            ram, f'*_stack_{m.group("safe")}_{m.group("h")}*')
-    return ''
+    pfx = fire_prefix(fire)
+    if not pfx:
+        return ''
+    return os.path.join(ram_dir_for(fire), f'*_stack_{pfx}*')
 
 
 def _is_stack_artifact(path: str) -> bool:
@@ -215,30 +246,47 @@ def restore_stack(ram_path: str, log=None) -> bool:
 
 
 def restore_fire(fire, log=None) -> int:
-    """Bring back every durable stack belonging to *fire*."""
+    """Bring back every durable stack belonging to *fire*.
+
+    Also repairs ``crop_bin`` when it points at a file that no longer
+    exists: a fire whose stacks were restored but whose pointer still
+    named a purged path would be treated as having no imagery at all.
+    """
     dest = store_dir()
-    cb = getattr(fire, 'crop_bin', '') or ''
-    if not dest or not cb:
+    pfx = fire_prefix(fire)
+    if not dest or not pfx or not os.path.isdir(dest):
         return 0
-    import re
-    m = re.match(r'^\d{8}_stack_(?P<safe>.+?)_(?P<h>[0-9a-fA-F]{6,})'
-                 r'(_l2(_d\d{8})?)?\.bin$', os.path.basename(cb))
-    if not m:
-        return 0
-    ram = os.path.dirname(cb)
+    ram = ram_dir_for(fire)
     n = 0
-    for src in sorted(glob.glob(os.path.join(
-            dest, f'*_stack_{m.group("safe")}_{m.group("h")}*'))):
+    for src in sorted(glob.glob(os.path.join(dest, f'*_stack_{pfx}*'))):
         d = os.path.join(ram, os.path.basename(src))
         if os.path.isfile(d):
             continue
         try:
+            os.makedirs(ram, exist_ok=True)
             tmp = d + '.part'
             shutil.copy2(src, tmp)
             os.replace(tmp, d)
             n += 1
         except OSError as exc:
             sys.stderr.write(f'[durable] restore: {exc}\n')
+
+    # Point the fire at something real.
+    cb = getattr(fire, 'crop_bin', '') or ''
+    if not cb or not os.path.isfile(cb):
+        cands = [c for c in sorted(glob.glob(os.path.join(
+            ram, f'*_stack_{pfx}*.bin')), reverse=True)
+            if '.kgc' not in os.path.basename(c)
+            and os.path.isfile(os.path.splitext(c)[0] + '.hdr')]
+        if cands:
+            fire.crop_bin = cands[0]
+            msg = (f'[durable] {fire.fire_numbe}: crop_bin pointed at a '
+                   f'missing file; using '
+                   f'{os.path.basename(cands[0])}')
+            sys.stderr.write(msg + '\n')
+            if log:
+                log(msg)
+
     if n:
         msg = (f'[durable] {fire.fire_numbe}: restored {n} file(s) '
                f'from the durable store')
@@ -366,6 +414,50 @@ def recover_identity(fire, log=None) -> bool:
             log(msg)
         return True
     return False
+
+
+def revive_fires(log=None) -> int:
+    """Clear a stale error once a fire's imagery is back.
+
+    A fire that failed to prepare keeps ERROR in the saved state. After
+    its stacks have been restored the status is simply out of date, and
+    leaving it red means an operator is told to re-create a fire whose
+    data is sitting there. Only fires that now have a readable stack
+    are revived, and only from ERROR -- nothing else is touched.
+    """
+    from .state import FireStatus
+    n = 0
+    try:
+        with state.lock:
+            fires = list(state.fires.values())
+    except Exception:
+        return 0
+    for fire in fires:
+        if getattr(fire, 'status', None) != FireStatus.ERROR:
+            continue
+        cb = getattr(fire, 'crop_bin', '') or ''
+        if not cb or not os.path.isfile(cb):
+            continue
+        if not os.path.isfile(os.path.splitext(cb)[0] + '.hdr'):
+            continue
+        fire.status = FireStatus.READY
+        try:
+            fire.error_msg = ''
+        except Exception:
+            pass
+        n += 1
+        msg = (f'[recover] {fire.fire_numbe}: imagery is present; '
+               f'clearing the error state')
+        sys.stderr.write(msg + '\n')
+        if log:
+            log(msg)
+    if n:
+        try:
+            from .persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+    return n
 
 
 def recover_all(log=None) -> int:

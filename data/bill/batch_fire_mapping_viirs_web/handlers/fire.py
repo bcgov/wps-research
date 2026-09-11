@@ -543,15 +543,30 @@ class FireRoutes:
         remaining = max(0, int(job.get('total', 0))
                         - int(job.get('done', 0)))
         eta = (avg * remaining) if (avg and remaining) else None
+        # The stage detail the builder is already recording. Without
+        # it a multi-minute build reports only "1 of 2", which cannot
+        # be told apart from a stuck one.
+        fire = state.fires.get(fire_numbe)
+        pr = (getattr(fire, 'progress', None) or {}) if fire else {}
         self._send_json({
             'running': bool(job.get('running')),
             'done': job.get('done', 0),
             'total': job.get('total', 0),
             'current': job.get('current', ''),
+            'queued': list(job.get('queue') or [])[:12],
             'errors': list(job.get('errors') or [])[:5],
             'eta_s': None if eta is None else round(eta, 1),
             'elapsed_s': round(time.time()
                                - float(job.get('started', time.time())), 1),
+            'avg_s': round(avg, 1) if avg else None,
+            # Stage of the build currently running.
+            'stage': pr.get('stage_label') or pr.get('stage', ''),
+            'stage_idx': pr.get('stage_idx'),
+            'stage_total': pr.get('total_stages'),
+            'detail': pr.get('detail', ''),
+            'stage_fraction': pr.get('stage_fraction'),
+            'fraction': pr.get('fraction'),
+            'stage_eta_s': pr.get('eta_s'),
         })
 
     def handle_api_products(self, fire_numbe):

@@ -2943,26 +2943,38 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                 # night's imagery its analyst had chosen. The product key
                 # names the specific file, and repointing to it costs a
                 # file copy.
-                was_key = product_key_for_path(
-                    getattr(fire, 'crop_bin', '') or '')
-                was_src = getattr(fire, 'post_source', 'l2') or 'l2'
-                was_date = getattr(fire, 'l2_start_date', '') or ''
+                # Build what is missing WITHOUT switching the fire.
+                #
+                # This used to switch to MRAP, then to L2, then back --
+                # three switches per fire, each of which clears the live
+                # previews and re-renders them. That is why a fire whose
+                # imagery was already on disk greeted the operator with
+                # "being prepared" after a restart, and why products
+                # appeared to move on their own. ensure_aoi_stack()
+                # builds the stack and returns; the fire stays exactly
+                # where its operator left it.
+                from .aoi_stack import ensure_aoi_stack, AoiStackError
+                inst = getattr(state, 'shared_root', '') or ''
+                ref = (state.rasters_by_year.get(fire.fire_year)
+                       or state.raster_path)
                 for src in ('mrap', 'l2'):
-                    r = switch_post_source(fire, src, l2_date='')
-                    if not r.get('ok') and not r.get('unchanged'):
+                    try:
+                        info = ensure_aoi_stack(
+                            fire.fire_numbe, fire.bbox_native,
+                            instance_key=inst, post_source=src,
+                            ref_raster=ref, l2_start_date='')
+                        path = (info or {}).get('path', '')
+                        if (info or {}).get('rebuilt'):
+                            sys.stderr.write(
+                                f'[startup] {fn}: built '
+                                f'{os.path.basename(path)}\n')
+                    except AoiStackError as exc:
                         sys.stderr.write(
-                            f'[startup] {fn}: {src} refresh: '
-                            f'{r.get("error") or r.get("busy")}\n')
-                now_key = product_key_for_path(
-                    getattr(fire, 'crop_bin', '') or '')
-                if was_key and now_key != was_key:
-                    r = switch_post_source(fire, was_src, product=was_key)
-                    if not r.get('ok'):
+                            f'[startup] {fn}: {src}: {exc}\n')
+                    except Exception as exc:
                         sys.stderr.write(
-                            f'[startup] {fn}: could not return to '
-                            f'{was_key}: {r.get("error")}\n')
-                elif not was_key and (was_src != 'l2' or was_date):
-                    switch_post_source(fire, was_src, l2_date=was_date)
+                            f'[startup] {fn}: {src}: '
+                            f'{type(exc).__name__}: {exc}\n')
                 built += 1
             except Exception as exc:
                 failed += 1

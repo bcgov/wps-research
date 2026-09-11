@@ -1028,7 +1028,14 @@ def main():
         if _restored:
             _log(f'  Restored {_restored} stack file(s) from the '
                  f'durable store')
-        _durable.mirror_in_background(delay_s=30.0)
+        # A fire whose imagery is back is not in error any more.
+        _rev = _durable.revive_fires(log=_log)
+        if _rev:
+            _log(f'  Cleared the error state on {_rev} fire(s)')
+        # Mirror straight away, not on a timer: the first run after
+        # this change has nothing on disk yet, and waiting means a
+        # restart in between leaves the store empty again.
+        _durable.mirror_in_background(delay_s=3.0)
     except Exception as _exc:
         _log(f'[startup] durable store unavailable: {_exc}')
 

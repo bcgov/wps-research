@@ -232,6 +232,13 @@ const STATUS_ORDER = [
 async function loadFires() {
     const r = await fetch('/api/fires');
     allFires = await r.json();
+    // Warm the browser cache for the fires an operator is likely to
+    // open. Runs once, in the background, and never blocks the list.
+    try {
+        if (window.prefetchFirePreviews) {
+            setTimeout(() => window.prefetchFirePreviews(allFires), 2000);
+        }
+    } catch (_) {}
     lastFiresJSON = JSON.stringify(allFires);
     buildFilterUI();
     restoreFilterState();
@@ -1621,6 +1628,38 @@ function markFireOpened(fireEnc) {
             }),
         }).catch(function () {});
     } catch (e) { /* nothing here is worth breaking a page for */ }
+})();
+
+// Warm the browser cache for every ready fire, newest first.
+//
+// Opening a fire should not wait on a network fetch for imagery that
+// has been sitting on the server for hours. One request per fire, run
+// sequentially so the list itself stays responsive, and entirely
+// best-effort: a failure here costs nothing because the fire page
+// fetches again anyway.
+(function () {
+    let started = false;
+    async function prefetchFirePreviews(fires) {
+        if (started) return;
+        started = true;
+        const ready = (fires || [])
+            .filter((f) => f && f.fire_numbe
+                    && String(f.status || '').toLowerCase()
+                       .match(/ready|mapped|accepted/))
+            .slice(0, 40);
+        for (const f of ready) {
+            try {
+                await fetch(
+                    `/api/fire/${encodeURIComponent(f.fire_numbe)}`
+                    + `/preview/post`,
+                    {headers: {'X-Requested-With': 'fetch'}});
+            } catch (_) { /* best effort */ }
+        }
+        if (ready.length) {
+            console.log(`[prefetch] warmed ${ready.length} fire(s)`);
+        }
+    }
+    window.prefetchFirePreviews = prefetchFirePreviews;
 })();
 </script>
 </body>

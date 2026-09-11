@@ -4156,6 +4156,11 @@ async function openDatePicker() {
     // clip to this AOI. Both produce a dated product; the inputs are
     // entirely different, so the dialog asks the matching question.
     _datePickerMode = parseProductKey(currentProductKey()).source;
+    // A batch may already be running from an earlier visit -- the
+    // server keeps building after the dialog closes -- so reflect that
+    // straight away rather than offering an Apply that would queue on
+    // top of work in progress.
+    startBuildWatch();
     // The dialog does two different jobs; the heading must say which.
     const _t = document.getElementById('date-picker-title');
     if (_t) {
@@ -4242,104 +4247,80 @@ async function openDatePicker() {
 async function applyMrapDateSelection() {
     const btn = document.getElementById('btn-apply-date');
     const prog = document.getElementById('date-picker-progress');
-    const all = [...document.querySelectorAll(
+    const picked = [...document.querySelectorAll(
         'input[name="mrap-date"]:checked')].map((el) => el.value);
-    if (!all.length) return;
-    // Newest first, and the LAST one built becomes the displayed
-    // product -- so a multi-select ends on the oldest date chosen,
-    // which is the one an operator is usually reaching back for.
-    all.sort().reverse();
-    // Skip what already exists.
+    if (!picked.length) return;
+    picked.sort().reverse();
+
+    // Everything goes to the server queue, including the date that
+    // will end up displayed.
     //
-    // Selecting five dates when two are built should build three. The
-    // existing ones still need SELECTING (the last one becomes the
-    // displayed product), but they must not be counted as work or
-    // re-run -- a rebuild of a product already on disk costs minutes
-    // and produces the identical file.
+    // The previous version queued the extras and then switched to the
+    // last date in the same breath. That switch raced its own queue:
+    // the server was already holding the per-fire lock, so the switch
+    // came back busy and reported a failure a moment before the build
+    // it was waiting for started. Queue first, switch when it exists.
     const already = new Set(_products
         .filter((q) => q.built !== false).map((q) => q.key));
-    const toBuild = all.filter((d) => !already.has(`mrap_p${d}`));
-    const skipped = all.length - toBuild.length;
-    if (skipped) {
-        log(`[products] ${skipped} selected date(s) already built; `
-            + `building ${toBuild.length}`, 'dim');
-    }
-    const date = all[all.length - 1];
-    const key = `mrap_p${date}`;
-    const row = _mrapRows.find((d) => d.date === date) || {};
+    const keys = picked.map((d) => `mrap_p${d}`);
+    const toBuild = keys.filter((k) => !already.has(k));
+    const target = keys[keys.length - 1];
 
     _dateApplying = true;
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
-    if (prog) {
-        prog.style.display = '';
-        prog.textContent = row.ready
-            ? `Loading the MRAP composite for ${date} ...`
-            : `Clipping the ${date} province-wide mosaic to this AOI. `
-              + `This takes a few minutes.`;
-    }
+    setApplyEnabled(false);
     try {
-        // Build the others first, one at a time. The server
-        // serialises work per fire anyway, so firing them together
-        // would only queue them behind each other with no progress
-        // shown; sequentially, each one reports as it lands.
-        // Progress counts only what will actually be built.
-        const bp = makeBuildProgress(prog, Math.max(1, toBuild.length),
-                                     'Building MRAP composite');
-        // Hand the extras to the server: it keeps building them after
-        // this dialog closes, and after the operator moves to another
-        // fire and starts a batch there.
-        const extraKeys = toBuild.filter((d) => d !== date)
-            .map((d) => `mrap_p${d}`);
-        if (extraKeys.length) {
-            bp.stop();
-            await queueProductBuilds(extraKeys, 'MRAP composite');
-        }
-        bp.start(date);
-        const parts = parseProductKey(key);
-        // The display follows immediately, as with any other switch;
-        // the server is told in the same call because this one may
-        // have to BUILD, and the operator is waiting on that.
-        const r = await fetch(
-            `/api/fire/${encodeURIComponent(FIRE)}/post_source`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json',
-                          'X-Requested-With': 'fetch'},
-                body: JSON.stringify({source: 'mrap', product: key}),
-            });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok || data.error) {
+        if (toBuild.length) {
             if (prog) {
-                prog.textContent = 'Failed: '
-                    + (data.error || ('HTTP ' + r.status));
+                prog.style.display = '';
+                prog.textContent = `Queuing ${toBuild.length} build(s) ...`;
             }
-            return;
+            await queueProductBuilds(toBuild, 'MRAP composite');
+            // The dialog may be closed now; the queue carries on.
+            log(`[products] ${toBuild.length} MRAP build(s) queued`
+                + (keys.length - toBuild.length
+                    ? `, ${keys.length - toBuild.length} already built`
+                    : ''), 'dim');
         }
-        bp.stop();
-        leftProduct = data.user_product_key || data.product_key || key;
-        currentPostSource = 'mrap';
-        currentL2Date = '';
-        if (Array.isArray(data.products)) _products = data.products;
-        rebuildSourceSelectors();
-        closeDatePicker();
-        _previewStamp = Date.now();
-        await loadPaneImage('left', leftView);
-        updateSubtitle('left', leftView);
-        await loadFireOverlays();
-        loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
-        try { refreshDownloadStatus(); } catch (_) {}
-        log(`[products] MRAP composite ${date} is now the source`,
-            'success');
+        if (already.has(target)) {
+            // Nothing to wait for: show it immediately.
+            await switchToProduct(target);
+            closeDatePicker();
+        } else if (prog) {
+            prog.textContent = 'Building. You can close this and carry '
+                + 'on; the builds continue.';
+            // Show it as soon as the queue produces it.
+            _switchWhenBuilt = target;
+        }
     } catch (err) {
         if (prog) prog.textContent = 'Failed: ' + err.message;
-        log(`[products] could not apply MRAP ${date}: ${err.message}`,
-            'error');
+        log(`[products] MRAP apply failed: ${err.message}`, 'error');
     } finally {
-        try { bp.stop(); } catch (_) {}
         _dateApplying = false;
-        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
-        // The batch is over: pick up everything it produced, including
-        // any build whose own response this page missed.
-        checkForNewProducts('batch finished');
+        setApplyEnabled(true);
+        checkForNewProducts('mrap apply');
+    }
+}
+
+// Enable/disable Apply from one place, so the button always reflects
+// whether a batch is running.
+function setApplyEnabled(on) {
+    const btn = document.getElementById('btn-apply-date');
+    if (!btn) return;
+    btn.disabled = !on;
+    btn.style.opacity = on ? '' : '0.5';
+    btn.style.pointerEvents = on ? '' : 'none';
+}
+
+// A product the operator asked for that was not built yet; the build
+// watcher switches to it once it appears.
+let _switchWhenBuilt = '';
+
+async function switchToProduct(key) {
+    const sel = document.getElementById('post-source-select');
+    if (!sel) return;
+    setSourceSelectValue(sel, key);
+    if (sel.value === key) {
+        await onPostSourceChange();
     }
 }
 
@@ -4564,7 +4545,10 @@ async function applyDateSelection() {
         // here directly would do nothing at all.
         setTimeout(() => checkForNewProducts('batch finished'), 0);
         _dateApplying = false;
-        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+        // Re-enable through the shared helper, so the button's state
+        // has one owner and cannot be left disabled by a path that
+        // forgot to restore it.
+        setApplyEnabled(true);
     }
 }
 
@@ -4986,8 +4970,13 @@ async function queueProductBuilds(keys, label) {
 }
 
 let _buildWatch = null;
+// Whether this watch has actually seen a batch running. Without it,
+// opening the dialog when nothing is queued would announce "Builds
+// finished" for builds that never started.
+let _buildSeen = false;
 function startBuildWatch() {
     if (_buildWatch) return;
+    _buildSeen = false;
     const tick = async () => {
         try {
             const r = await fetch(
@@ -4996,23 +4985,63 @@ function startBuildWatch() {
             const j = await r.json().catch(() => ({}));
             const prog = document.getElementById('date-picker-progress');
             if (j.running) {
+                _buildSeen = true;
+                setApplyEnabled(false);
                 if (prog) {
                     prog.style.display = '';
-                    const eta = (typeof j.eta_s === 'number')
-                        ? ` \u00b7 about ${fmtShortDur(j.eta_s)} left`
-                        : '';
-                    prog.textContent =
-                        `Building ${j.current || ''} \u2014 `
-                        + `${j.done + 1} of ${j.total}${eta}`;
+                    // Exhaustive on purpose: which product, where in the
+                    // batch, which stage of that build, how far into the
+                    // stage, elapsed, and both estimates.
+                    const parts = [];
+                    parts.push(`Building ${productLabel(
+                        _products.find((q) => q.key === j.current)
+                        || parseProductKey(j.current || ''))}`);
+                    parts.push(`${j.done + 1} of ${j.total}`);
+                    if (j.stage) {
+                        const pct = (typeof j.stage_fraction === 'number')
+                            ? ` ${Math.round(j.stage_fraction * 100)}%` : '';
+                        const si = (j.stage_idx && j.stage_total)
+                            ? ` (step ${j.stage_idx}/${j.stage_total})` : '';
+                        parts.push(`${j.stage}${si}${pct}`);
+                    }
+                    if (j.detail) parts.push(j.detail);
+                    if (typeof j.elapsed_s === 'number') {
+                        parts.push(`${fmtShortDur(j.elapsed_s)} elapsed`);
+                    }
+                    if (typeof j.stage_eta_s === 'number') {
+                        parts.push(`~${fmtShortDur(j.stage_eta_s)} for `
+                                   + `this build`);
+                    }
+                    if (typeof j.eta_s === 'number') {
+                        parts.push(`~${fmtShortDur(j.eta_s)} for the batch`);
+                    }
+                    if ((j.queued || []).length) {
+                        parts.push(`then: ${j.queued.join(', ')}`);
+                    }
+                    prog.textContent = parts.join(' \u00b7 ');
                 }
             } else {
                 clearInterval(_buildWatch);
                 _buildWatch = null;
-                if (prog) prog.textContent = 'Builds finished.';
+                setApplyEnabled(true);
+                if (prog && _buildSeen) {
+                    prog.textContent = (j.errors || []).length
+                        ? `Finished with ${j.errors.length} error(s).`
+                        : 'Builds finished.';
+                }
                 if ((j.errors || []).length) {
                     log(`[build] ${j.errors.join('; ')}`, 'error');
                 }
-                checkForNewProducts('builds finished');
+                await checkForNewProducts('builds finished');
+                // Show the product the operator asked for, now that it
+                // exists.
+                if (_switchWhenBuilt) {
+                    const want = _switchWhenBuilt;
+                    _switchWhenBuilt = '';
+                    if (_products.some((q) => q.key === want)) {
+                        await switchToProduct(want);
+                    }
+                }
             }
         } catch (_) {}
     };
