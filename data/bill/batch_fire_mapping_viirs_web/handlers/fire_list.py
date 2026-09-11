@@ -210,6 +210,11 @@ class FireListRoutes:
             fires = [
                 {
                     'fire_numbe': f.fire_numbe,
+                    # Creation time doubles as a cache generation: a
+                    # fire recreated under a name that was deleted is a
+                    # different fire, and must not be shown the old
+                    # one's cached imagery.
+                    'created_at': float(getattr(f, 'created_at', 0) or 0),
                     'fire_year': f.fire_year,
                     'fire_size_ha': f.fire_size_ha,
                     'status': f.status.value,
@@ -351,6 +356,51 @@ class FireListRoutes:
         # and scaled copies, and kgc's memoised tables. All share the
         # stack's stem, which embeds a per-AOI hash, so this cannot
         # reach another fire's stack.
+        # Stop any background product builds for this fire FIRST.
+        #
+        # A queued batch keeps building after the delete, writing
+        # stacks under the same identity hash -- so the purge below
+        # removes the files and the build then recreates them, and a
+        # fire made later under the same name inherits them. Clearing
+        # the queue makes the purge final.
+        try:
+            jobs = getattr(state, 'product_builds', None) or {}
+            job = jobs.get(fire_numbe)
+            if job:
+                with state.lock:
+                    left = len(job.get('queue') or [])
+                    job['queue'] = []
+                    job['cancelled'] = True
+                if left:
+                    sys.stderr.write(
+                        f'[remove] {fire_numbe}: cancelled {left} '
+                        f'queued build(s)\n')
+                jobs.pop(fire_numbe, None)
+        except Exception as exc:
+            sys.stderr.write(f'[remove] build cancel: {exc}\n')
+
+        # Prepared download archives, which are named after the fire.
+        # Left behind, a recreated fire with a matching signature could
+        # be served the old fire's products.
+        try:
+            from ..delivery import cache_dir_for
+            _dc = cache_dir_for(state.output_root)
+            if _dc and os.path.isdir(_dc):
+                _n = 0
+                for f in glob.glob(os.path.join(_dc,
+                                                f'{fire_numbe}__*.zip')):
+                    try:
+                        os.remove(f)
+                        _n += 1
+                    except OSError:
+                        pass
+                if _n:
+                    sys.stderr.write(
+                        f'[remove] {fire_numbe}: dropped {_n} cached '
+                        f'download archive(s)\n')
+        except Exception as exc:
+            sys.stderr.write(f'[remove] download cache: {exc}\n')
+
         # Purge by IDENTITY first, regardless of crop_bin.
         #
         # Everything below hangs off the stack this fire is pointing
@@ -391,6 +441,15 @@ class FireListRoutes:
                     except OSError as exc:
                         sys.stderr.write(
                             f'[remove] {os.path.basename(f)}: {exc}\n')
+            # Clustering work directories are named kgc_<fire>_<hash>,
+            # so they are reachable by name even when crop_bin is gone.
+            for d in glob.glob(os.path.join(RAM_DIR,
+                                            f'kgc_{_safe0}_*')):
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                    _gone += 1
+                except OSError:
+                    pass
             if _gone:
                 sys.stderr.write(
                     f'[remove] {fire_numbe}: purged {_gone} file(s) by '

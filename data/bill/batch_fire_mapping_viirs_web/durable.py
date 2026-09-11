@@ -173,6 +173,14 @@ def mirror_all(log=None) -> dict:
     except Exception:
         return total
     for fire in fires:
+        # Re-check membership: this list was taken when the mirror
+        # started, and a fire deleted since must not have its files
+        # copied back to the durable store after the purge.
+        try:
+            if fire.fire_numbe not in state.fires:
+                continue
+        except Exception:
+            pass
         r = mirror_fire(fire)
         for k in ('copied', 'skipped', 'bytes', 'failed'):
             total[k] += r[k]

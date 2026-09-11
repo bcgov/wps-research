@@ -489,6 +489,15 @@ class FireRoutes:
             job = state.product_builds.get(fire_numbe) or {}
             while True:
                 with state.lock:
+                    # A delete clears the queue and sets this. Checking
+                    # it here means the build stops between products
+                    # rather than recreating files the purge has just
+                    # removed.
+                    if job.get('cancelled') \
+                            or fire_numbe not in state.fires:
+                        sys.stderr.write(
+                            f'[build] {fire_numbe}: cancelled\n')
+                        break
                     q = job.get('queue') or []
                     if not q:
                         break

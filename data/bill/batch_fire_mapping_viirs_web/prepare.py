@@ -2953,6 +2953,13 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                 # appeared to move on their own. ensure_aoi_stack()
                 # builds the stack and returns; the fire stays exactly
                 # where its operator left it.
+                if fn not in state.fires:
+                    # Deleted while this loop was running. Rebuilding
+                    # would restore files the delete had just purged,
+                    # and they would then appear as products of
+                    # whatever is next created with that name.
+                    skipped += 1
+                    continue
                 from .aoi_stack import ensure_aoi_stack, AoiStackError
                 inst = getattr(state, 'shared_root', '') or ''
                 ref = (state.rasters_by_year.get(fire.fire_year)
