@@ -1356,7 +1356,20 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
     gt = geotransform
     det = gt[1] * gt[5] - gt[2] * gt[4]
     if not det:
-        return {'error': 'degenerate geotransform', 'passes': []}
+        return {'error': 'degenerate geotransform', 'passes': [],
+                'retry': True}
+    # An AOI with no size cannot overlap anything.
+    #
+    # This happens while a fire is still being prepared, or just after
+    # a restart before its crop is readable. Reporting it as "no
+    # planned pass covers this AOI" is wrong and alarming: the plans
+    # are fine, we simply had nothing to test against yet. Saying so
+    # -- and asking to be called again -- is the difference between a
+    # panel that looks broken and one that fills in a moment later.
+    if not width or not height:
+        return {'error': 'the AOI grid is not available yet '
+                         '(the fire is still being prepared)',
+                'passes': [], 'retry': True}
 
     def to_px(x, y):
         dx, dy = x - gt[0], y - gt[3]

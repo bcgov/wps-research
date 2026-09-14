@@ -2348,6 +2348,24 @@ async function _loadNextCoverageInner() {
             renderAcqProgress(st);
             return;
         }
+        // Ask again when the server says the answer is not final.
+        //
+        // "No planned pass covers this AOI" is a statement about the
+        // published plans; it must not be shown when the truth is
+        // "we could not test yet". The server distinguishes the two,
+        // so honour it rather than reporting an absence that turns
+        // into three passes a moment later.
+        if (d && d.retry) {
+            if (legend) {
+                legend.innerHTML = '<span style="color:#777">'
+                    + `${d.error || 'Not ready yet'} \u2014 retrying `
+                    + '...</span>';
+            }
+            log(`[diag] next_coverage: not ready (${d.error || '?'}); `
+                + `retrying`, 'dim');
+            if (!_acqPoll) _acqPoll = setInterval(pollAcqPlans, 3000);
+            return;
+        }
         const why = (d && d.error) ? d.error
             : 'No planned pass covers this AOI within the published '
               + 'plan horizon.';
@@ -7035,7 +7053,18 @@ function applyPaneFit(pane, img) {
         const st = paneState[pane];
         const r = _d.w / fs.fitW;
         if (isFinite(r) && r > 0 && Math.abs(r - 1) > 1e-9) {
+            // Scale AND pan.
+            //
+            // No transform-origin is set, so CSS uses 50% 50% -- the
+            // element's centre. Screen position is therefore
+            //     pan + W/2 + (p - W/2) * scale
+            // and the W/2 terms move when the element resizes. Scaling
+            // alone left the image off by (W - W')/2 in each axis,
+            // which is the small jump seen when stepping between
+            // products whose previews differ in size.
             st.scale = st.scale / r;
+            st.panX += (fs.fitW - _d.w) / 2;
+            st.panY += (fs.fitH - _d.h) / 2;
         }
         updateTransformForPane(pane);
     } else if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
