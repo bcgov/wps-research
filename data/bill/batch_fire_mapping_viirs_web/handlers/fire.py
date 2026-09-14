@@ -3002,6 +3002,21 @@ class FireRoutes:
         except Exception:
             return ''
 
+    @staticmethod
+    def _stack_stamp(path: str) -> int:
+        """Modification time of a stack, as a cache generation.
+
+        A page-load timestamp made every preview URL unique, so the
+        browser cache -- which the server already marks immutable for
+        a day -- could never hit. Keying on the file instead means the
+        same product returns the same URL tomorrow, and after a server
+        restart, and is served from the browser.
+        """
+        try:
+            return int(os.path.getmtime(path))
+        except OSError:
+            return 0
+
     def _built_products(self, fire_numbe, fire):
         """Every product on disk for this AOI, newest first.
 
@@ -3051,6 +3066,13 @@ class FireRoutes:
                     out.append({'key': key, 'source': src,
                                 'date': start or post,
                                 'label': product_label(key),
+                                # When this product's stack was last
+                                # written. The client puts it in the
+                                # preview URL, so the URL changes only
+                                # when the imagery does -- which is
+                                # what makes the browser cache usable
+                                # across reloads and restarts.
+                                'stamp': self._stack_stamp(cand),
                                 'built': True})
         except Exception as exc:
             sys.stderr.write(f'[products] scan failed: {exc}\n')

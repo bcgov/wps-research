@@ -859,7 +859,36 @@ let _previewStamp = Date.now();
 // without disturbing pre/post/diff, which are unaffected.
 let _hintStamp = Date.now();
 
-function previewStamp() { return _previewStamp; }
+// Cache generation for the CURRENT product, not for this page load.
+//
+// _previewStamp is Date.now() at load, so every preview URL was unique
+// on every visit and the browser cache -- which the server marks
+// immutable for a day -- could never hit. A product's stack mtime
+// changes only when the imagery is rebuilt, so keying on that makes a
+// revisit, a reload, and a server restart all serve from the browser.
+//
+// _previewStamp still wins when it has been bumped past the product's
+// own stamp: that is how a forced refresh after a rebuild propagates.
+// Set only when something must be re-fetched (a rebuild, a failed
+// provenance check). Zero the rest of the time, so the product's own
+// stamp decides -- comparing against _previewStamp does not work,
+// because Date.now() is always larger than a file mtime.
+let _forceStamp = 0;
+
+function bumpPreviewStamp() {
+    _forceStamp = Date.now();
+    _previewStamp = _forceStamp;
+}
+
+function productStamp(pane) {
+    if (_forceStamp) return _forceStamp;
+    const key = paneProductKey(pane);
+    const p = _products.find((q) => q && q.key === key);
+    const st = (p && Number(p.stamp)) || 0;
+    return st || _previewStamp;
+}
+
+function previewStamp(pane) { return productStamp(pane); }
 
 function cacheKeyFor(viewKey, pane) {
     // Only the stack-derived views differ between post sources and are
@@ -869,7 +898,7 @@ function cacheKeyFor(viewKey, pane) {
     // 'hint' additionally varies with the hint mode; every other view
     // depends only on the post source.
     const modePart = (viewKey === 'hint') ? `:${currentHintMode}` : '';
-    const stamp = (viewKey === 'hint') ? _hintStamp : _previewStamp;
+    const stamp = (viewKey === 'hint') ? _hintStamp : productStamp(pane);
     // Derive the source from the pane's PRODUCT, so the two can never
     // describe different things in the same request.
     const _pk0 = paneProductKey(pane);
@@ -1106,7 +1135,7 @@ function clearPreviewCache() {
         try { URL.revokeObjectURL(u); } catch (_) {}
     }
     _previewBlobs.clear();
-    _previewStamp = Date.now();
+    bumpPreviewStamp();
 }
 
 // Warm the cache for the source that is NOT currently displayed, so the
@@ -4449,7 +4478,7 @@ async function applyDateSelection() {
         if (prog) prog.textContent = 'Built. Loading the new imagery ...';
         // The stack changed underneath EVERY view, so nothing cached
         // client-side is still valid.
-        _previewStamp = Date.now();
+        bumpPreviewStamp();
         for (const k of [..._previewBlobs.keys()]) {
             try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
             _previewBlobs.delete(k);
@@ -4480,7 +4509,7 @@ async function applyDateSelection() {
         };
         if (!await paneOk('left', leftView)) {
             await new Promise((res) => setTimeout(res, 900));
-            _previewStamp = Date.now();
+            bumpPreviewStamp();
             if (!await paneOk('left', leftView) && leftView !== 'post') {
                 log(`[date] "${leftView}" has no preview for this `
                     + `composite yet; showing post-fire`, 'dim');
@@ -4494,7 +4523,7 @@ async function applyDateSelection() {
         if (splitActive && rightView) {
             if (!await paneOk('right', rightView)) {
                 await new Promise((res) => setTimeout(res, 900));
-                _previewStamp = Date.now();
+                bumpPreviewStamp();
                 await loadPaneImage('right', rightView);
             }
         }
@@ -4524,7 +4553,7 @@ async function applyDateSelection() {
             return;
         }
         log(`[date] L2 composite now starts from ${date}`, 'success');
-        _previewStamp = Date.now();
+        bumpPreviewStamp();
         for (const k of [..._previewBlobs.keys()]) {
             try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
             _previewBlobs.delete(k);
@@ -4709,6 +4738,17 @@ function concreteProductKey(key) {
         || _products.find((q) => q.source === src && q.date)
         || _products.find((q) => q.source === src);
     return (match && match.key) || key;
+}
+
+// Is the product this pane is showing already built?
+//
+// The server reports built=false for a product that exists only as a
+// selectable option. Anything else is on disk, so it is never
+// "generating" -- at most it is being fetched.
+function paneProductIsBuilt(pane) {
+    const key = paneProductKey(pane);
+    const p = _products.find((q) => q && q.key === key);
+    return !!(p && p.built !== false);
 }
 
 function paneProductKey(pane) {
@@ -6063,7 +6103,7 @@ async function flushErase() {
         }
         // Refetch so what is displayed is the server's rendering, not
         // the local approximation.
-        _previewStamp = Date.now();
+        bumpPreviewStamp();
         for (const k of [..._previewBlobs.keys()]) {
             if (k.includes(':result') || k.includes(':serial_')) {
                 try { URL.revokeObjectURL(_previewBlobs.get(k)); }
@@ -6111,7 +6151,7 @@ async function revertErase() {
         if (typeof j.agreement_pct === 'number') {
             renderAgreement(j.agreement_pct, previouslyAccepted);
         }
-        _previewStamp = Date.now();
+        bumpPreviewStamp();
         for (const k of [..._previewBlobs.keys()]) {
             try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
             _previewBlobs.delete(k);
@@ -6982,7 +7022,7 @@ function previewUrlFor(viewKey, pane) {
     // Source AND hint mode must both be in the URL: they select
     // different server-side files, not just different cache entries.
     const modePart = (viewKey === 'hint') ? `&hint=${currentHintMode}` : '';
-    const stamp = (viewKey === 'hint') ? _hintStamp : previewStamp();
+    const stamp = (viewKey === 'hint') ? _hintStamp : previewStamp(pane);
     // Per-pane source, so the right pane can show the other imagery.
     const src = (pane === 'right') ? rightPostSource : currentPostSource;
     // The L2 start date is part of the URL, because it selects a
@@ -7047,7 +7087,26 @@ function applyPaneFit(pane, img) {
     // needs the LEFT pane to recompute, since the ratio depends on
     // this pane's freshly-loaded dimensions.
     const inheritFromLeft = syncPanes && splitActive && pane === 'right';
-    if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
+    if (!inheritFromLeft && fs.fitted && dimsChanged && fs.fitW > 0
+            && _d.w > 0) {
+        // Dimensions changed, but the GROUND has not.
+        //
+        // Every product for a fire covers the same extent in the same
+        // CRS, so a different preview pixel size means the same
+        // hectares drawn at a different resolution -- not a different
+        // place. Refitting there threw away the operator's zoom and
+        // pan on every switch between dates.
+        //
+        // Screen position is pan + p * scale, and the same ground
+        // point moves from p to p * (newW / oldW). Dividing the scale
+        // by that ratio leaves pan untouched and the view identical.
+        const st = paneState[pane];
+        const r = _d.w / fs.fitW;
+        if (isFinite(r) && r > 0 && Math.abs(r - 1) > 1e-9) {
+            st.scale = st.scale / r;
+        }
+        updateTransformForPane(pane);
+    } else if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
         zoomFitPane(pane);
     } else if (inheritFromLeft) {
         syncOtherPane('left');
@@ -7258,13 +7317,15 @@ async function loadPaneImage(pane, viewKey) {
         if (tries < 4) {
             _paneLoadRetry[pane] = tries + 1;
             const waitMs = 400 * (tries + 1);
-            if (pane === 'left') {
+            // Only speak up for a product that genuinely is not built.
+            //
+            // A built product is on disk: a slow response there means
+            // the network or a preview render, not a build, and saying
+            // "being generated" made switching between finished dates
+            // look like work was starting. The bottom loading bar --
+            // which both panes share -- covers that case.
+            if (pane === 'left' && !paneProductIsBuilt(pane)) {
                 loadMsg.style.display = 'block';
-                // Say what is happening. A source layer is never
-                // genuinely absent -- we build it from imagery we know
-                // exists -- so "not available" describes a state that
-                // cannot occur and sends the operator looking for a
-                // fault instead of waiting a few seconds.
                 const _lbl = productLabel(
                     _products.find((q) => q.key === paneProductKey(pane))
                     || parseProductKey(paneProductKey(pane)));
@@ -7272,6 +7333,8 @@ async function loadPaneImage(pane, viewKey) {
                     `Preparing ${_lbl} \u2014 `
                     + `"${getViewLabel(viewKey)}" is being generated `
                     + `(attempt ${tries + 1} of 5) ...`;
+            } else if (pane === 'left') {
+                loadMsg.style.display = 'none';
             }
             log(`[pane] ${pane}: ${getViewLabel(viewKey)} not ready `
                 + `yet (${err.message}); retrying in ${waitMs} ms`,
@@ -7284,7 +7347,7 @@ async function loadPaneImage(pane, viewKey) {
             return;
         }
         _paneLoadRetry[pane] = 0;
-        if (pane === 'left') {
+        if (pane === 'left' && !paneProductIsBuilt(pane)) {
             loadMsg.style.display = 'block';
             const _lbl2 = productLabel(
                 _products.find((q) => q.key === paneProductKey(pane))
@@ -7357,7 +7420,7 @@ async function loadPaneImage(pane, viewKey) {
             _productByUrl.delete(finalUrl);
             if (!_paneRefetched[pane]) {
                 _paneRefetched[pane] = true;
-                _previewStamp = Date.now();
+                bumpPreviewStamp();
                 setTimeout(() => {
                     _paneRefetched[pane] = false;
                     loadPaneImage(pane, viewKey);
@@ -7871,7 +7934,7 @@ async function runRebrush() {
         // are served immutable, so bust the caches before reloading or
         // the panes would replay the pre-rebrush images at the same
         // URLs.
-        _previewStamp = Date.now();
+        bumpPreviewStamp();
         for (const k of [..._previewBlobs.keys()]) {
             if (k.includes(':result') || k.includes(':serial_')) {
                 try { URL.revokeObjectURL(_previewBlobs.get(k)); }
@@ -8139,7 +8202,7 @@ async function pollFireState() {
             // already had and the rebrush looked like it had done
             // nothing -- until clicking a run requested a different URL.
             try {
-                _previewStamp = Date.now();
+                bumpPreviewStamp();
                 for (const k of [..._previewBlobs.keys()]) {
                     try { URL.revokeObjectURL(_previewBlobs.get(k)); }
                     catch (_) {}
@@ -8212,7 +8275,7 @@ async function pollFireState() {
                 // stamp changes every preview key and URL, which is
                 // what makes the new result appear immediately instead
                 // of after a manual reload.
-                _previewStamp = Date.now();
+                bumpPreviewStamp();
                 _hintStamp = Date.now();
                 let dropped = 0;
                 for (const k of [..._previewBlobs.keys()]) {
