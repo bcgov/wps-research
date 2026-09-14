@@ -305,7 +305,8 @@ def _write_jpeg_twin(rgb_uint8, png_path: str) -> str:
 
 
 def generate_all_previews(crop_path: str, cache_dir: str,
-                          fire_numbe: str) -> list[str]:
+                          fire_numbe: str,
+                          preview_dir: str = None) -> list[str]:
     """Generate all preview PNGs for a cropped raster.
 
     Returns list of available view keys (e.g. ['post', 'pre', 'diff1']).
@@ -322,16 +323,54 @@ def generate_all_previews(crop_path: str, cache_dir: str,
 
     groups = detect_band_groups(band_names)
 
-    preview_dir = os.path.join(cache_dir, 'previews')
+    # An explicit directory lets a caller render a product's previews
+    # beside the others without the fire being switched to it. Without
+    # this the path was always <cache>/previews, so rendering for a
+    # different product either overwrote the live set or, if the
+    # caller passed the stash directory as cache_dir, landed in
+    # <stash>/previews and was never found.
+    preview_dir = preview_dir or os.path.join(cache_dir, 'previews')
     os.makedirs(preview_dir, exist_ok=True)
 
-    available: list[str] = []
+    jobs = []
     for key in ('post', 'pre', *DIFF_KEYS):
         indices = groups.get(key, [])
         if not indices:
             continue
-        output = os.path.join(preview_dir, f'{key}.png')
-        if generate_preview_png(crop_path, indices, output):
-            available.append(key)
+        jobs.append((key, indices,
+                     os.path.join(preview_dir, f'{key}.png')))
+    if not jobs:
+        return []
 
+    # Each view is an independent read-and-render over the same file,
+    # so they go together. Serially this was the slowest part of a
+    # switch for no reason.
+    try:
+        from .state import PREVIEW_WORKERS as _pw
+    except Exception:
+        _pw = 4
+    workers = max(1, min(len(jobs), _pw))
+
+    available: list[str] = []
+    if workers == 1:
+        for key, indices, output in jobs:
+            if generate_preview_png(crop_path, indices, output):
+                available.append(key)
+        return available
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(generate_preview_png, crop_path,
+                            indices, output): key
+                for key, indices, output in jobs}
+        for fut, key in futs.items():
+            try:
+                if fut.result():
+                    available.append(key)
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[preview] {fire_numbe}: {key} failed: {exc}\n')
+    # Stable order regardless of completion order.
+    order = ['post', 'pre', *DIFF_KEYS]
+    available.sort(key=lambda k: order.index(k) if k in order else 99)
     return available

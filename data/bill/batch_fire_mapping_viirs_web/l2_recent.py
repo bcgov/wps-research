@@ -805,7 +805,14 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     # decompressing ~1 GB zips, so running them concurrently is close
     # to a linear speedup. Capped so a many-tile AOI cannot exhaust
     # memory: each worker holds a full AOI-sized 4-band float32 buffer.
-    max_workers = max(1, min(len(per_tile), 4))
+    # Was a flat 4. Tile extraction is ZIP reads and decompression,
+    # which scale with cores, and an AOI spanning several tiles was
+    # waiting on a queue of four while the rest of the machine idled.
+    try:
+        from .state import TILE_EXTRACT_WORKERS as _tw
+    except Exception:
+        _tw = 4
+    max_workers = max(1, min(len(per_tile), _tw))
     _log(f'extracting {n_tiles} tile(s) with {max_workers} worker(s) '
          f'in parallel ...')
     done_n = 0

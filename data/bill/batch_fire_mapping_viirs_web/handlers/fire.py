@@ -502,14 +502,50 @@ class FireRoutes:
 
         from ..prepare import switch_post_source, product_parts
 
+        def _build_one(key):
+            """Build ONE product's stack. Never touches the fire."""
+            t0 = time.time()
+            src, start, post = product_parts(key)
+            try:
+                from ..aoi_stack import ensure_aoi_stack
+                info = ensure_aoi_stack(
+                    fire_numbe, fire.bbox_native,
+                    instance_key=getattr(state, 'shared_root', '') or '',
+                    post_source=src,
+                    ref_raster=(state.rasters_by_year.get(fire.fire_year)
+                                or state.raster_path),
+                    l2_start_date=(start if src == 'l2' else ''),
+                    mrap_date=(post if src == 'mrap' else ''))
+                return key, (info or {}).get('path', ''), None, \
+                    time.time() - t0
+            except Exception as exc:
+                return key, '', f'{type(exc).__name__}: {exc}', \
+                    time.time() - t0
+
         def _run():
             job = state.product_builds.get(fire_numbe) or {}
+            # Build the stacks in PARALLEL, and without switching.
+            #
+            # Each product is a separate output file, so they do not
+            # contend: the only reason the old loop was serial is that
+            # it switched the fire to each product in turn, which
+            # mutates shared state and held the per-fire lock. Building
+            # the stacks directly lets the machine do several at once
+            # -- which on a box with this many cores is the difference
+            # between one date at a time and the whole batch.
+            #
+            # Conservative by default: each build is itself threaded
+            # inside GDAL, so more workers here is not automatically
+            # faster, and memory per build is not small.
+            from ..state import PRODUCT_BUILD_WORKERS
+            workers = max(1, min(PRODUCT_BUILD_WORKERS,
+                                 len(job.get('queue') or []) or 1))
+            sys.stderr.write(
+                f'[build] {fire_numbe}: {len(job.get("queue") or [])} '
+                f'product(s), {workers} at a time\n')
+            from concurrent.futures import ThreadPoolExecutor
             while True:
                 with state.lock:
-                    # A delete clears the queue and sets this. Checking
-                    # it here means the build stops between products
-                    # rather than recreating files the purge has just
-                    # removed.
                     if job.get('cancelled') \
                             or fire_numbe not in state.fires:
                         sys.stderr.write(
@@ -518,28 +554,32 @@ class FireRoutes:
                     q = job.get('queue') or []
                     if not q:
                         break
-                    key = q.pop(0)
-                    job['current'] = key
-                t0 = time.time()
+                    batch = [q.pop(0) for _ in range(min(workers,
+                                                         len(q)))]
+                    job['current'] = ', '.join(batch)
                 try:
-                    src = product_parts(key)[0]
-                    r = switch_post_source(fire, src, product=key)
-                    if not r.get('ok'):
-                        job['errors'].append(
-                            f'{key}: {r.get("error") or "busy"}')
-                    else:
-                        fire.user_post_source = src
-                        fire.user_product = key
+                    with ThreadPoolExecutor(
+                            max_workers=len(batch)) as ex:
+                        for key, path, err, dt in ex.map(_build_one,
+                                                         batch):
+                            if err:
+                                job['errors'].append(f'{key}: {err}')
+                                sys.stderr.write(
+                                    f'[build] {fire_numbe} {key}: '
+                                    f'{err}\n')
+                            else:
+                                sys.stderr.write(
+                                    f'[build] {fire_numbe}: {key} ready '
+                                    f'in {dt:.0f}s '
+                                    f'({os.path.basename(path)})\n')
+                            with state.lock:
+                                job['done'] = int(job.get('done', 0)) + 1
+                                job['durations'].append(dt)
                 except Exception as exc:
-                    job['errors'].append(f'{key}: {exc}')
+                    with state.lock:
+                        job['errors'].append(f'{batch}: {exc}')
                     sys.stderr.write(
-                        f'[build] {fire_numbe} {key}: {exc}\n')
-                with state.lock:
-                    job['done'] = int(job.get('done', 0)) + 1
-                    job['durations'].append(time.time() - t0)
-                sys.stderr.write(
-                    f'[build] {fire_numbe}: {job["done"]}/'
-                    f'{job["total"]} ({key})\n')
+                        f'[build] {fire_numbe}: batch failed: {exc}\n')
             with state.lock:
                 job['running'] = False
                 job['current'] = ''
@@ -1709,8 +1749,12 @@ class FireRoutes:
                             # may have rendered it while we waited.
                             if not self._stash_view_current(
                                     fire, _outdir, view):
+                                # preview_dir explicitly: the helper
+                                # otherwise appends 'previews' to the
+                                # directory it is given.
                                 generate_all_previews(
-                                    _stk, _outdir, fire_numbe)
+                                    _stk, fire.cache_dir, fire_numbe,
+                                    preview_dir=_outdir)
                                 try:
                                     from ..prepare import (
                                         stamp_previews_product)

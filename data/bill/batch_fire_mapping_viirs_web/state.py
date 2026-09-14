@@ -238,6 +238,69 @@ class FireInfo:
     cancel_event: Optional[threading.Event] = None
 
 
+# ---------------------------------------------------------------------
+# Parallelism
+# ---------------------------------------------------------------------
+# Sized from the machine, capped per stage, and overridable by
+# environment variable so a smaller box (or a busy one) can be dialled
+# back without editing code.
+#
+# The caps are not arbitrary. More workers helps only where a stage is
+# actually parallel and not already saturating something else:
+#
+#   product builds  -- separate output files, but each build is itself
+#                      threaded inside GDAL and holds a full AOI in
+#                      memory, so a handful at once uses the machine
+#                      without thrashing it.
+#   tile extraction -- ZIP reads, mostly disk and decompression.
+#   cloud cover     -- remote HTTP against one mirror; the limit here
+#                      is politeness and the mirror's tolerance, not
+#                      our cores.
+#   previews        -- independent PNG renders, cheap and CPU-bound.
+
+import os as _os
+
+
+def _cpu_count() -> int:
+    try:
+        return len(_os.sched_getaffinity(0))
+    except AttributeError:
+        return _os.cpu_count() or 8
+
+
+def _env_workers(name: str, default: int, cap: int) -> int:
+    try:
+        v = int(_os.environ.get(name, '') or 0)
+        if v > 0:
+            return v
+    except ValueError:
+        pass
+    return max(1, min(default, cap))
+
+
+CPU_COUNT = _cpu_count()
+
+# Stack builds run concurrently; each one is heavy.
+PRODUCT_BUILD_WORKERS = _env_workers(
+    'FIRE_PRODUCT_BUILD_WORKERS', max(2, CPU_COUNT // 32), 16)
+# ZIP reads and per-tile extraction.
+TILE_EXTRACT_WORKERS = _env_workers(
+    'FIRE_TILE_EXTRACT_WORKERS', max(4, CPU_COUNT // 8), 32)
+# Remote metadata reads against the mirror.
+CLOUD_COVER_WORKERS = _env_workers(
+    'FIRE_CLOUD_COVER_WORKERS', max(8, CPU_COUNT // 16), 24)
+# Independent PNG renders.
+PREVIEW_WORKERS = _env_workers(
+    'FIRE_PREVIEW_WORKERS', max(4, CPU_COUNT // 16), 12)
+
+
+def describe_parallelism() -> str:
+    return (f'{CPU_COUNT} cpu(s); builds={PRODUCT_BUILD_WORKERS}, '
+            f'tiles={TILE_EXTRACT_WORKERS}, '
+            f'cloud={CLOUD_COVER_WORKERS}, '
+            f'previews={PREVIEW_WORKERS}')
+
+
 class AppState:
     """Global application state shared across all routes."""
 

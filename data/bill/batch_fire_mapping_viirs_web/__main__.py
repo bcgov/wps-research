@@ -680,6 +680,30 @@ def main():
     app_state.viirs_concurrent_jobs = max(1, int(args.viirs_concurrent_jobs))
     app_state.viirs_download_workers = max(1, int(args.viirs_download_workers))
     app_state.viirs_shapify_workers = max(1, int(args.viirs_shapify_workers))
+    # Let GDAL use the machine.
+    #
+    # By default GDAL warps on one thread and keeps a block cache of a
+    # few percent of RAM. On a box with this many cores and this much
+    # memory that leaves nearly all of it idle while an AOI build runs
+    # -- and warping is most of what a build does. Set through the
+    # environment so every GDAL call inherits it, including the ones
+    # inside worker threads and any child process.
+    try:
+        from .state import (CPU_COUNT, describe_parallelism)
+        os.environ.setdefault('GDAL_NUM_THREADS', 'ALL_CPUS')
+        os.environ.setdefault('GDAL_CACHEMAX', '4096')     # MB
+        os.environ.setdefault('GDAL_SWATH_SIZE', '1073741824')
+        os.environ.setdefault('VSI_CACHE', 'TRUE')
+        os.environ.setdefault('VSI_CACHE_SIZE', '268435456')
+        os.environ.setdefault('GDAL_DISABLE_READDIR_ON_OPEN',
+                              'EMPTY_DIR')
+        _log(f'  Parallelism: {describe_parallelism()}')
+        _log(f'  GDAL       : NUM_THREADS='
+             f'{os.environ["GDAL_NUM_THREADS"]}, '
+             f'CACHEMAX={os.environ["GDAL_CACHEMAX"]} MB')
+    except Exception as _exc:
+        _log(f'[startup] could not configure GDAL threading: {_exc}')
+
     app_state.admin_username = (args.admin_username
                                 or os.environ.get('FIRE_ADMIN_USERNAME')
                                 or 'admin')

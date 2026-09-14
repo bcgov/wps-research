@@ -4397,226 +4397,66 @@ async function applyDateSelection() {
     if (_datePickerMode === 'mrap') {
         return applyMrapDateSelection();
     }
-    const btn = document.getElementById('btn-apply-date');
     const prog = document.getElementById('date-picker-progress');
-    const allPicked = [...document.querySelectorAll('.date-pick:checked')]
+    const picked = [...document.querySelectorAll('.date-pick:checked')]
         .map((el) => el.value);
-    if (!allPicked.length) return;
-    // Newest first; the last built is the one left displayed.
-    allPicked.sort().reverse();
-    const alreadyL2 = new Set(_products
+    if (!picked.length) return;
+    picked.sort().reverse();
+
+    // The same server-side queue the MRAP side uses.
+    //
+    // This used to POST /l2_date and wait. That call blocks for the
+    // whole build while holding the fire's lock, so anything else
+    // touching the fire -- a warm, a background build, another tab --
+    // came back 409, and a 409 without a `busy` flag fell straight
+    // out of the retry loop, closed the dialog and built nothing.
+    // Trying again "worked" only because the contending work had
+    // finished by then. Queuing removes the race rather than timing
+    // it better.
+    const already = new Set(_products
         .filter((q) => q.built !== false).map((q) => q.key));
-    const date = allPicked[allPicked.length - 1];
-    // Only the dates not already on disk are built; the rest are
-    // already selectable and rebuilding them would produce identical
-    // files at a cost of minutes each.
-    const extras = allPicked.slice(0, allPicked.length - 1)
-        .filter((d) => !alreadyL2.has(`l2_d${d}`));
-    const skippedL2 = (allPicked.length - 1) - extras.length;
-    if (skippedL2) {
-        log(`[products] ${skippedL2} selected date(s) already built; `
-            + `building ${extras.length + (alreadyL2.has(`l2_d${date}`)
-                ? 0 : 1)}`, 'dim');
-    }
+    const keys = picked.map((d) => `l2_d${d}`);
+    const toBuild = keys.filter((k) => !already.has(k));
+    const target = keys[keys.length - 1];
 
     _dateApplying = true;
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
-    if (prog) {
-        prog.style.display = '';
-        prog.textContent = 'Building the L2 composite from ' + date
-            + ' ...';
-    }
-    // Poll the fire's progress so a build that takes minutes reports
-    // like every other long operation.
-    const t0 = performance.now();
-    const poll = setInterval(async () => {
-        try {
-            const r = await fetch(
-                `/api/fire/${encodeURIComponent(FIRE)}/progress`,
-                {headers: {'X-Requested-With': 'fetch'}});
-            if (!r.ok) return;
-            const j = await r.json();
-            const d = (j.progress && j.progress.detail) || '';
-            const el = (performance.now() - t0) / 1000;
-            if (prog) {
-                prog.textContent = `Building from ${date} - `
-                    + `${el.toFixed(0)}s` + (d ? ` - ${d}` : '');
-            }
-        } catch (_) {}
-    }, 1500);
-
+    setApplyEnabled(false);
     try {
-        // Build the other selected dates first, one at a time. The
-        // server serialises per fire, so issuing them together would
-        // just queue them invisibly; sequentially each reports as it
-        // lands and the last one stays displayed.
-        const bp = makeBuildProgress(prog, extras.length + 1,
-                                     'Building L2 composite from');
-        // Queue the extras server-side; they survive navigation.
-        if (extras.length) {
-            bp.stop();
-            await queueProductBuilds(
-                extras.map((d) => `l2_d${d}`), 'L2 composite');
-        }
-        bp.start(date);
-        let r, j;
-        for (;;) {
-            r = await fetch(
-                `/api/fire/${encodeURIComponent(FIRE)}/l2_date`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json',
-                          'X-Requested-With': 'fetch'},
-                body: JSON.stringify({date: date}),
-            });
-            j = await r.json().catch(() => ({}));
-            // Same courtesy as the source switch: a background prebuild
-            // holding the fire is something to wait out, not fail on.
-            if (r.status !== 409 || !j.busy) break;
+        if (toBuild.length) {
             if (prog) {
-                prog.textContent = 'Waiting for a background build to '
-                    + 'finish ...';
+                prog.style.display = '';
+                prog.textContent = `Queuing ${toBuild.length} build(s) ...`;
             }
-            await new Promise((res) => setTimeout(res, 2000));
-        }
-        if (!r.ok || j.error) {
-            if (prog) {
-                prog.textContent = 'Failed: '
-                    + (j.error || ('HTTP ' + r.status));
+            const q = await queueProductBuilds(toBuild, 'L2 composite');
+            if (!q || !q.queued) {
+                if (prog) {
+                    prog.textContent = 'Could not queue the build. See '
+                        + 'the console.';
+                }
+                log('[products] the L2 build was not queued; nothing '
+                    + 'has been started', 'error');
+                return;
             }
-            log(`[date] apply failed: ${j.error || r.status}`, 'error');
-            return;
+            log(`[products] ${q.queued} L2 build(s) queued`
+                + (q.skipped ? `, ${q.skipped} already built` : ''),
+                'dim');
         }
-        log(`[date] L2 composite now starts from ${date}`, 'success');
-        // Adopt it BEFORE reloading, so every request below asks for
-        // the new product by name.
-        currentL2Date = (j && typeof j.date === 'string') ? j.date : date;
-        currentPostSource = 'l2';
-        // The new dated product exists now: offer it in both
-        // selectors immediately, which is the whole point of building
-        // it. The right pane keeps whatever it was showing.
-        try {
-            const pr = await fetch(
-                `/api/fire/${encodeURIComponent(FIRE)}/prepare`,
-                {headers: {'X-Requested-With': 'fetch'}});
-            if (pr.ok) {
-                const pj = await pr.json();
-                refreshSourceSelectors(pj.products);
-            }
-        } catch (_) {}
-        // Select the PRODUCT just built, not merely the source.
-        //
-        // This used to set the selector to 'l2', which was right when
-        // L2 meant one composite -- but it now names the most-recent
-        // one, so it undid the selection two lines above and the
-        // dropdown read "L2 recent" while everything else correctly
-        // used the dated product.
-        const _ls = document.getElementById('post-source-select');
-        if (_ls) {
-            setSourceSelectValue(_ls, currentProductKey());
+        if (already.has(target)) {
+            await switchToProduct(target);
+            closeDatePicker();
+        } else if (prog) {
+            prog.textContent = 'Building. You can close this and carry '
+                + 'on; the builds continue and the product appears in '
+                + 'the selector when it is ready.';
+            _switchWhenBuilt = target;
         }
-        if (prog) prog.textContent = 'Built. Loading the new imagery ...';
-        // The stack changed underneath EVERY view, so nothing cached
-        // client-side is still valid.
-        bumpPreviewStamp();
-        for (const k of [..._previewBlobs.keys()]) {
-            try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
-            _previewBlobs.delete(k);
-        }
-        _geoByUrl.clear();          // sidecars are per rendered PNG
-        invalidateEraseBuffers('L2 start date changed');
-
-        // Load, then CHECK. The server re-renders previews as part of
-        // the switch, and a request that lands mid-render can return
-        // the old file or nothing at all -- which is how a freshly
-        // built composite could fail to appear. One retry after a short
-        // pause covers it, and the view falls back to post-fire if this
-        // particular layer has no preview for the new product.
-        // Abandon anything already in flight before reloading.
-        //
-        // A request issued before the switch can land after it and
-        // repaint the OLD composite -- the pane then looks unchanged
-        // until something forces another load, which is what made a
-        // second switch appear to "fix" it. Bumping the generation
-        // makes every in-flight load discard its result.
-        for (const pn of ['left', 'right']) {
-            try { _paneGen[pn] = (_paneGen[pn] || 0) + 1; } catch (_) {}
-        }
-        const paneOk = async (pn, view) => {
-            await loadPaneImage(pn, view);
-            const { img } = getPaneElements(pn);
-            return !!(img && img.naturalWidth);
-        };
-        if (!await paneOk('left', leftView)) {
-            await new Promise((res) => setTimeout(res, 900));
-            bumpPreviewStamp();
-            if (!await paneOk('left', leftView) && leftView !== 'post') {
-                log(`[date] "${leftView}" has no preview for this `
-                    + `composite yet; showing post-fire`, 'dim');
-                leftView = 'post';
-                const vs = document.getElementById('view-select');
-                if (vs) vs.value = 'post';
-                await loadPaneImage('left', 'post');
-                updateSubtitle('left', 'post');
-            }
-        }
-        if (splitActive && rightView) {
-            if (!await paneOk('right', rightView)) {
-                await new Promise((res) => setTimeout(res, 900));
-                bumpPreviewStamp();
-                await loadPaneImage('right', rightView);
-            }
-        }
-        invalidateOverlayLayers();
-        // Panes are always synced; realign after the swap so the
-        // two views cannot drift apart.
-        try { if (splitActive) resyncPanes(); } catch (_) {}
-        try { syncDateSelectButton(); } catch (_) {}
-        closeDatePicker();
     } catch (err) {
-        // "Failed to fetch" means the connection dropped, not that the
-        // build failed: a composite can take minutes and the request is
-        // held open the whole time. The server keeps building, so poll
-        // for the result rather than declaring failure.
-        if (prog) {
-            prog.textContent = 'Connection dropped while building; '
-                + 'checking whether it finished ...';
-        }
-        log(`[date] request interrupted (${err.message}); polling for `
-            + `the result`, 'dim');
-        const ok = await waitForDateApplied(date, prog);
-        if (!ok) {
-            if (prog) {
-                prog.textContent = 'Failed: ' + err.message
-                    + ' (the build did not complete)';
-            }
-            return;
-        }
-        log(`[date] L2 composite now starts from ${date}`, 'success');
-        bumpPreviewStamp();
-        for (const k of [..._previewBlobs.keys()]) {
-            try { URL.revokeObjectURL(_previewBlobs.get(k)); } catch (_) {}
-            _previewBlobs.delete(k);
-        }
-        invalidateEraseBuffers('L2 start date changed');
-        await loadPaneImage('left', leftView);
-        if (splitActive && rightView) await loadPaneImage('right', rightView);
-        invalidateOverlayLayers();
-        closeDatePicker();
+        if (prog) prog.textContent = 'Failed: ' + err.message;
+        log(`[products] L2 apply failed: ${err.message}`, 'error');
     } finally {
-        clearInterval(poll);
-        // The batch ticker and the per-build poller both write this
-        // line; stopping the ticker here leaves one owner.
-        try { bp.stop(); } catch (_) {}
-        // Pick up everything the batch produced. Deferred, because
-        // _dateApplying is still set at this point and the check
-        // deliberately skips while a build is in flight -- calling it
-        // here directly would do nothing at all.
-        setTimeout(() => checkForNewProducts('batch finished'), 0);
         _dateApplying = false;
-        // Re-enable through the shared helper, so the button's state
-        // has one owner and cannot be left disabled by a path that
-        // forgot to restore it.
         setApplyEnabled(true);
+        checkForNewProducts('l2 apply');
     }
 }
 

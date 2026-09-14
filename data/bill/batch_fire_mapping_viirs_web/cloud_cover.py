@@ -43,7 +43,10 @@ L2A_PREFIX = LEVEL_PREFIXES['L2A']
 # Parallelism for the mirror. The original script defaults to 8 and
 # accepts --workers; here it is a module constant because the caller is
 # a web request, not a person at a terminal.
-N_WORKERS = 8
+try:
+    from .state import CLOUD_COVER_WORKERS as N_WORKERS
+except Exception:
+    N_WORKERS = 8
 
 # How long a "no products found" answer stays trusted. A date with no
 # acquisition will not grow one, but the mirror can lag, so this is not
