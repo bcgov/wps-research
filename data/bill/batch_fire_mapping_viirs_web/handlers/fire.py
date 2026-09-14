@@ -429,6 +429,23 @@ class FireRoutes:
         return os.path.join(cache, 'coverage',
                             f'{product_key}_dates.json')
 
+    _PREVIEW_RENDER_LOCKS: dict = {}
+    _PREVIEW_RENDER_GUARD = threading.Lock()
+
+    @classmethod
+    def _preview_render_lock(cls, fire_numbe: str, key: str):
+        """One lock per (fire, product), so parallel warms cooperate.
+
+        Without it, several browser tabs warming at once would render
+        the same product's previews several times over.
+        """
+        name = f'{fire_numbe}:{key}'
+        with cls._PREVIEW_RENDER_GUARD:
+            lk = cls._PREVIEW_RENDER_LOCKS.get(name)
+            if lk is None:
+                lk = cls._PREVIEW_RENDER_LOCKS[name] = threading.Lock()
+            return lk
+
     def handle_api_build_products(self, fire_numbe):
         """Queue a batch of product builds and return immediately.
 
@@ -1665,8 +1682,61 @@ class FireRoutes:
                 # disturbed. Costs one stack build the first time and
                 # nothing afterwards.
                 sys.stderr.write(
-                    f'[preview] {fire_numbe}: no previews_{_src} '
+                    f'[preview] {fire_numbe}: no previews_{_req_key} '
                     f'stash; generating it on demand\n')
+
+                # Render straight from the requested product's stack.
+                #
+                # Switching the fire to render and back holds the
+                # per-fire lock for the whole job, so every other
+                # request for this fire answers 409 busy -- including
+                # the pane the operator is watching. With the client
+                # warming several products at once that is constant.
+                # generate_all_previews() takes any stack path and any
+                # output directory, so the previews can be produced
+                # beside the others without the fire moving at all.
+                _direct = ''
+                try:
+                    _stk = stack_path_for_product(fire, _req_key)
+                    if _stk and os.path.isfile(_stk):
+                        from ..preview import generate_all_previews
+                        _outdir = os.path.join(
+                            fire.cache_dir, f'previews_{_req_key}')
+                        os.makedirs(_outdir, exist_ok=True)
+                        _lk = self._preview_render_lock(fire_numbe, _req_key)
+                        with _lk:
+                            # Re-check under the lock: a concurrent warm
+                            # may have rendered it while we waited.
+                            if not self._stash_view_current(
+                                    fire, _outdir, view):
+                                generate_all_previews(
+                                    _stk, _outdir, fire_numbe)
+                                try:
+                                    from ..prepare import (
+                                        stamp_previews_product)
+                                    with open(os.path.join(
+                                            _outdir, '.product'), 'w',
+                                            encoding='utf-8') as _pf:
+                                        _pf.write(_req_key)
+                                except OSError:
+                                    pass
+                        _direct = _outdir
+                        sys.stderr.write(
+                            f'[preview] {fire_numbe}: rendered '
+                            f'{_req_key} without switching the fire\n')
+                except Exception as _rexc:
+                    sys.stderr.write(
+                        f'[preview] {fire_numbe}: direct render of '
+                        f'{_req_key} failed ({_rexc}); falling back to '
+                        f'a switch\n')
+
+                if _direct and os.path.isdir(_direct):
+                    cand = _direct
+                    _stash_dir = _direct
+                    png = os.path.join(_direct, f'{view}.png')
+                    if os.path.isfile(png):
+                        serve_path = png
+                        serve_type = 'image/png'
                 try:
                     from ..prepare import switch_post_source
                     # switch_post_source() repoints fire.post_source

@@ -2354,7 +2354,46 @@ async function _loadNextCoverageInner() {
         if (legend) {
             legend.innerHTML = `<span style="color:#777">${why}</span>`;
         }
-        log(`[diag] next_coverage: no passes (${why})`, 'dim');
+        // Say WHY, in enough detail to act on.
+        //
+        // "No planned pass" has several quite different causes -- the
+        // plans are stale, they end before the horizon, the AOI sits
+        // outside every planned swath, or the AOI itself is wrong --
+        // and the response already carries the numbers that tell them
+        // apart. Printing them costs nothing and saves a round of
+        // guesswork every time this looks empty.
+        log(`[diag] next_coverage: no passes (${why})`, 'error');
+        try {
+            if (d.aoi_wgs84) {
+                log(`[diag]   AOI (WGS84): `
+                    + `lon ${Number(d.aoi_wgs84[0]).toFixed(4)} .. `
+                    + `${Number(d.aoi_wgs84[2]).toFixed(4)}, `
+                    + `lat ${Number(d.aoi_wgs84[1]).toFixed(4)} .. `
+                    + `${Number(d.aoi_wgs84[3]).toFixed(4)}`, 'dim');
+            }
+            if (typeof d.horizon_days === 'number') {
+                log(`[diag]   horizon: ${d.horizon_days} day(s) from `
+                    + `now; plans fetched `
+                    + `${d.fetched_h == null ? '?'
+                        : Number(d.fetched_h).toFixed(1)} h ago`, 'dim');
+            }
+            const cen = d.census || {};
+            for (const sat of Object.keys(cen).sort()) {
+                const c = cen[sat] || {};
+                log(`[diag]   ${sat}: ${c.total || 0} datatake(s), `
+                    + `${c.candidate || 0} in window, `
+                    + `${c.used || 0} over AOI, `
+                    + `${c.no_overlap || 0} missed the AOI, `
+                    + `${c.beyond_horizon || 0} beyond the horizon, `
+                    + `${c.past || 0} already past`
+                    + (c.last_planned
+                        ? `; plan ends ${c.last_planned}` : ''), 'dim');
+            }
+            if (d.error) log(`[diag]   error: ${d.error}`, 'error');
+        } catch (e) {
+            log(`[diag]   (could not print the census: ${e.message})`,
+                'dim');
+        }
         return;
     }
     if (_acqPoll) { clearInterval(_acqPoll); _acqPoll = null; }
@@ -4663,28 +4702,81 @@ let _products = [];
 // A fire marked ready should never show "being prepared": its imagery
 // is on the ramdisk, and the only reason a switch felt slow was that
 // the browser had not fetched those previews yet.
+// Pre-fetch every view of every built product, several at a time.
+//
+// A fire marked ready has its imagery on the ramdisk; the only reason
+// switching ever felt slow was the browser not having fetched those
+// previews yet. Warming them in parallel means a switch is a cache
+// hit. Safe to run concurrently now that the server renders a
+// product's previews from its own stack instead of switching the fire
+// -- which used to make every warm collide with the pane in view.
 let _warmedProducts = new Set();
-async function warmAllProducts() {
-    const mine = _products.filter((q) => q && q.key && q.built !== false);
-    for (const p of mine) {
-        if (_warmedProducts.has(p.key)) continue;
-        _warmedProducts.add(p.key);
-        const view = leftView || 'post';
-        const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/`
-            + `${encodeURIComponent(view)}?src=`
-            + `${encodeURIComponent(parseProductKey(p.key).source)}`
-            + `&prod=${encodeURIComponent(p.key)}`
-            + `&t=${_previewStamp}`;
-        try {
-            // Sequential on purpose: parallel fetches of several
-            // hundred MB compete with the pane the operator is
-            // actually looking at.
-            await fetch(url, {headers: {'X-Requested-With': 'fetch'}});
-        } catch (_) { /* a failed warm is not worth reporting */ }
+let _warmAllRunning = false;
+
+const WARM_CONCURRENCY = 4;   // enough to saturate a LAN, not the box
+
+async function warmAllProducts(views) {
+    if (_warmAllRunning) return;
+    _warmAllRunning = true;
+    const t0 = performance.now();
+    // The view being looked at first, then the rest.
+    const wanted = views || [leftView || 'post', 'pre', 'diff1'];
+    const built = _products.filter((q) => q && q.key && q.built !== false);
+    const jobs = [];
+    for (const p of built) {
+        for (const v of wanted) {
+            const tag = `${p.key}:${v}`;
+            if (_warmedProducts.has(tag)) continue;
+            _warmedProducts.add(tag);
+            jobs.push({key: p.key, view: v, stamp: p.stamp || 0});
+        }
     }
-    if (mine.length) {
-        log(`[warm] pre-fetched ${mine.length} product view(s)`, 'dim');
+    if (!jobs.length) { _warmAllRunning = false; return; }
+    log(`[warm] pre-fetching ${jobs.length} layer(s) across `
+        + `${built.length} product(s), ${WARM_CONCURRENCY} at a time`,
+        'dim');
+
+    let next = 0, ok = 0, failed = 0;
+    async function worker(id) {
+        for (;;) {
+            const i = next++;
+            if (i >= jobs.length) return;
+            const j = jobs[i];
+            const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/`
+                + `${encodeURIComponent(j.view)}`
+                + `?src=${encodeURIComponent(parseProductKey(j.key).source)}`
+                + `&prod=${encodeURIComponent(j.key)}`
+                + `&t=${j.stamp || _previewStamp}`;
+            try {
+                const r = await fetch(url,
+                    {headers: {'X-Requested-With': 'fetch'}});
+                if (r.ok) {
+                    ok++;
+                } else {
+                    failed++;
+                    // 409 means the fire is busy building something;
+                    // it is not an error, and the layer will be there
+                    // once that finishes.
+                    if (r.status !== 409) {
+                        log(`[warm] ${j.key} ${j.view}: HTTP `
+                            + `${r.status}`, 'dim');
+                    }
+                    _warmedProducts.delete(`${j.key}:${j.view}`);
+                }
+            } catch (err) {
+                failed++;
+                _warmedProducts.delete(`${j.key}:${j.view}`);
+            }
+        }
     }
+    await Promise.all(
+        Array.from({length: WARM_CONCURRENCY}, (_, i) => worker(i)));
+    const dt = Math.round(performance.now() - t0);
+    log(`[warm] done: ${ok} cached, ${failed} deferred, ${dt} ms`,
+        'dim');
+    _warmAllRunning = false;
+    // Anything deferred (busy) is worth one more pass shortly.
+    if (failed) setTimeout(() => warmAllProducts(views), 8000);
 }
 
 function productLabel(p) {
@@ -7369,9 +7461,29 @@ async function loadPaneImage(pane, viewKey) {
         // like a wrong one -- the console showed 'pre' while the pill
         // said "before brushing".
         try {
-            log(`[view] "${getViewLabel(viewKey)}" has no image for `
-                + `this fire; nothing is displayed. Run Map Fire to `
-                + `produce it.`, 'error');
+            // Say something TRUE for the layer that is missing.
+            //
+            // "Run Map Fire" only makes sense for a classification
+            // view. Source imagery -- pre, post, diff -- comes from
+            // the stack, and telling an operator to run the mapper
+            // because a post-fire preview was slow sends them to do
+            // something irrelevant. The usual cause is a preview still
+            // rendering, which resolves on its own.
+            const RESULT_VIEWS = ['result', 'result_prebrush',
+                                  'comparison'];
+            if (RESULT_VIEWS.includes(viewKey)) {
+                log(`[view] "${getViewLabel(viewKey)}" has no image `
+                    + `yet; run Map Fire to produce it.`, 'error');
+            } else {
+                log(`[view] "${getViewLabel(viewKey)}" is not ready `
+                    + `for ${productLabel(
+                        _products.find(
+                            (q) => q.key === paneProductKey(pane))
+                        || parseProductKey(paneProductKey(pane)))}. `
+                    + `The preview is still being rendered; it will `
+                    + `appear on its own. Nothing needs doing.`,
+                    'dim');
+            }
         } catch (_) {}
         return;
     }

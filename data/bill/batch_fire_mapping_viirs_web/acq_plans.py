@@ -1522,6 +1522,13 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         'horizon_days': horizon_days,
         'plans_fetched_at': plans.get('fetched_at'),
         'plans_age_s': cache_age_s(),
+        # The AOI as the overlap test actually saw it. When this looks
+        # empty, the first question is whether the AOI is where the
+        # operator thinks it is -- a wrong bbox and a genuinely
+        # uncovered AOI produce the same empty panel otherwise.
+        'aoi_wgs84': [aoi_lon0, aoi_lat0, aoi_lon1, aoi_lat1],
+        'fetched_h': (None if cache_age_s() is None
+                      else round(cache_age_s() / 3600.0, 2)),
         'insecure': bool(_status.get('insecure')),
         'census': census,
         'sources': plans.get('sources', {}),
