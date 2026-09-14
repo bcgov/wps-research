@@ -821,6 +821,87 @@ def restrict_hint_to_bcws(fire: FireInfo, hint_path: str,
         return hint_path
 
 
+def derived_hint_path(fire: FireInfo, mode: str) -> str:
+    """Where this product's hint for *mode* lives, if it has one.
+
+    Same naming the builders use, so "do we already have it?" can be
+    answered without deriving anything.
+    """
+    try:
+        pkey = (product_key_for_path(getattr(fire, 'crop_bin', '') or '')
+                or product_key(getattr(fire, 'post_source', 'l2') or 'l2',
+                               getattr(fire, 'l2_start_date', '') or ''))
+        return os.path.join(fire.cache_dir, '_redwins',
+                            f'{mode}_{pkey}_hint.bin')
+    except Exception:
+        return ''
+
+
+_hint_jobs: dict = {}
+_hint_jobs_lock = threading.Lock()
+
+
+def _defer_hint_build(fire: FireInfo, mode: str) -> None:
+    """Derive one hint in the background, once per (fire, product)."""
+    key = f'{fire.fire_numbe}:{derived_hint_path(fire, mode)}'
+
+    def _run():
+        try:
+            path, err = build_derived_hint_for_fire(fire, mode)
+            if path and getattr(fire, 'restrict_hint_bcws', False):
+                path = restrict_hint_to_bcws(fire, path)
+            if path:
+                fire.hint_bin = path
+                fire.perimeter_type = mode
+                fire.hint_mode = mode
+                try:
+                    from .mapping import _overlay_mask_on_post
+                    _overlay_mask_on_post(fire, path, 'hint',
+                                          (0.0, 0.8, 0.2))
+                    if 'hint' not in fire.available_views:
+                        fire.available_views.append('hint')
+                except Exception:
+                    pass
+                sys.stderr.write(
+                    f'[hint] {fire.fire_numbe}: {mode} ready '
+                    f'({os.path.basename(path)})\n')
+            else:
+                sys.stderr.write(
+                    f'[hint] {fire.fire_numbe}: {mode} failed: {err}\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[hint] {fire.fire_numbe}: {mode} failed: {exc}\n')
+        finally:
+            with _hint_jobs_lock:
+                _hint_jobs.pop(key, None)
+
+    with _hint_jobs_lock:
+        t = _hint_jobs.get(key)
+        if t is not None and t.is_alive():
+            return
+        th = threading.Thread(target=_run, daemon=True,
+                              name=f'hint-{fire.fire_numbe}')
+        _hint_jobs[key] = th
+        th.start()
+
+
+def _defer_pregenerate_hints(fire: FireInfo) -> None:
+    """Render every hint mode for this product, off the hot path."""
+    def _run():
+        try:
+            pregenerate_all_hints(fire)
+            sys.stderr.write(
+                f'[hint] {fire.fire_numbe}: all hint modes '
+                f'pre-rendered\n')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[hint] {fire.fire_numbe}: pregenerate failed: '
+                f'{exc}\n')
+
+    threading.Thread(target=_run, daemon=True,
+                     name=f'hints-{fire.fire_numbe}').start()
+
+
 def build_derived_hint_for_fire(fire: FireInfo, mode: str):
     """Build whichever derived hint *mode* names.
 
@@ -992,8 +1073,91 @@ def build_bcws_hint_for_fire(fire: FireInfo):
         return None, f'Failed to rasterise BCWS perimeters: {exc}'
 
 
-def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
-    """Generate the red-wins hint for *mode* against ``fire.crop_bin``.
+def warm_product_artifacts(fire: FireInfo, stack_path: str,
+                           log=None) -> dict:
+    """Render everything a product needs, without switching the fire.
+
+    A built stack is not enough to switch to instantly: the pane wants
+    preview PNGs, and the hint layer wants its mask. Producing those
+    only on first switch is what made a date change sit behind
+    "Rendering preview imagery" and "Computing the hint layer" for
+    imagery that had been on disk for hours.
+
+    Doing it here, at build time, means every later switch is a file
+    read. Nothing in this function touches ``fire.crop_bin`` or any
+    other shared field, so it is safe to run for several products at
+    once and while the operator works on a different one.
+    """
+    out = {'previews': 0, 'hints': 0, 'skipped': 0, 'errors': []}
+    if not stack_path or not os.path.isfile(stack_path):
+        return out
+    key = product_key_for_path(stack_path)
+    if not key:
+        return out
+
+    # --- previews ----------------------------------------------------
+    try:
+        from .preview import generate_all_previews
+        outdir = os.path.join(fire.cache_dir, f'previews_{key}')
+        have = os.path.isdir(outdir) and any(
+            f.endswith('.png') for f in os.listdir(outdir))
+        if have:
+            out['skipped'] += 1
+        else:
+            os.makedirs(outdir, exist_ok=True)
+            views = generate_all_previews(stack_path, fire.cache_dir,
+                                          fire.fire_numbe,
+                                          preview_dir=outdir)
+            out['previews'] = len(views or [])
+            try:
+                with open(os.path.join(outdir, '.product'), 'w',
+                          encoding='utf-8') as f:
+                    f.write(key)
+            except OSError:
+                pass
+    except Exception as exc:
+        out['errors'].append(f'previews: {exc}')
+        sys.stderr.write(
+            f'[warm] {fire.fire_numbe}: previews for {key}: {exc}\n')
+
+    # --- hint masks --------------------------------------------------
+    #
+    # Only the red-wins modes: the BCWS perimeter hint is derived from
+    # the incident polygon rather than the imagery, and the VIIRS hint
+    # does not vary by product.
+    for mode in ('redwins_post', 'redwins_diff'):
+        try:
+            path, err = build_redwins_hint_for_fire(
+                fire, mode, stack_path=stack_path)
+            if err:
+                out['errors'].append(f'{mode}: {err}')
+            elif path:
+                out['hints'] += 1
+        except Exception as exc:
+            out['errors'].append(f'{mode}: {exc}')
+            sys.stderr.write(
+                f'[warm] {fire.fire_numbe}: {mode} for {key}: '
+                f'{exc}\n')
+
+    msg = (f'[warm] {fire.fire_numbe}: {key} ready to switch '
+           f'({out["previews"]} preview(s), {out["hints"]} hint(s)'
+           + (f', {len(out["errors"])} error(s)' if out['errors'] else '')
+           + ')')
+    sys.stderr.write(msg + '\n')
+    if log:
+        log(msg)
+    return out
+
+
+def build_redwins_hint_for_fire(fire: FireInfo, mode: str,
+                                stack_path: str = ''):
+    """Generate the red-wins hint for *mode*.
+
+    Works against ``fire.crop_bin`` by default, or against
+    *stack_path* when given -- which lets a product's hint be computed
+    at BUILD time, without the fire being switched to it. Computing it
+    on first switch instead is what put "Computing the hint layer" in
+    front of an operator who had merely changed date.
 
     Returns ``(path, None)`` on success or ``(None, error_message)``.
 
@@ -1004,12 +1168,13 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     """
     if mode not in ('redwins_post', 'redwins_diff'):
         return None, f'Not a red-wins mode: {mode}'
-    if not fire.crop_bin or not os.path.isfile(fire.crop_bin):
+    _crop = stack_path or fire.crop_bin
+    if not _crop or not os.path.isfile(_crop):
         return None, 'Fire has no crop raster.'
 
-    band_names = parse_envi_band_names(fire.crop_bin)
+    band_names = parse_envi_band_names(_crop)
     if not band_names:
-        ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+        ds = gdal.Open(_crop, gdal.GA_ReadOnly)
         if ds:
             try:
                 n = ds.RasterCount
@@ -1053,7 +1218,7 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     # under one name and looked for under another, so it was recomputed
     # on every switch -- the "Computing the hint layer" that appeared
     # even for products prepared hours earlier.
-    _pkey = (product_key_for_path(getattr(fire, 'crop_bin', '') or '')
+    _pkey = (product_key_for_path(_crop)
              or product_key(src, getattr(fire, 'l2_start_date', '') or ''))
     out_path = os.path.join(out_dir, f'{mode}_{_pkey}_hint.bin')
 
@@ -1069,12 +1234,12 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     try:
         if (os.path.isfile(out_path)
                 and os.path.getmtime(out_path)
-                >= os.path.getmtime(fire.crop_bin)):
+                >= os.path.getmtime(_crop)):
             return out_path, None
     except OSError:
         pass
 
-    n_fire = generate_redwins_hint(fire.crop_bin, indices, out_path)
+    n_fire = generate_redwins_hint(_crop, indices, out_path)
     if n_fire < 0:
         return None, f'Failed to generate {mode} hint mask.'
     if n_fire == 0:
@@ -1883,9 +2048,20 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             fire.viirs_bin and os.path.isfile(fire.viirs_bin)):
         mode = 'redwins_post'
     if mode in DERIVED_HINT_MODES:
-        set_prep_stage(fire, 'hint',
-                       detail=f'deriving the {mode} hint', frac=0.2)
-        rw_path, rw_err = build_derived_hint_for_fire(fire, mode)
+        # Reuse this product's hint when it exists, and otherwise get
+        # OUT OF THE WAY.
+        #
+        # Deriving a hint takes seconds to minutes. Doing it inside the
+        # switch meant that asking for post-fire imagery -- the thing
+        # the operator actually clicked -- waited on a mask they had
+        # not asked to see. Stepping through dates felt like building,
+        # because it was.
+        _hp = derived_hint_path(fire, mode)
+        if _hp and os.path.isfile(_hp):
+            rw_path, rw_err = _hp, None
+        else:
+            rw_path, rw_err = None, 'deferred'
+            _defer_hint_build(fire, mode)
         if rw_path and getattr(fire, 'restrict_hint_bcws', False):
             # Clip the chosen hint to the BCWS perimeter, so
             # the preview, the agreement score and the
@@ -1895,7 +2071,7 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             fire.hint_bin = rw_path
             fire.perimeter_type = mode
             fire.hint_mode = mode
-        else:
+        elif rw_err != 'deferred':
             sys.stderr.write(
                 f'[prepare] red-wins rebuild after source switch '
                 f'failed: {rw_err}\n')
@@ -1937,10 +2113,11 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             f'[prepare] run overlay re-render skipped: {_rexc}\n')
 
     if not restored:
-        # Render EVERY hint mode for this source before stashing, so
-        # the stash carries all of them and later hint toggles never
-        # need a render.
-        pregenerate_all_hints(fire)
+        # Render every hint mode for this source, but IN THE
+        # BACKGROUND. The stash still ends up with all of them; the
+        # difference is that the operator's switch returns now rather
+        # than after the last mask is derived.
+        _defer_pregenerate_hints(fire)
         # Snapshot now that previews/ holds this source's images AND
         # all of its hint overlays, so a later switch back restores
         # everything.
@@ -2525,10 +2702,15 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
                 instance_key=getattr(state, 'shared_root', '') or '',
                 post_source=other, ref_raster=ref_raster,
                 l2_start_date='')
+            _p2 = (info or {}).get('path', '')
             sys.stderr.write(
                 f'[prepare] {fire_numbe}: second default product '
-                f'({other}) ready: '
-                f'{os.path.basename((info or {}).get("path", ""))}\n')
+                f'({other}) ready: {os.path.basename(_p2)}\n')
+            try:
+                warm_product_artifacts(fire, _p2)
+            except Exception as wexc:
+                sys.stderr.write(
+                    f'[prepare] {fire_numbe}: warm failed: {wexc}\n')
             from .durable import mirror_in_background
             mirror_in_background()
         except AoiStackError as exc:
@@ -3035,6 +3217,15 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                             sys.stderr.write(
                                 f'[startup] {fn}: built '
                                 f'{os.path.basename(path)}\n')
+                        # Previews and hints too, so the first switch
+                        # after a restart is a file read rather than a
+                        # render.
+                        try:
+                            warm_product_artifacts(fire, path)
+                        except Exception as wexc:
+                            sys.stderr.write(
+                                f'[startup] {fn}: warm failed: '
+                                f'{wexc}\n')
                     except AoiStackError as exc:
                         sys.stderr.write(
                             f'[startup] {fn}: {src}: {exc}\n')

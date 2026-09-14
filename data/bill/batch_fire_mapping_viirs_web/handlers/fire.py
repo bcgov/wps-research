@@ -516,8 +516,16 @@ class FireRoutes:
                                 or state.raster_path),
                     l2_start_date=(start if src == 'l2' else ''),
                     mrap_date=(post if src == 'mrap' else ''))
-                return key, (info or {}).get('path', ''), None, \
-                    time.time() - t0
+                path = (info or {}).get('path', '')
+                # Make it switch-ready here, not on first switch.
+                try:
+                    from ..prepare import warm_product_artifacts
+                    warm_product_artifacts(fire, path)
+                except Exception as wexc:
+                    sys.stderr.write(
+                        f'[build] {fire_numbe}: {key} built but not '
+                        f'warmed: {wexc}\n')
+                return key, path, None, time.time() - t0
             except Exception as exc:
                 return key, '', f'{type(exc).__name__}: {exc}', \
                     time.time() - t0
@@ -1739,7 +1747,6 @@ class FireRoutes:
                 try:
                     _stk = stack_path_for_product(fire, _req_key)
                     if _stk and os.path.isfile(_stk):
-                        from ..preview import generate_all_previews
                         _outdir = os.path.join(
                             fire.cache_dir, f'previews_{_req_key}')
                         os.makedirs(_outdir, exist_ok=True)
@@ -1749,21 +1756,15 @@ class FireRoutes:
                             # may have rendered it while we waited.
                             if not self._stash_view_current(
                                     fire, _outdir, view):
-                                # preview_dir explicitly: the helper
-                                # otherwise appends 'previews' to the
-                                # directory it is given.
-                                generate_all_previews(
-                                    _stk, fire.cache_dir, fire_numbe,
-                                    preview_dir=_outdir)
-                                try:
-                                    from ..prepare import (
-                                        stamp_previews_product)
-                                    with open(os.path.join(
-                                            _outdir, '.product'), 'w',
-                                            encoding='utf-8') as _pf:
-                                        _pf.write(_req_key)
-                                except OSError:
-                                    pass
+                                # One implementation of "make this
+                                # product usable", shared with the
+                                # build paths -- so a product reached
+                                # this way ends up with its hint too,
+                                # and cannot differ from one warmed at
+                                # build time.
+                                from ..prepare import (
+                                    warm_product_artifacts)
+                                warm_product_artifacts(fire, _stk)
                         _direct = _outdir
                         sys.stderr.write(
                             f'[preview] {fire_numbe}: rendered '
