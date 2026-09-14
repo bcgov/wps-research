@@ -1989,6 +1989,11 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
 
     restored = _restore_previews(fire, source,
                                  path=getattr(fire, 'crop_bin', ''))
+    sys.stderr.write(
+        '[persist] previews %s: %s\n'
+        % (fire.fire_numbe,
+           'restored from the stash' if restored
+           else 'no stash; rendering'))
     if restored:
         stamp_previews_product(fire)
     if restored:
@@ -2059,8 +2064,15 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         _hp = derived_hint_path(fire, mode)
         if _hp and os.path.isfile(_hp):
             rw_path, rw_err = _hp, None
+            sys.stderr.write(
+                '[persist] hint %s: reusing %s\n'
+                % (fire.fire_numbe, os.path.basename(_hp)))
         else:
             rw_path, rw_err = None, 'deferred'
+            sys.stderr.write(
+                '[persist] hint %s: %s not on disk; deriving in the '
+                'background (the switch does not wait)\n'
+                % (fire.fire_numbe, os.path.basename(_hp or mode)))
             _defer_hint_build(fire, mode)
         if rw_path and getattr(fire, 'restrict_hint_bcws', False):
             # Clip the chosen hint to the BCWS perimeter, so

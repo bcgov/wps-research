@@ -88,9 +88,14 @@ def list_mrap_dates(mrap_dir: str = MRAP_DIR) -> list:
                 continue
             path = os.path.join(mrap_dir, name)
             stem = os.path.splitext(path)[0]
-            # A mosaic without its header cannot be opened, so offering
-            # it would only produce a failed build later.
+            # A mosaic that cannot be opened -- no header, or still
+            # being written -- would only produce a failed build later.
             if not os.path.isfile(stem + '.hdr'):
+                continue
+            if not mosaic_is_readable(path):
+                sys.stderr.write(
+                    f'[mrap] {name} is not readable yet; leaving it '
+                    f'out of the date list\n')
                 continue
             try:
                 size = os.path.getsize(path)
@@ -115,6 +120,40 @@ def find_mrap_for_date(date: str, mrap_dir: str = MRAP_DIR):
     return None, None
 
 
+def mosaic_is_readable(path: str) -> bool:
+    """Can GDAL actually open this mosaic?
+
+    Existence and a header are not enough. A mosaic still being written
+    by the nightly pipeline, or truncated by a failed copy, satisfies
+    both and then fails at the first read -- and because EVERY product
+    is built against it, one bad file turns every fire on the list into
+    "not recognized as being in a supported file format". Checking here
+    is the difference between one clear message and a server that looks
+    entirely broken.
+    """
+    if not path or not os.path.isfile(path):
+        return False
+    if not os.path.isfile(_hdr_for(path)):
+        return False
+    try:
+        ds = gdal.Open(path, gdal.GA_ReadOnly)
+        if ds is None:
+            return False
+        try:
+            ok = (ds.RasterCount > 0 and ds.RasterXSize > 0
+                  and ds.RasterYSize > 0)
+            if ok:
+                # Touch one pixel: a truncated file opens happily and
+                # only fails when something reads it.
+                b = ds.GetRasterBand(1)
+                ok = b is not None and b.ReadAsArray(0, 0, 1, 1) is not None
+            return bool(ok)
+        finally:
+            ds = None
+    except Exception:
+        return False
+
+
 def find_latest_mrap(mrap_dir: str = MRAP_DIR):
     """Return ``(yyyymmdd, path)`` for the newest ``<date>_mrap.bin``.
 
@@ -135,10 +174,26 @@ def find_latest_mrap(mrap_dir: str = MRAP_DIR):
     if not candidates:
         raise AoiStackError(
             f'no <yyyymmdd>_mrap.bin files found in {mrap_dir}')
-    date_str, path = max(candidates, key=lambda pair: pair[0])
-    if not os.path.isfile(_hdr_for(path)):
-        raise AoiStackError(f'missing header for {path}')
-    return date_str, path
+    # Newest READABLE, not merely newest.
+    #
+    # The nightly mosaic appears on disk before it is complete, so the
+    # newest name is routinely the one that cannot be opened yet.
+    # Falling back one night keeps every fire working instead of
+    # failing them all until the copy finishes.
+    skipped = []
+    for date_str, path in sorted(candidates, key=lambda p: p[0],
+                                 reverse=True):
+        if mosaic_is_readable(path):
+            if skipped:
+                sys.stderr.write(
+                    f'[mrap] using {os.path.basename(path)}; skipped '
+                    f'{len(skipped)} unreadable newer mosaic(s): '
+                    f'{", ".join(skipped)}\n')
+            return date_str, path
+        skipped.append(os.path.basename(path))
+    raise AoiStackError(
+        f'no readable <yyyymmdd>_mrap.bin in {mrap_dir}; tried '
+        f'{len(skipped)}: {", ".join(skipped[:6])}')
 
 
 def _hdr_for(bin_path: str) -> str:

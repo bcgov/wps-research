@@ -2140,6 +2140,17 @@ class FireRoutes:
         else:
             _served_key = _live_key or _cur_key
         _hdrs['X-Product'] = _served_key or ''
+        # Where did these bytes come from? Answered on every request,
+        # because "why is this slow / stale / wrong" is otherwise a
+        # guess. Cheap: one header and one line.
+        _hdrs['X-Preview-Origin'] = (
+            'stash' if _stash_dir else 'live')
+        _origin = ('stash:' + os.path.basename(_stash_dir)
+                   if _stash_dir else 'live previews/')
+        sys.stderr.write(
+            '[persist] preview %s %s req=%s served=%s from=%s\n'
+            % (fire_numbe, view, _req_key or '-', _served_key or '-',
+               _origin))
         _hdrs['X-Product-Requested'] = _req_key or ''
         try:
             _hdrs['X-Preview-Png-Bytes'] = str(os.path.getsize(png))

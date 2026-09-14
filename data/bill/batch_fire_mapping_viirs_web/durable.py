@@ -177,6 +177,11 @@ def mirror_fire(fire, log=None) -> dict:
             out['failed'] += 1
             sys.stderr.write(f'[durable] {os.path.basename(src)}: '
                              f'{exc}\n')
+    sys.stderr.write(
+        '[persist] mirror %s: %d copied, %d skipped, %d failed '
+        '(%.0f MB)\n'
+        % (getattr(fire, 'fire_numbe', '?'), out['copied'],
+           out['skipped'], out['failed'], out['bytes'] / 1048576.0))
     if out['copied'] and log:
         log(f'[durable] mirrored {out["copied"]} file(s), '
             f'{out["bytes"] / 1048576:.0f} MB')

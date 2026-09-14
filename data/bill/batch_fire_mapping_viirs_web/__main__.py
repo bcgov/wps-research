@@ -695,8 +695,19 @@ def main():
         os.environ.setdefault('GDAL_SWATH_SIZE', '1073741824')
         os.environ.setdefault('VSI_CACHE', 'TRUE')
         os.environ.setdefault('VSI_CACHE_SIZE', '268435456')
-        os.environ.setdefault('GDAL_DISABLE_READDIR_ON_OPEN',
-                              'EMPTY_DIR')
+        #
+        # NOT GDAL_DISABLE_READDIR_ON_OPEN.
+        #
+        # It stops GDAL listing a directory when opening a file, which
+        # is a large win for /vsicurl and object stores where a listing
+        # is an HTTP round trip. It is fatal here: ENVI is a SIDECAR
+        # format, so the driver finds <stem>.hdr by listing the
+        # directory. With listing disabled the header is never found,
+        # the driver does not recognise the file, and every raster on
+        # the system reports "not recognized as being in a supported
+        # file format" -- source mosaics included. Setting it here was
+        # a mistake; it is recorded so nobody adds it back.
+        os.environ.pop('GDAL_DISABLE_READDIR_ON_OPEN', None)
         _log(f'  Parallelism: {describe_parallelism()}')
         _log(f'  GDAL       : NUM_THREADS='
              f'{os.environ["GDAL_NUM_THREADS"]}, '
