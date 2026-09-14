@@ -133,17 +133,43 @@ def mirror_fire(fire, log=None) -> dict:
     for src in sorted(glob.glob(pattern)):
         if not os.path.isfile(src) or not _is_stack_artifact(src):
             continue
+
+        # Never mirror a stack that is still being written.
+        #
+        # The destination was already written via a temporary name, so
+        # a half-written MIRROR was impossible -- but a half-written
+        # SOURCE was not. Copying a stack mid-build produced a
+        # plausible-looking file that GDAL then refused as "not
+        # recognized as being in a supported file format", and the next
+        # start-up restored that corruption over the ramdisk.
+        if src.endswith('.bin'):
+            try:
+                from .aoi_stack import stack_is_valid
+                if not stack_is_valid(src):
+                    out['skipped'] += 1
+                    continue
+            except Exception:
+                pass
+
         dst = os.path.join(dest, os.path.basename(src))
         try:
             ssize = os.path.getsize(src)
+            smtime = os.path.getmtime(src)
             if os.path.isfile(dst) and os.path.getsize(dst) == ssize:
                 out['skipped'] += 1
                 continue
-            # Copy to a temporary name first: a half-written mirror
-            # that looks complete is worse than no mirror, because the
-            # restore path would trust it.
             tmp = dst + '.part'
             shutil.copy2(src, tmp)
+            # Did the source change under us while we copied? Then what
+            # we have is a torn read; discard it rather than publish it.
+            if (os.path.getsize(src) != ssize
+                    or os.path.getmtime(src) != smtime):
+                os.remove(tmp)
+                out['skipped'] += 1
+                sys.stderr.write(
+                    f'[durable] {os.path.basename(src)} changed during '
+                    f'the copy; not mirrored this time\n')
+                continue
             os.replace(tmp, dst)
             out['copied'] += 1
             out['bytes'] += ssize
@@ -243,6 +269,30 @@ def restore_stack(ram_path: str, log=None) -> bool:
                 tmp = d + '.part'
                 shutil.copy2(s, tmp)
                 os.replace(tmp, d)
+        # Validate what we just put back. A durable copy made by an
+        # older build could itself be torn; restoring it would turn one
+        # bad file into two.
+        try:
+            from .aoi_stack import stack_is_valid
+            if not stack_is_valid(ram_path):
+                sys.stderr.write(
+                    f'[durable] restored {base} is not readable; '
+                    f'discarding it so the builder makes a fresh one\n')
+                for sfx in ('.bin', '.hdr'):
+                    bad = os.path.splitext(ram_path)[0] + sfx
+                    try:
+                        os.remove(bad)
+                    except OSError:
+                        pass
+                # The durable copy is bad too -- drop it, or every
+                # restart repeats this.
+                try:
+                    os.remove(src)
+                except OSError:
+                    pass
+                return False
+        except Exception:
+            pass
         msg = f'[durable] restored {base} from the durable store'
         sys.stderr.write(msg + '\n')
         if log:

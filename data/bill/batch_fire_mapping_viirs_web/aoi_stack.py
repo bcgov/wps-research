@@ -783,6 +783,22 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     if not force and stack_is_valid(out_bin):
         return _describe(False)
 
+    # A present-but-unreadable stack is rubbish, not a build input.
+    #
+    # Left in place, everything downstream reports "not recognized as
+    # being in a supported file format" and the fire lands in the error
+    # state -- when the right answer is simply to make it again. This
+    # is how a torn ramdisk file, or a bad restore, heals itself.
+    if os.path.isfile(out_bin) and not stack_is_valid(out_bin):
+        sys.stderr.write(
+            f'[aoi_stack] {os.path.basename(out_bin)} is unreadable; '
+            f'discarding it and rebuilding\n')
+        for _sfx in ('.bin', '.hdr'):
+            try:
+                os.remove(os.path.splitext(out_bin)[0] + _sfx)
+            except OSError:
+                pass
+
     # Missing from the ramdisk but kept on real disk? Copy it back.
     #
     # /ram is tmpfs: a reboot empties it and every stack has to be

@@ -861,7 +861,16 @@ def build_bcws_hint_for_fire(fire: FireInfo):
     # crop_bin at a different raster.
     # Product-keyed for the same reason as the red-wins masks: the
     # rasterisation follows the crop it is burned onto.
-    _pkey = product_key(src, getattr(fire, 'l2_start_date', '') or '')
+    # Key the hint by the PRODUCT the stack actually is.
+    #
+    # product_key(src, start_date) returns a bare 'l2' for a default
+    # build, while every other part of the app identifies that same
+    # product as 'l2_d<newest-date>'. The hint was therefore written
+    # under one name and looked for under another, so it was recomputed
+    # on every switch -- the "Computing the hint layer" that appeared
+    # even for products prepared hours earlier.
+    _pkey = (product_key_for_path(getattr(fire, 'crop_bin', '') or '')
+             or product_key(src, getattr(fire, 'l2_start_date', '') or ''))
     out_path = os.path.join(out_dir,
                             f'bcws_perimeter_{_pkey}_hint.bin')
 
@@ -1036,7 +1045,16 @@ def build_redwins_hint_for_fire(fire: FireInfo, mode: str):
     # to the clustering), while red-wins-diff showed the other
     # product's features. The date is part of what the mask is derived
     # from, so it has to be part of its name.
-    _pkey = product_key(src, getattr(fire, 'l2_start_date', '') or '')
+    # Key the hint by the PRODUCT the stack actually is.
+    #
+    # product_key(src, start_date) returns a bare 'l2' for a default
+    # build, while every other part of the app identifies that same
+    # product as 'l2_d<newest-date>'. The hint was therefore written
+    # under one name and looked for under another, so it was recomputed
+    # on every switch -- the "Computing the hint layer" that appeared
+    # even for products prepared hours earlier.
+    _pkey = (product_key_for_path(getattr(fire, 'crop_bin', '') or '')
+             or product_key(src, getattr(fire, 'l2_start_date', '') or ''))
     out_path = os.path.join(out_dir, f'{mode}_{_pkey}_hint.bin')
 
     # Reuse an existing mask when it is newer than the stack it was
