@@ -932,14 +932,16 @@ def _viirs_worker(fire: FireInfo) -> None:
             # measured the VIIRS raster, so with red-wins as the
             # default hint the panel always read "Hint Size: 0.0 ha"
             # even when a large mask was plainly visible.
-            fire.fire_size_ha = (
+            # The HINT area, into its own field. fire_size_ha is the
+            # BCWS perimeter area and must not be touched here.
+            fire.hint_size_ha = (
                 _compute_viirs_area_ha(_hint_bin) if _hint_bin else 0.0)
             if _hint_bin and fire.crop_w and fire.crop_h:
                 # A hint covering most of the AOI is legal but rarely
                 # useful as a seed -- worth saying so rather than
                 # letting a poor result look like a parameter problem.
                 try:
-                    px = fire.fire_size_ha * 10000.0 / (20.0 * 20.0)
+                    px = fire.hint_size_ha * 10000.0 / (20.0 * 20.0)
                     frac = px / float(fire.crop_w * fire.crop_h)
                     fire.console_log.append(
                         f'  Hint covers {frac:.1%} of the AOI '

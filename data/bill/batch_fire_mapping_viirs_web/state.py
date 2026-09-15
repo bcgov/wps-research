@@ -92,6 +92,15 @@ class FireInfo:
     fire_numbe: str
     fire_year: int
     fire_size_ha: float
+    # Area of the HINT mask, measured per preparation.
+    #
+    # Separate from fire_size_ha, which is the BCWS perimeter area for
+    # the incident. They were one field, so every preparation -- and,
+    # once hints became per-product, every background hint build --
+    # overwrote the published perimeter area with whatever the current
+    # mask happened to cover. That is why the list's figures moved
+    # about and dropped to zero while nobody was editing anything.
+    hint_size_ha: float = 0.0
 
     status: FireStatus = FireStatus.PENDING
     error_msg: str = ""
@@ -472,6 +481,11 @@ class AppState:
                         fire.fire_size_ha = 0.0
                     if not math.isfinite(fire.fire_size_ha):
                         fire.fire_size_ha = 0.0
+                    try:
+                        fire.hint_size_ha = float(
+                            fi.get('hint_size_ha', 0) or 0)
+                    except (TypeError, ValueError):
+                        fire.hint_size_ha = 0.0
                     try:
                         fire.agreement_pct = float(
                             fi.get('agreement_pct', -1) or -1)

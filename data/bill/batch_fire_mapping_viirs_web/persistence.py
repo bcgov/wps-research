@@ -373,6 +373,8 @@ def _save_fire_state():
                     entry['fire_year'] = int(fire.fire_year)
                 if fire.fire_size_ha:
                     entry['fire_size_ha'] = float(fire.fire_size_ha)
+                if getattr(fire, 'hint_size_ha', 0):
+                    entry['hint_size_ha'] = float(fire.hint_size_ha)
                 if fire.error_msg:
                     entry['error_msg'] = str(fire.error_msg)
                 # Persist serial gallery state so the results gallery
@@ -528,6 +530,11 @@ def _load_fire_state():
                     fire.fire_year = int(saved_year)
                 except (TypeError, ValueError):
                     pass
+            try:
+                fire.hint_size_ha = float(
+                    entry.get('hint_size_ha', 0) or 0)
+            except (TypeError, ValueError):
+                fire.hint_size_ha = 0.0
             saved_size = entry.get('fire_size_ha')
             if saved_size is not None:
                 try:

@@ -7113,9 +7113,23 @@ async function compositeOverlays(bitmap, cropW, cropH, sizeMul,
     });
 }
 
-function applyPaneFit(pane, img) {
+function applyPaneFit(pane, img, provisional) {
     const fs = _paneFitState[pane];
     const _d = paneImageDims(img);
+
+    // A provisional layout must not become the fit basis.
+    //
+    // The low-resolution proxy lays out at the FULL size when that is
+    // known, and at its own (much smaller) natural size when it is
+    // not. Recording the latter made fs.fitW a proxy dimension, so the
+    // full image that followed looked like a dimension change and got
+    // the scale compensation applied against a ratio of perhaps 4:1 --
+    // a visible jump in zoom, on a product whose extent had not
+    // changed at all. Paint it, but leave the basis alone.
+    if (provisional) {
+        updateTransformForPane(pane);
+        return;
+    }
     const dimsChanged = fs.fitted
         && (_d.w !== fs.fitW || _d.h !== fs.fitH);
     // In syncPanes the right pane mirrors left's transform — skip the
@@ -7337,7 +7351,9 @@ async function loadPaneImage(pane, viewKey) {
                 // operator's zoom and pan across a dimension change,
                 // so routing through it keeps one rule for the view
                 // instead of two that disagree.
-                applyPaneFit(pane, img);
+                // Provisional when the full dimensions are not known
+                // yet: the box below is then the proxy's own size.
+                applyPaneFit(pane, img, !(fullW > 0 && fullH > 0));
                 if (pane === 'left' && loadMsg) {
                     loadMsg.style.display = 'none';
                 }

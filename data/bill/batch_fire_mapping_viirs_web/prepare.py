@@ -2971,6 +2971,11 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             'fire': {
                 'fire_numbe': fire_numbe,
                 'fire_size_ha': fire.fire_size_ha,
+                # Recorded separately, because these are different
+                # measurements: fire_size_ha is the BCWS perimeter
+                # area for the incident, hint_size_ha is the area of
+                # the mask this run was seeded with.
+                'hint_size_ha': getattr(fire, 'hint_size_ha', 0.0),
                 'ml_area_ha': ml_area_ha,
                 'ml_area_m2': ml_area_m2,
                 'agreement_pct': fire.agreement_pct,
@@ -3111,6 +3116,11 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 row_data = {
                     'fire_numbe': fire_numbe,
                     'fire_size_ha': fire.fire_size_ha,
+                # Recorded separately, because these are different
+                # measurements: fire_size_ha is the BCWS perimeter
+                # area for the incident, hint_size_ha is the area of
+                # the mask this run was seeded with.
+                'hint_size_ha': getattr(fire, 'hint_size_ha', 0.0),
                     'agreement_pct': fire.agreement_pct,
                     'padding': fire.padding_used,
                     'timestamp': datetime.datetime.now().isoformat(
