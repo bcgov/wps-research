@@ -2403,7 +2403,8 @@ async function _loadNextCoverageInner() {
                     + `${c.used || 0} over AOI, `
                     + `${c.no_overlap || 0} missed the AOI, `
                     + `${c.beyond_horizon || 0} beyond the horizon, `
-                    + `${c.past || 0} already past`
+                    + `${c.past || 0} already past, `
+                    + `${c.bad_geometry || 0} unusable footprint(s)`
                     + (c.last_planned
                         ? `; plan ends ${c.last_planned}` : ''), 'dim');
             }
@@ -4725,9 +4726,68 @@ async function warmAllProducts(views) {
     const dt = Math.round(performance.now() - t0);
     log(`[warm] done: ${ok} cached, ${failed} deferred, ${dt} ms`,
         'dim');
+
+    // Then the classification results, then the hints.
+    //
+    // Source imagery first because that is what stepping through
+    // dates needs; results next because switching the secondary
+    // selector to "ML classification" should be immediate; hints
+    // last, since they are the least urgent and the most expensive.
+    try {
+        await warmRunImages();
+        await warmHintViews();
+    } catch (_) { /* warming is best effort */ }
+
     _warmAllRunning = false;
     // Anything deferred (busy) is worth one more pass shortly.
     if (failed) setTimeout(() => warmAllProducts(views), 8000);
+}
+
+// Pre-fetch every classification result's overlay image.
+//
+// These are per RUN, not per product, so they are a separate pass.
+// Without it, choosing "ML classification" in the secondary selector
+// waited on a render that could have happened minutes earlier.
+let _warmedRuns = new Set();
+async function warmRunImages() {
+    const runs = (_knownRuns || []).map((r) => r && r.run_id)
+        .filter((v) => v !== undefined && v !== null);
+    if (!runs.length) return;
+    let ok = 0;
+    for (const rid of runs) {
+        const tag = `run:${rid}`;
+        if (_warmedRuns.has(tag)) continue;
+        _warmedRuns.add(tag);
+        try {
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(FIRE)}/serial/`
+                + `${encodeURIComponent(rid)}/image`,
+                {headers: {'X-Requested-With': 'fetch'}});
+            if (r.ok) { ok++; } else { _warmedRuns.delete(tag); }
+        } catch (_) { _warmedRuns.delete(tag); }
+    }
+    if (ok) log(`[warm] cached ${ok} classification result(s)`, 'dim');
+}
+
+// Hints last: least urgent, most expensive to derive.
+let _warmedHints = new Set();
+async function warmHintViews() {
+    const built = _products.filter((q) => q && q.key && q.built !== false);
+    let ok = 0;
+    for (const p of built) {
+        if (_warmedHints.has(p.key)) continue;
+        _warmedHints.add(p.key);
+        const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/hint`
+            + `?src=${encodeURIComponent(parseProductKey(p.key).source)}`
+            + `&prod=${encodeURIComponent(p.key)}`
+            + `&t=${p.stamp || _previewStamp}`;
+        try {
+            const r = await fetch(url,
+                                  {headers: {'X-Requested-With': 'fetch'}});
+            if (r.ok) { ok++; } else { _warmedHints.delete(p.key); }
+        } catch (_) { _warmedHints.delete(p.key); }
+    }
+    if (ok) log(`[warm] cached ${ok} hint view(s)`, 'dim');
 }
 
 function productLabel(p) {

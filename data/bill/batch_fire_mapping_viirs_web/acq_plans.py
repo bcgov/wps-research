@@ -1399,7 +1399,13 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
         c = census.setdefault(sat or '?', {
             'total': 0, 'wrong_mode': 0, 'past': 0, 'beyond_horizon': 0,
             'candidate': 0, 'no_overlap': 0, 'used': 0,
+            # Records whose footprint GDAL cannot work with. Counted
+            # rather than silently dropped, so "fewer passes than
+            # expected" has a visible explanation.
+            'bad_geometry': 0,
             'last_planned': None})
+        if key not in c:
+            c[key] = 0
         c[key] += 1
         return c
 
@@ -1448,20 +1454,49 @@ def next_coverage(aoi_ring_native, srs_wkt, geotransform, width, height,
             _c(d.get('sat'), 'no_overlap')
             continue
 
-        ring = ogr.Geometry(ogr.wkbLinearRing)
-        for lon, lat in d['ring']:
-            ring.AddPoint_2D(float(lon), float(lat))
-        ring.CloseRings()
-        swath = ogr.Geometry(ogr.wkbPolygon)
-        swath.AddGeometry(ring)
+        # One malformed footprint must not take out the panel.
+        #
+        # A published datatake occasionally carries a ring with too few
+        # distinct vertices, or one that self-intersects. GDAL raises
+        # "Corrupt data" on the first operation that touches it, and
+        # with exceptions enabled that propagated out and became the
+        # whole "Expected next coverage" panel's error -- so one bad
+        # record hid every good pass. Skip the record instead.
+        pts = [(float(lon), float(lat)) for lon, lat in d['ring']]
+        uniq = {(round(x, 9), round(y, 9)) for x, y in pts}
+        if len(uniq) < 3:
+            _c(d.get('sat'), 'bad_geometry')
+            continue
         try:
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            for lon, lat in pts:
+                ring.AddPoint_2D(lon, lat)
+            ring.CloseRings()
+            swath = ogr.Geometry(ogr.wkbPolygon)
+            swath.AddGeometry(ring)
             swath.Transform(tx)
-        except Exception:
+            if not swath.IsValid():
+                # MakeValid is not in every GDAL build; without it an
+                # invalid ring is simply skipped.
+                fixed = None
+                try:
+                    fixed = swath.MakeValid()
+                except (AttributeError, RuntimeError):
+                    fixed = None
+                if fixed is None or fixed.IsEmpty():
+                    _c(d.get('sat'), 'bad_geometry')
+                    continue
+                swath = fixed
+            if not swath.Intersects(aoi_poly):
+                _c(d.get('sat'), 'no_overlap')
+                continue
+            piece = swath.Intersection(aoi_poly)
+        except Exception as exc:
+            _c(d.get('sat'), 'bad_geometry')
+            sys.stderr.write(
+                '[acq] skipping a datatake with unusable geometry '
+                '(%s): %s\n' % (d.get('sat', '?'), exc))
             continue
-        if not swath.Intersects(aoi_poly):
-            _c(d.get('sat'), 'no_overlap')
-            continue
-        piece = swath.Intersection(aoi_poly)
         if piece is None or piece.IsEmpty():
             continue
         # FULL footprint of this pass over the AOI. Earlier versions

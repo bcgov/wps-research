@@ -510,11 +510,31 @@ class SerialRoutes:
         # Re-render into the current AOI grid when the crop has moved
         # under it, so this run lines up with the post-fire preview
         # exactly rather than relying on extent bookkeeping.
+        # Which raster IS this run?
+        #
+        # The conventional name is <fire>_serial_<n>_classified.bin,
+        # but a run recovered from disk may be the canonical
+        # <fire>_classified.bin instead. The record holds the actual
+        # path, so ask it before falling back to the convention --
+        # otherwise the thumbnail silently never renders and the
+        # gallery shows an empty frame.
+        _recorded = ''
+        try:
+            for _r in (getattr(fire, 'serial_results', None) or []):
+                if str(_r.get('run_id')) == str(run_id):
+                    _recorded = _r.get('classified') or ''
+                    break
+        except Exception:
+            _recorded = ''
+
         try:
             from ..mapping import ensure_overlay_current
             _sclf = os.path.join(
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}_classified.bin')
+            if not os.path.isfile(_sclf) and _recorded \
+                    and os.path.isfile(_recorded):
+                _sclf = _recorded
             if os.path.isfile(_sclf):
                 ensure_overlay_current(
                     fire, f'serial_{run_id}', _sclf)
@@ -525,10 +545,27 @@ class SerialRoutes:
             serial_clf = os.path.join(
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}_classified.bin')
+            if not os.path.isfile(serial_clf) and _recorded \
+                    and os.path.isfile(_recorded):
+                serial_clf = _recorded
             if os.path.isfile(serial_clf):
+                sys.stderr.write(
+                    '[results] %s: rendering the missing thumbnail for '
+                    'run %s from %s\n'
+                    % (fire_numbe, run_id,
+                       os.path.basename(serial_clf)))
                 _overlay_mask_on_post(
                     fire, serial_clf, f'serial_{run_id}',
                     (0.9, 0.1, 0.0))
+                # Record it, so deletion accounts for it and a future
+                # request finds it already made.
+                try:
+                    from ..manifest import record, KIND_RESULT
+                    if os.path.isfile(overlay_path):
+                        record(fire, KIND_RESULT, overlay_path,
+                               f'serial_{run_id}')
+                except Exception:
+                    pass
         if os.path.isfile(overlay_path):
             # Ship this run's georeferencing with the image so split
             # sync uses the extent the run was actually mapped at.
