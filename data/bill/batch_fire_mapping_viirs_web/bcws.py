@@ -172,7 +172,7 @@ def _read_features(shp_path: str, target_crs_wkt: str,
     finally:
         _gdal.PopErrorHandler()
     if ds is None:
-        return [], []
+        return [], [], [], [], {}
     layer = ds.GetLayer(0)
     src_srs = layer.GetSpatialRef()
     dst_srs = osr.SpatialReference()
@@ -187,6 +187,14 @@ def _read_features(shp_path: str, target_crs_wkt: str,
     polygons: list = []
     point_fire_nums: list = []
     polygon_fire_nums: list = []
+    # True area per incident, from the FULL geometry.
+    #
+    # Only outer rings are kept for drawing, and holes are dropped --
+    # fine for an outline, wrong for an area: an unburned island inside
+    # a perimeter would be counted as burned. Multipart fires add their
+    # parts here too. Measured in the target CRS, which is BC Albers --
+    # equal-area, in metres.
+    areas_m2: dict = {}
     for feature in layer:
         geom = feature.GetGeometryRef()
         if geom is None:
@@ -216,7 +224,19 @@ def _read_features(shp_path: str, target_crs_wkt: str,
                 pt = geom.GetGeometryRef(i)
                 points.append(_xform_point(pt.GetX(), pt.GetY()))
                 point_fire_nums.append(fire_num)
-        elif gtype_flat == ogr.wkbPolygon:
+        if fire_num and gtype_flat in (ogr.wkbPolygon,
+                                      ogr.wkbMultiPolygon):
+            try:
+                g2 = geom.Clone()
+                if ct is not None:
+                    g2.Transform(ct)
+                a = float(g2.GetArea() or 0.0)
+                if a > 0:
+                    areas_m2[fire_num] = areas_m2.get(fire_num, 0.0) + a
+            except Exception:
+                pass
+
+        if gtype_flat == ogr.wkbPolygon:
             if geom.GetGeometryCount() > 0:
                 ring = geom.GetGeometryRef(0)  # outer ring only
                 if ct is not None:
@@ -241,7 +261,8 @@ def _read_features(shp_path: str, target_crs_wkt: str,
                         ])
                     polygon_fire_nums.append(fire_num)
     ds = None
-    return points, polygons, point_fire_nums, polygon_fire_nums
+    return (points, polygons, point_fire_nums,
+            polygon_fire_nums, areas_m2)
 
 
 def refresh_bcws_overlay(state) -> dict:
@@ -274,6 +295,7 @@ def refresh_bcws_overlay(state) -> dict:
     all_polygons: list = []
     all_point_fire_nums: list = []
     all_polygon_fire_nums: list = []
+    all_areas_m2: dict = {}
     for dataset in BCWS_DATASETS:
         _download_and_extract(dataset, dest_dir)
         shp_path = _find_shapefile(dest_dir, dataset['key'][:5])
@@ -286,14 +308,21 @@ def refresh_bcws_overlay(state) -> dict:
             sys.stderr.write(
                 f'[bcws] Detected fire number field in '
                 f'{os.path.basename(shp_path)}: {fn_field}\n')
-        pts, polys, pt_fnums, poly_fnums = _read_features(
+        pts, polys, pt_fnums, poly_fnums, areas = _read_features(
             shp_path, target_crs_wkt, fire_num_field=fn_field)
         all_points.extend(pts)
         all_polygons.extend(polys)
         all_point_fire_nums.extend(pt_fnums)
         all_polygon_fire_nums.extend(poly_fnums)
+        for _fn, _a in (areas or {}).items():
+            all_areas_m2[_fn] = all_areas_m2.get(_fn, 0.0) + _a
 
     overlay = {
+        # Hectares per incident, from the full geometry -- holes
+        # subtracted, multipart summed. The drawing rings above keep
+        # only outer boundaries, so they must not be used for area.
+        'fire_areas_ha': {k: round(v / 10000.0, 2)
+                          for k, v in all_areas_m2.items()},
         'points': all_points,
         'polygons': all_polygons,
         'point_fire_nums': all_point_fire_nums,
@@ -360,6 +389,18 @@ def bcws_area_ha(state, fire_numbe: str):
     want = (fire_numbe or '').strip().upper()
     if not want:
         return None
+    # Prefer the measured areas: they come from the full geometry.
+    #
+    # Summing the drawing rings counts holes as burned and can double
+    # a multipart fire, which is why the figures came out several times
+    # too large. The ring sum stays only as a fallback for an overlay
+    # written before this field existed.
+    areas = ov.get('fire_areas_ha') or {}
+    if want in areas:
+        try:
+            return float(areas[want])
+        except (TypeError, ValueError):
+            pass
     rings = ov.get('polygons') or []
     nums = ov.get('polygon_fire_nums') or []
     total = 0.0
@@ -417,6 +458,165 @@ def refresh_fire_sizes(state, log=None) -> dict:
         if log:
             log(msg)
     if stats['updated']:
+        try:
+            from .persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+    return stats
+
+
+def incident_features(state, fire_numbe: str) -> list:
+    """Every BCWS point and polygon vertex for one incident.
+
+    In the overlay's CRS, which is the active raster's -- the same CRS
+    a fire's bbox_native is in, so the two can be compared directly.
+    """
+    ov = load_bcws_overlay(state)
+    if not ov:
+        return []
+    want = (fire_numbe or '').strip().upper()
+    if not want:
+        return []
+    out = []
+    pts = ov.get('points') or []
+    pnums = ov.get('point_fire_nums') or []
+    for i, p in enumerate(pts):
+        if str((pnums[i] if i < len(pnums) else '') or '').upper() == want:
+            out.append((float(p[0]), float(p[1])))
+    rings = ov.get('polygons') or []
+    rnums = ov.get('polygon_fire_nums') or []
+    for i, ring in enumerate(rings):
+        if str((rnums[i] if i < len(rnums) else '') or '').upper() != want:
+            continue
+        for v in ring:
+            out.append((float(v[0]), float(v[1])))
+    return out
+
+
+def bbox_covers_incident(bbox, feats, slack_m: float = 2000.0) -> bool:
+    """Does this AOI contain any of the incident's own features?
+
+    The decisive test for "is this fire looking at its own ground".
+    A little slack, because an AOI is drawn around a fire rather than
+    snapped to it, and a perimeter can extend beyond the crop.
+    """
+    if not bbox or not feats:
+        return True                 # cannot judge; do not accuse
+    try:
+        xmin, ymin, xmax, ymax = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return True
+    for x, y in feats:
+        if (xmin - slack_m) <= x <= (xmax + slack_m) \
+                and (ymin - slack_m) <= y <= (ymax + slack_m):
+            return True
+    return False
+
+
+def audit_fire_locations(state, log=None, repair: bool = True) -> dict:
+    """Find fires whose AOI is not over their own incident, and fix.
+
+    A fire can end up on the wrong ground when its bounding box is
+    recovered from another fire's record -- which a defect in the
+    recovery code allowed. The BCWS layer settles it: an AOI that
+    contains none of its own incident's points or perimeter vertices
+    is not that incident's AOI.
+
+    Repair uses ONLY the fire's own historical sidecars, and only ones
+    whose grid does contain the incident. Where no such record exists
+    the fire is reported and left alone -- re-creating it is then the
+    honest fix, and silently guessing a box would be worse.
+    """
+    stats = {'checked': 0, 'ok': 0, 'mislocated': 0, 'repaired': 0,
+             'unjudgeable': 0}
+    try:
+        with state.lock:
+            fires = list(state.fires.values())
+    except Exception:
+        return stats
+
+    for fire in fires:
+        stats['checked'] += 1
+        feats = incident_features(state, fire.fire_numbe)
+        if not feats:
+            stats['unjudgeable'] += 1
+            continue
+        if bbox_covers_incident(getattr(fire, 'bbox_native', None),
+                                feats):
+            stats['ok'] += 1
+            continue
+
+        stats['mislocated'] += 1
+        msg = ('[audit] %s: its AOI contains NONE of this incident\'s '
+               'BCWS features -- the bounding box is not this fire\'s'
+               % fire.fire_numbe)
+        sys.stderr.write(msg + '\n')
+        if log:
+            log(msg)
+        if not repair:
+            continue
+
+        # Its own history: which recorded grid DOES contain it?
+        fixed = None
+        try:
+            from .durable import _grid_of, fire_prefix, store_dir
+            import glob as _g
+            pfx = fire_prefix(fire)
+            roots = ['/ram', store_dir()]
+            try:
+                from .aoi_stack import RAM_DIR
+                roots[0] = RAM_DIR
+            except Exception:
+                pass
+            seen = set()
+            for root in roots:
+                if not root or not os.path.isdir(root):
+                    continue
+                for cand in sorted(_g.glob(os.path.join(
+                        root, f'*_stack_{pfx}*.bin')), reverse=True):
+                    g = _grid_of(cand)
+                    if not g:
+                        continue
+                    w, h, gt = g
+                    bx = (gt[0], gt[3] + h * gt[5], gt[0] + w * gt[1],
+                          gt[3])
+                    key = tuple(round(v, 1) for v in bx)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if bbox_covers_incident(bx, feats):
+                        fixed = bx
+                        break
+                if fixed:
+                    break
+        except Exception as exc:
+            sys.stderr.write(f'[audit] {fire.fire_numbe}: repair scan '
+                             f'failed: {exc}\n')
+
+        if fixed:
+            fire.bbox_native = (min(fixed[0], fixed[2]),
+                                min(fixed[1], fixed[3]),
+                                max(fixed[0], fixed[2]),
+                                max(fixed[1], fixed[3]))
+            fire.bbox_wgs84 = None
+            stats['repaired'] += 1
+            msg = ('[audit] %s: restored its own AOI from its recorded '
+                   'history: %s' % (fire.fire_numbe,
+                                    tuple(round(v) for v
+                                          in fire.bbox_native)))
+            sys.stderr.write(msg + '\n')
+            if log:
+                log(msg)
+        else:
+            msg = ('[audit] %s: no historical record of this fire has '
+                   'the right location; it needs to be removed and '
+                   're-created' % fire.fire_numbe)
+            sys.stderr.write(msg + '\n')
+            if log:
+                log(msg)
+
+    if stats['repaired']:
         try:
             from .persistence import _save_fire_state
             _save_fire_state()

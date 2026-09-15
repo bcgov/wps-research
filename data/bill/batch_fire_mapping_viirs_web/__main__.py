@@ -1143,6 +1143,23 @@ def main():
     except Exception as _exc:
         _log(f'[startup] BCWS size refresh skipped: {_exc}')
 
+    # Is every fire looking at its own ground?
+    #
+    # A defect in the bbox recovery could hand one fire another's
+    # bounding box, after which everything built for it covers the
+    # wrong incident under the right name. The BCWS layer settles it:
+    # an AOI containing none of its own incident's features is not that
+    # incident's AOI. Repair uses only the fire's own recorded history.
+    try:
+        from .bcws import audit_fire_locations
+        _au = audit_fire_locations(app_state, log=_log)
+        _log(f'[audit] AOIs: {_au["ok"]} correct, '
+             f'{_au["mislocated"]} mislocated '
+             f'({_au["repaired"]} repaired), '
+             f'{_au["unjudgeable"]} not in the BCWS layer')
+    except Exception as _exc:
+        _log(f'[startup] AOI audit skipped: {_exc}')
+
     _load_stage_timings()
     _load_notifications()
     _load_cache_retention()
