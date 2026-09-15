@@ -1152,6 +1152,13 @@ def main():
     try:
         from . import manifest as _mf
         _mf.sync_all(app_state, log=_log)
+        # Classification results that exist on disk but are missing
+        # from the fire record, so the results gallery shows what the
+        # pane is already displaying.
+        _nres = _mf.recover_all_results(app_state, log=_log)
+        if _nres:
+            _log(f'[results] recovered {_nres} classification '
+                 f'result(s) into the gallery')
     except Exception as _exc:
         _log(f'[startup] manifest sync skipped: {_exc}')
 

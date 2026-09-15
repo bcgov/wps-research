@@ -4479,6 +4479,12 @@ async function applyMrapDateSelection() {
 function setApplyEnabled(on) {
     const btn = document.getElementById('btn-apply-date');
     if (!btn) return;
+    // Never enable while this fire still has builds queued.
+    //
+    // The queue lives on the server, so closing the dialog or going to
+    // another fire does not stop it -- and reopening the dialog must
+    // not offer an Apply that would pile a second batch on top.
+    if (on && _buildWatch) return;
     btn.disabled = !on;
     btn.style.opacity = on ? '' : '0.5';
     btn.style.pointerEvents = on ? '' : 'none';
@@ -5101,6 +5107,17 @@ function startBuildWatch() {
                 clearInterval(_buildWatch);
                 _buildWatch = null;
                 setApplyEnabled(true);
+                // Close the dialog once the batch it started has
+                // finished. Leaving it open makes the operator dismiss
+                // a window whose work is done; it stays open while
+                // anything is still building so progress is visible.
+                if (_buildSeen) {
+                    setTimeout(() => {
+                        try {
+                            if (!_buildWatch) closeDatePicker();
+                        } catch (_) {}
+                    }, 900);
+                }
                 if (prog && _buildSeen) {
                     prog.textContent = (j.errors || []).length
                         ? `Finished with ${j.errors.length} error(s).`
@@ -9388,6 +9405,22 @@ function toggleSplit(manual) {
         const sel = document.getElementById('view-select');
         if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
     }
+
+    // Draw the overlays for whichever panes are now showing.
+    //
+    // Opening split creates a second pane whose overlay canvas has
+    // never been painted, so the tile grid and the BCWS features were
+    // missing there until something else happened to trigger a
+    // redraw. Closing split leaves a stale right canvas behind.
+    try {
+        if (splitActive && rightProductKey()) {
+            loadOverlaysForProduct(rightProductKey())
+                .then(() => drawAllOverlayLayers())
+                .catch(() => drawAllOverlayLayers());
+        } else {
+            drawAllOverlayLayers();
+        }
+    } catch (_) {}
 }
 
 // -----------------------------------------------------------------------

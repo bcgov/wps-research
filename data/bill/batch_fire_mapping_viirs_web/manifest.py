@@ -24,6 +24,7 @@ genuinely this fire's and nothing else.
 import glob
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -327,3 +328,113 @@ def purge(fire, log=None) -> dict:
     if log:
         log(msg)
     return stats
+
+
+# ------------------------------------------------- classification runs
+
+def recover_serial_results(fire, state) -> int:
+    """Rebuild the results list from this fire's own classification files.
+
+    A classification can exist on disk while ``serial_results`` is
+    empty -- the list lives in the fire record, and a record rebuilt
+    from a partial save, or from a session where the run predated the
+    list, has nothing in it. The pane still shows the raster, so the
+    result is plainly there while the gallery says otherwise.
+
+    Scoped to the fire's OWN cache directory, which is per fire by
+    construction: no pattern is matched against a shared directory, so
+    this cannot pick up a predecessor's or a neighbour's run.
+    """
+    cache = getattr(fire, 'cache_dir', '') or ''
+    if not cache or not os.path.isdir(cache):
+        return 0
+    existing = list(getattr(fire, 'serial_results', None) or [])
+    have_paths = {r.get('classified') for r in existing if r.get('classified')}
+    name = getattr(fire, 'fire_numbe', '')
+    added = 0
+
+    # <fire>_serial_<n>_classified.bin, plus the canonical one.
+    cands = []
+    for f in sorted(os.listdir(cache)):
+        if not f.endswith('_classified.bin'):
+            continue
+        if not f.startswith(f'{name}_'):
+            continue                      # another record's file
+        full = os.path.join(cache, f)
+        m = re.match(rf'^{re.escape(name)}_serial_(\d+)_classified\.bin$',
+                     f)
+        run_id = int(m.group(1)) if m else 0
+        cands.append((run_id, full))
+    if not cands:
+        return 0
+
+    # Canonical (run_id 0) only counts when there is no serial run at
+    # all: it is the same mask under its accepted name.
+    if any(rid for rid, _ in cands):
+        cands = [(rid, p) for rid, p in cands if rid]
+
+    for run_id, path in sorted(cands):
+        if path in have_paths:
+            continue
+        area = -1.0
+        try:
+            from .mapping import _compute_ml_area
+            area = float(_compute_ml_area(fire, path))
+        except Exception:
+            try:
+                from .prepare import _compute_ml_area as _cm
+                area = float(_cm(fire, path))
+            except Exception:
+                area = -1.0
+        entry = {
+            'run_id': run_id or 1,
+            'setting_idx': 0,
+            'run_idx': 0,
+            'setting_label': 'recovered',
+            'agreement_pct': float(getattr(fire, 'agreement_pct', -1)
+                                   or -1),
+            'ml_area_ha': area,
+            'error': '',
+            'params': dict(getattr(fire, 'kgc_params', None) or {}),
+            'is_previous': False,
+            'classified': path,
+            # Accepted if this is the mask the fire is delivering.
+            'accepted': bool(
+                getattr(fire, 'status', None) is not None
+                and str(getattr(fire.status, 'value', '')) == 'accepted'),
+        }
+        existing.append(entry)
+        added += 1
+        sys.stderr.write(
+            '[results] %s: recovered run %d from %s (%.2f ha)\n'
+            % (name, entry['run_id'], os.path.basename(path), area))
+
+    if added:
+        fire.serial_results = existing
+        record_many(fire, [(KIND_RESULT, r['classified'])
+                           for r in existing if r.get('classified')])
+        try:
+            from .persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+    return added
+
+
+def recover_all_results(state, log=None) -> int:
+    total = 0
+    try:
+        with state.lock:
+            fires = list(state.fires.values())
+    except Exception:
+        return 0
+    for fire in fires:
+        try:
+            total += recover_serial_results(fire, state)
+        except Exception as exc:
+            sys.stderr.write(
+                f'[results] {getattr(fire, "fire_numbe", "?")}: '
+                f'recovery failed: {exc}\n')
+    if total and log:
+        log(f'[results] recovered {total} classification result(s)')
+    return total

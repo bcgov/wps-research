@@ -3681,6 +3681,18 @@ class FireRoutes:
         # Snapshot mutable lists under lock to avoid iteration-during-mutation
         with state.lock:
             console_lines = list(f.console_log)
+            # A result on disk that the record has lost still belongs
+            # in the gallery: the pane is already showing it. Scoped to
+            # this fire's own cache directory, so nothing else can be
+            # picked up.
+            if not f.serial_results:
+                try:
+                    from ..manifest import recover_serial_results
+                    recover_serial_results(f, state)
+                except Exception as _rexc:
+                    sys.stderr.write(
+                        f'[results] {f.fire_numbe}: recovery skipped: '
+                        f'{_rexc}\n')
             raw_serial = list(f.serial_results)
             settings_used = [
                 {'label': str(s.get('label', '')),

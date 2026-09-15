@@ -204,7 +204,35 @@ class FireListRoutes:
 
     # -- API handlers --
 
+    def _top_up_missing_sizes(self):
+        """Fill in a zero size when the layer has one now.
+
+        A fire created before its perimeter was published starts at 0,
+        and only a restart would have corrected it. This costs a dict
+        lookup per zero-sized fire against the already-loaded overlay,
+        and never overwrites a non-zero value.
+        """
+        try:
+            from ..bcws import bcws_area_ha
+            changed = 0
+            for fire in list(state.fires.values()):
+                if float(getattr(fire, 'fire_size_ha', 0) or 0) > 0:
+                    continue
+                ha = bcws_area_ha(state, fire.fire_numbe)
+                if ha and ha > 0:
+                    fire.fire_size_ha = round(float(ha), 2)
+                    changed += 1
+                    sys.stderr.write(
+                        '[bcws] %s: perimeter area %.2f ha (was 0)\n'
+                        % (fire.fire_numbe, fire.fire_size_ha))
+            if changed:
+                from ..persistence import _save_fire_state
+                _save_fire_state()
+        except Exception as exc:
+            sys.stderr.write(f'[bcws] size top-up failed: {exc}\n')
+
     def handle_api_fires(self):
+        self._top_up_missing_sizes()
         _now = time.time()
         with state.lock:
             fires = [
@@ -1001,6 +1029,26 @@ class FireListRoutes:
             )
             fire.bbox_native = tuple(float(v) for v in bbox_clipped)
             fire.created_at = time.time()
+            # Its BCWS perimeter area, now.
+            #
+            # The size refresh runs at start-up, so a fire created
+            # afterwards showed 0.00 ha until the next restart -- which
+            # is what a freshly created fire always looks like.
+            try:
+                from ..bcws import bcws_area_ha
+                _ha = bcws_area_ha(state, name)
+                if _ha is not None:
+                    fire.fire_size_ha = round(float(_ha), 2)
+                    sys.stderr.write(
+                        '[bcws] %s: perimeter area %.2f ha at creation\n'
+                        % (name, fire.fire_size_ha))
+                else:
+                    sys.stderr.write(
+                        '[bcws] %s: not in the current perimeter layer; '
+                        'size stays 0 until it appears\n' % name)
+            except Exception as _bexc:
+                sys.stderr.write(
+                    f'[bcws] {name}: size lookup failed: {_bexc}\n')
             fire.bbox_wgs84 = tuple(float(v) for v in bbox_wgs84)
             fire.viirs_start_date = start_date.isoformat()
             fire.viirs_end_date = end_date.isoformat()
