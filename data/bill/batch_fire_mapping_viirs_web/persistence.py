@@ -147,7 +147,13 @@ def _carry_forward_identity(state_path: str, data: dict) -> None:
             # from the file for good. That is why a fire that showed
             # 8,769 ha yesterday shows 0.0 today. Same for the ML area,
             # which is written only when a result exists.
-            'fire_size_ha', 'ml_area_ha')
+            # NOT fire_size_ha: that comes from the BCWS perimeter
+            # layer, refreshed at every start-up, and carrying an old
+            # value forward would resurrect a figure the published
+            # layer no longer supports. ml_area_ha stays -- it is our
+            # own measurement of an accepted result, not an external
+            # feed.
+            'ml_area_ha')
     try:
         import yaml            # imported locally, as elsewhere here
         if not os.path.isfile(state_path):

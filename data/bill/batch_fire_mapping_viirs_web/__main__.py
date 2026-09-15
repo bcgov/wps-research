@@ -1128,6 +1128,21 @@ def main():
     _load_fire_state()
     _save_active_year()
 
+    # Fire sizes from the CURRENT BCWS perimeter layer.
+    #
+    # Here, because it needs BOTH the overlay (downloaded above) and
+    # the fires (just loaded). Computing it every start means the
+    # column tracks the published layer rather than whatever was
+    # recorded when each fire was created.
+    try:
+        from .bcws import refresh_fire_sizes
+        _sz = refresh_fire_sizes(app_state, log=_log)
+        _log(f'[bcws] sizes: {_sz["updated"]} updated, '
+             f'{_sz["unchanged"]} unchanged, '
+             f'{_sz["absent"]} not in the layer')
+    except Exception as _exc:
+        _log(f'[startup] BCWS size refresh skipped: {_exc}')
+
     _load_stage_timings()
     _load_notifications()
     _load_cache_retention()

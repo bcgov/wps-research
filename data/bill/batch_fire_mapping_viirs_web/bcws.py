@@ -321,3 +321,105 @@ def load_bcws_overlay(state) -> dict | None:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+# ---------------------------------------------------------------------
+# Perimeter area per incident
+# ---------------------------------------------------------------------
+
+def _ring_area_m2(ring) -> float:
+    """Planar area of a closed ring, by the shoelace formula.
+
+    The overlay stores rings in the AOI's CRS, which is BC Albers --
+    an equal-area projection in metres, so this is the honest area and
+    needs no reprojection.
+    """
+    n = len(ring or [])
+    if n < 3:
+        return 0.0
+    total = 0.0
+    for i in range(n):
+        x1, y1 = ring[i][0], ring[i][1]
+        x2, y2 = ring[(i + 1) % n][0], ring[(i + 1) % n][1]
+        total += x1 * y2 - x2 * y1
+    return abs(total) / 2.0
+
+
+def bcws_area_ha(state, fire_numbe: str):
+    """Perimeter area in hectares for one incident, or None.
+
+    Read from the CURRENT BCWS overlay, which is refreshed at start-up,
+    so the figure tracks the published layer instead of whatever was
+    recorded when the fire was created. None means the incident is not
+    in the layer at all -- which is different from zero, and the caller
+    should be able to tell those apart.
+    """
+    ov = load_bcws_overlay(state)
+    if not ov:
+        return None
+    want = (fire_numbe or '').strip().upper()
+    if not want:
+        return None
+    rings = ov.get('polygons') or []
+    nums = ov.get('polygon_fire_nums') or []
+    total = 0.0
+    found = False
+    for i, ring in enumerate(rings):
+        num = (nums[i] if i < len(nums) else None) or ''
+        if str(num).strip().upper() != want:
+            continue
+        found = True
+        total += _ring_area_m2(ring)
+    if not found:
+        return None
+    return total / 10000.0
+
+
+def refresh_fire_sizes(state, log=None) -> dict:
+    """Set every fire's size from the current BCWS layer.
+
+    Called after the overlay refresh at start-up. A fire absent from
+    the layer keeps whatever it had -- an incident can drop out of the
+    public dataset once it is declared out, and blanking a size that
+    was correct yesterday is worse than showing a slightly old one.
+    """
+    stats = {'updated': 0, 'unchanged': 0, 'absent': 0}
+    try:
+        with state.lock:
+            fires = list(state.fires.values())
+    except Exception:
+        return stats
+    for fire in fires:
+        try:
+            ha = bcws_area_ha(state, fire.fire_numbe)
+        except Exception as exc:
+            sys.stderr.write(
+                '[bcws] %s: area lookup failed: %s\n'
+                % (fire.fire_numbe, exc))
+            continue
+        if ha is None:
+            stats['absent'] += 1
+            sys.stderr.write(
+                '[bcws] %s: not in the current perimeter layer; '
+                'keeping %.2f ha\n'
+                % (fire.fire_numbe, float(getattr(fire, 'fire_size_ha',
+                                                  0) or 0)))
+            continue
+        old = float(getattr(fire, 'fire_size_ha', 0) or 0)
+        if abs(old - ha) < 0.005:
+            stats['unchanged'] += 1
+            continue
+        fire.fire_size_ha = round(ha, 2)
+        stats['updated'] += 1
+        msg = ('[bcws] %s: perimeter area %.2f ha (was %.2f)'
+               % (fire.fire_numbe, ha, old))
+        sys.stderr.write(msg + '\n')
+        if log:
+            log(msg)
+    if stats['updated']:
+        try:
+            from .persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+    return stats

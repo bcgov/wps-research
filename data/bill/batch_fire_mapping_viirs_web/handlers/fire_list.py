@@ -844,6 +844,19 @@ class FireListRoutes:
         from ..bcws import refresh_bcws_overlay
         try:
             overlay = refresh_bcws_overlay(state)
+            # The sizes come from this layer, so refresh them in the
+            # same breath -- otherwise the button updates the overlay
+            # while the list keeps yesterday's areas.
+            try:
+                from ..bcws import refresh_fire_sizes
+                _sz = refresh_fire_sizes(state)
+                sys.stderr.write(
+                    '[bcws] sizes after manual refresh: %d updated, '
+                    '%d unchanged, %d not in the layer\n'
+                    % (_sz['updated'], _sz['unchanged'], _sz['absent']))
+            except Exception as _exc:
+                sys.stderr.write(
+                    f'[bcws] size refresh failed: {_exc}\n')
         except Exception as exc:
             self._send_json({'error': f'BCWS refresh failed: {exc}'}, 500)
             return
