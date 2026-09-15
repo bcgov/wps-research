@@ -1699,6 +1699,43 @@ def stack_path_for_product(fire, key: str) -> str:
     for cand in sorted(_g.glob(pat), reverse=True):
         if product_key_for_path(cand) == key:
             return cand
+
+    # Not on the ramdisk -- try the durable store, and bring it back.
+    #
+    # Rebuilding is not an alternative here. A stack's filename carries
+    # the POST date it was built against ('20260913_stack_..._l2_d
+    # 20260901.bin'), and a rebuild today would compute a different
+    # prefix -- so the restore-by-name path inside ensure_aoi_stack
+    # cannot find it, and for a dated MRAP whose mosaic has rolled off
+    # there is nothing to rebuild from at all. Copying the stored file
+    # back under its own name is both faster and the only thing that
+    # works.
+    try:
+        from .durable import durable_products
+        import shutil as _sh
+        for cand in durable_products(fire):
+            if product_key_for_path(cand) != key:
+                continue
+            dst = os.path.join(ram, os.path.basename(cand))
+            stem_s = os.path.splitext(cand)[0]
+            stem_d = os.path.splitext(dst)[0]
+            for sfx in ('.bin', '.hdr', '_dates.json',
+                        '_overlays.json'):
+                s_p, d_p = stem_s + sfx, stem_d + sfx
+                if os.path.isfile(s_p) and not os.path.isfile(d_p):
+                    tmp = d_p + '.part'
+                    _sh.copy2(s_p, tmp)
+                    os.replace(tmp, d_p)
+            if os.path.isfile(dst):
+                sys.stderr.write(
+                    '[persist] %s: %s restored from the durable store '
+                    'on selection (%s)\n'
+                    % (getattr(fire, 'fire_numbe', '?'), key,
+                       os.path.basename(dst)))
+                return dst
+    except Exception as exc:
+        sys.stderr.write(
+            f'[persist] durable lookup for {key} failed: {exc}\n')
     return ''
 
 

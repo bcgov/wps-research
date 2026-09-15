@@ -3200,6 +3200,43 @@ class FireRoutes:
                                 # across reloads and restarts.
                                 'stamp': self._stack_stamp(cand),
                                 'built': True})
+                # Also offer products that survive only in the
+                # DURABLE STORE.
+                #
+                # The ramdisk is cleared by a reboot, but the store
+                # keeps every stack that was ever mirrored. Listing
+                # only /ram meant a restart quietly dropped every dated
+                # product an operator had built -- the files were still
+                # there, nothing enumerated them. Selecting one
+                # restores it from the store on demand, which
+                # ensure_aoi_stack already does.
+                #
+                # Grid-checked inside durable_products(): the identity
+                # hash does not cover the bounding box, so a same-named
+                # predecessor's stacks must never be adopted.
+                try:
+                    from ..durable import durable_products
+                    for cand in durable_products(fire):
+                        key = product_key_for_path(cand)
+                        if not key or key in seen:
+                            continue
+                        src, start, post = product_parts(key)
+                        if src == 'l2' and not os.path.isfile(
+                                date_polygons_path(cand)):
+                            continue
+                        seen.add(key)
+                        out.append({'key': key, 'source': src,
+                                    'date': start or post,
+                                    'label': product_label(key),
+                                    'stamp': self._stack_stamp(cand),
+                                    'durable': True,
+                                    'built': True})
+                        sys.stderr.write(
+                            '[persist] %s: offering %s from the '
+                            'durable store\n' % (fire_numbe, key))
+                except Exception as dexc:
+                    sys.stderr.write(
+                        f'[products] durable scan failed: {dexc}\n')
         except Exception as exc:
             sys.stderr.write(f'[products] scan failed: {exc}\n')
 

@@ -140,7 +140,14 @@ def _carry_forward_identity(state_path: str, data: dict) -> None:
     actually set always wins.
     """
     keep = ('bbox_native', 'bbox_wgs84', 'viirs_start_date',
-            'viirs_end_date', 'fire_year', 'created_at', 'padding')
+            'viirs_end_date', 'fire_year', 'created_at', 'padding',
+            # Written only when non-zero, so a save taken while the
+            # BCWS lookup had not answered -- or while the incident was
+            # absent from a refreshed BCWS layer -- dropped the size
+            # from the file for good. That is why a fire that showed
+            # 8,769 ha yesterday shows 0.0 today. Same for the ML area,
+            # which is written only when a result exists.
+            'fire_size_ha', 'ml_area_ha')
     try:
         import yaml            # imported locally, as elsewhere here
         if not os.path.isfile(state_path):

@@ -248,6 +248,109 @@ def mirror_in_background(delay_s: float = 2.0) -> bool:
 
 # ------------------------------------------------------------ restoring
 
+def _grid_of(path: str):
+    """(width, height, gt) for a stack, read from its sidecar.
+
+    The identity hash covers the fire's NAME and the server instance,
+    not its bounding box -- so a fire deleted and recreated under the
+    same name shares the hash with its predecessor's stacks. The grid
+    does not lie: a stack whose size and geotransform match the AOI now
+    on the books IS that AOI's, and one that does not belongs to a
+    different incident that merely shared a name.
+    """
+    stem = os.path.splitext(path)[0]
+    for side in (stem + '_overlays.json', stem + '_dates.json'):
+        try:
+            with open(side, encoding='utf-8') as f:
+                d = json.load(f)
+            gt = d.get('gt')
+            w = int(d.get('width') or 0)
+            h = int(d.get('height') or 0)
+            if w > 0 and h > 0 and isinstance(gt, (list, tuple)) \
+                    and len(gt) == 6:
+                return w, h, [float(v) for v in gt]
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
+
+
+def grids_match(a, b, tol: float = 0.51) -> bool:
+    """Same raster grid? Sizes exactly, origin and pixel within tol."""
+    if not a or not b:
+        return False
+    if a[0] != b[0] or a[1] != b[1]:
+        return False
+    ga, gb = a[2], b[2]
+    if abs(ga[1] - gb[1]) > 1e-6 or abs(ga[5] - gb[5]) > 1e-6:
+        return False
+    return abs(ga[0] - gb[0]) <= tol and abs(ga[3] - gb[3]) <= tol
+
+
+def reference_grid(fire):
+    """The grid this fire's AOI is on now, or None if unknowable."""
+    cb = getattr(fire, 'crop_bin', '') or ''
+    if cb:
+        g = _grid_of(cb)
+        if g:
+            return g
+    cache = getattr(fire, 'cache_dir', '') or ''
+    if cache:
+        for gj in sorted(glob.glob(os.path.join(
+                cache, 'previews*', 'geo.json')), reverse=True):
+            try:
+                with open(gj, encoding='utf-8') as f:
+                    d = json.load(f)
+                gt = d.get('gt')
+                w = int(d.get('width') or 0)
+                h = int(d.get('height') or 0)
+                if w > 0 and h > 0 and gt and len(gt) == 6:
+                    return w, h, [float(v) for v in gt]
+            except (OSError, ValueError, TypeError):
+                continue
+    return None
+
+
+def durable_products(fire) -> list:
+    """Stacks in the durable store that belong to THIS AOI.
+
+    Grid-checked, so a same-named predecessor's layers are never
+    adopted. Returns absolute paths inside the store.
+
+    When the grid cannot be established at all -- a fire with no
+    readable stack and no preview geo.json -- nothing is returned
+    rather than everything: recovering the wrong incident's imagery is
+    far worse than recovering none.
+    """
+    dest = store_dir()
+    pref = fire_prefix(fire)
+    if not dest or not pref or not os.path.isdir(dest):
+        return []
+    ref = reference_grid(fire)
+    if not ref:
+        sys.stderr.write(
+            '[persist] %s: no reference grid; not adopting durable '
+            'stacks (cannot prove they are this AOI)\n'
+            % getattr(fire, 'fire_numbe', '?'))
+        return []
+    out, rejected = [], 0
+    for cand in sorted(glob.glob(os.path.join(
+            dest, '*_stack_%s*.bin' % pref)), reverse=True):
+        if '.kgc' in os.path.basename(cand):
+            continue
+        if not os.path.isfile(os.path.splitext(cand)[0] + '.hdr'):
+            continue
+        g = _grid_of(cand)
+        if not g or not grids_match(ref, g):
+            rejected += 1
+            continue
+        out.append(cand)
+    sys.stderr.write(
+        '[persist] %s: %d durable product(s) match this AOI, '
+        '%d rejected (different grid under the same name)\n'
+        % (getattr(fire, 'fire_numbe', '?'), len(out), rejected))
+    return out
+
+
 def restore_stack(ram_path: str, log=None) -> bool:
     """Bring one stack back from the durable store to the ramdisk.
 
@@ -320,9 +423,28 @@ def restore_fire(fire, log=None) -> int:
     if not dest or not pfx or not os.path.isdir(dest):
         return 0
     ram = ram_dir_for(fire)
+
+    # Only stacks whose GRID matches this AOI.
+    #
+    # The identity hash covers the fire's name and the server instance,
+    # not its bounding box, so a fire deleted and recreated under the
+    # same name shares the hash with its predecessor's stacks.
+    # Restoring those would silently hand this AOI another incident's
+    # imagery. The grid settles it.
+    keep = {os.path.splitext(os.path.basename(p))[0]
+            for p in durable_products(fire)}
+
     n = 0
     for src in sorted(glob.glob(os.path.join(dest, f'*_stack_{pfx}*'))):
-        d = os.path.join(ram, os.path.basename(src))
+        base = os.path.basename(src)
+        stem = base
+        for sfx in ('.bin', '.hdr', '_dates.json', '_overlays.json'):
+            if stem.endswith(sfx):
+                stem = stem[:-len(sfx)]
+                break
+        if keep and stem not in keep:
+            continue
+        d = os.path.join(ram, base)
         if os.path.isfile(d):
             continue
         try:
