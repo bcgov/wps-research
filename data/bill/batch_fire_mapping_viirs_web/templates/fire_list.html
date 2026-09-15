@@ -1651,17 +1651,66 @@ function markFireOpened(fireEnc) {
                     && String(f.status || '').toLowerCase()
                        .match(/ready|mapped|accepted/))
             .slice(0, 40);
-        for (const f of ready) {
+        if (!ready.length) return;
+
+        // Newest product first, ACROSS fires.
+        //
+        // Stepping through dates should be instant wherever the
+        // operator happens to be, so the browser cache is filled in
+        // the order things are most likely to be looked at: every
+        // fire's newest product, then every fire's next newest, and
+        // so on. Doing one fire at a time would leave the last fire
+        // in the list cold for as long as the first takes.
+        const lists = await Promise.all(ready.map(async (f) => {
             try {
-                await fetch(
+                const r = await fetch(
                     `/api/fire/${encodeURIComponent(f.fire_numbe)}`
-                    + `/preview/post?g=${f.created_at || 0}`,
+                    + `/products`,
                     {headers: {'X-Requested-With': 'fetch'}});
-            } catch (_) { /* best effort */ }
+                if (!r.ok) return null;
+                const j = await r.json();
+                return {fire: f.fire_numbe,
+                        products: (j.products || [])
+                            .filter((p) => p && p.built !== false)};
+            } catch (_) { return null; }
+        }));
+
+        // Interleave: round N takes the Nth-newest product of each
+        // fire. The product lists arrive newest-first already.
+        const jobs = [];
+        const depth = Math.max(0, ...lists.map(
+            (l) => (l && l.products.length) || 0));
+        for (let i = 0; i < depth; i++) {
+            for (const l of lists) {
+                if (!l || !l.products[i]) continue;
+                const p = l.products[i];
+                jobs.push(
+                    `/api/fire/${encodeURIComponent(l.fire)}/preview/post`
+                    + `?src=${encodeURIComponent(
+                        p.key.startsWith('mrap') ? 'mrap' : 'l2')}`
+                    + `&prod=${encodeURIComponent(p.key)}`
+                    + `&t=${p.stamp || 0}`);
+            }
         }
-        if (ready.length) {
-            console.log(`[prefetch] warmed ${ready.length} fire(s)`);
-        }
+        if (!jobs.length) return;
+
+        // Several at a time: one request at a time would take as long
+        // as the whole list, which defeats the point of warming.
+        const WIDTH = 4;
+        let next = 0, done = 0;
+        await Promise.all(Array.from({length: WIDTH}, async () => {
+            for (;;) {
+                const i = next++;
+                if (i >= jobs.length) return;
+                try {
+                    await fetch(jobs[i],
+                                {headers: {'X-Requested-With': 'fetch'}});
+                    done++;
+                } catch (_) { /* best effort */ }
+            }
+        }));
+        console.log(`[prefetch] warmed ${done}/${jobs.length} layer(s) `
+                    + `across ${ready.length} fire(s), newest first`);
     }
     window.prefetchFirePreviews = prefetchFirePreviews;
 })();

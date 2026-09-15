@@ -7087,18 +7087,23 @@ function applyPaneFit(pane, img) {
         const st = paneState[pane];
         const r = _d.w / fs.fitW;
         if (isFinite(r) && r > 0 && Math.abs(r - 1) > 1e-9) {
-            // Scale AND pan.
+            // Scale ONLY. The pan must not move.
             //
-            // No transform-origin is set, so CSS uses 50% 50% -- the
-            // element's centre. Screen position is therefore
-            //     pan + W/2 + (p - W/2) * scale
-            // and the W/2 terms move when the element resizes. Scaling
-            // alone left the image off by (W - W')/2 in each axis,
-            // which is the small jump seen when stepping between
-            // products whose previews differ in size.
+            // style.css sets `transform-origin: 0 0` on .image-area
+            // img, so screen position is simply
+            //     pan + p * scale
+            // with no element-size term. A ground fraction f sits at
+            // p = f*W, so dividing the scale by W'/W leaves f*W*scale
+            // unchanged and the pan already correct.
+            //
+            // An earlier version added (W - W')/2 to the pan, on the
+            // assumption that the origin was the CSS default of
+            // 50% 50%. It is not, and that term displaced the view by
+            // a few pixels on every switch between products whose
+            // previews differ slightly in size -- moving the imagery
+            // and its baked-in overlays together, which is exactly how
+            // it looked.
             st.scale = st.scale / r;
-            st.panX += (fs.fitW - _d.w) / 2;
-            st.panY += (fs.fitH - _d.h) / 2;
         }
         updateTransformForPane(pane);
     } else if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
@@ -7257,6 +7262,9 @@ async function loadPaneImage(pane, viewKey) {
 
                 img.dataset.full = '0';
                 img.src = painted;
+                // The proxy is the first thing on screen, so it is
+                // what lifts the blanking.
+                img.style.visibility = '';
                 img.style.display = 'block';
                 // Lay out at FULL size, exactly as the new-fire page
                 // does: the browser upscales the low level into the
@@ -7322,6 +7330,16 @@ async function loadPaneImage(pane, viewKey) {
             // "being generated" made switching between finished dates
             // look like work was starting. The bottom loading bar --
             // which both panes share -- covers that case.
+            // Do not leave the PREVIOUS product on screen.
+            //
+            // Keeping it meant a slow layer showed the last one's
+            // imagery -- indistinguishable from having loaded, and
+            // wrong. Blanking to the pane background says plainly that
+            // this layer is not here yet.
+            try {
+                const { img: _bi } = getPaneElements(pane);
+                if (_bi) _bi.style.visibility = 'hidden';
+            } catch (_) {}
             if (pane === 'left' && !paneProductIsBuilt(pane)) {
                 loadMsg.style.display = 'block';
                 const _lbl = productLabel(
@@ -7454,6 +7472,8 @@ async function loadPaneImage(pane, viewKey) {
     // below reads real dimensions rather than the previous image's.
     img.dataset.full = '1';
     img.src = finalUrl;
+    // Back on screen: this is the layer that was asked for.
+    img.style.visibility = '';
     try {
         if (!img.complete || !img.naturalWidth) await img.decode();
     } catch (_) { /* superseded */ }
