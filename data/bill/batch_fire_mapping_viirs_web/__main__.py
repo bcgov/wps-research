@@ -1143,6 +1143,18 @@ def main():
     except Exception as _exc:
         _log(f'[startup] BCWS size refresh skipped: {_exc}')
 
+    # Adopt what is already on disk into each fire's manifest.
+    #
+    # Existing fires predate the manifest, so it is built once from
+    # their current files -- identity-anchored and grid-checked, so a
+    # same-named predecessor's data is never adopted. After this,
+    # deletion consults the record rather than a filename pattern.
+    try:
+        from . import manifest as _mf
+        _mf.sync_all(app_state, log=_log)
+    except Exception as _exc:
+        _log(f'[startup] manifest sync skipped: {_exc}')
+
     # Is every fire looking at its own ground?
     #
     # A defect in the bbox recovery could hand one fire another's

@@ -9,6 +9,8 @@ import os
 import re
 import threading
 from collections import deque
+import sys
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -18,6 +20,41 @@ CONSOLE_LOG_MAX_LINES = 2000
 # Regex for user-supplied fire names. Reused for path-traversal validation.
 # Must start with alnum; remaining chars from a small safe set; max 64.
 FIRE_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_. -]{0,63}$')
+
+
+def record_artifact(fire, path: str, kind: str = '') -> None:
+    """Note that *path* belongs to *fire*.
+
+    Called wherever the application creates something for a fire, so
+    the record -- not a filename pattern -- decides what deletion
+    removes. Idempotent, and never raises: a manifest is bookkeeping,
+    and failing to note a path must not fail the work that created it.
+    """
+    try:
+        if not path:
+            return
+        p = os.path.abspath(path)
+        lst = getattr(fire, 'artifacts', None)
+        if lst is None:
+            fire.artifacts = lst = []
+        for e in lst:
+            if isinstance(e, dict) and e.get('path') == p:
+                return
+        lst.append({'path': p, 'kind': kind or '',
+                    'at': round(time.time(), 3)})
+    except Exception:
+        pass
+
+
+def fire_artifact_paths(fire) -> list:
+    """Absolute paths this fire owns, newest first."""
+    out = []
+    for e in (getattr(fire, 'artifacts', None) or []):
+        if isinstance(e, dict) and e.get('path'):
+            out.append(e['path'])
+        elif isinstance(e, str):
+            out.append(e)
+    return sorted(set(out), reverse=True)
 
 
 def _is_valid_fire_name(name: str) -> bool:
@@ -101,6 +138,14 @@ class FireInfo:
     # mask happened to cover. That is why the list's figures moved
     # about and dropped to zero while nobody was editing anything.
     hint_size_ha: float = 0.0
+    # Everything this fire owns on disk, recorded as it is created.
+    #
+    # The authoritative answer to "what belongs to this record", so
+    # deletion removes exactly that and nothing else. Globs remain only
+    # as a safety net for fires created before this existed; they can
+    # never distinguish this record from an earlier one that reused the
+    # name, which is precisely how a deleted fire came back.
+    artifacts: list = field(default_factory=list)
 
     status: FireStatus = FireStatus.PENDING
     error_msg: str = ""
@@ -455,6 +500,23 @@ class AppState:
         for name in sorted(os.listdir(self.output_root)):
             if not _is_valid_fire_name(name):
                 continue
+            # A name that was deleted stays deleted.
+            #
+            # This scan adopts any directory under the output root that
+            # looks like a fire and carries a completion marker -- so a
+            # results directory left by an EARLIER run of the same
+            # incident silently resurrected the fire the operator had
+            # just removed. The graveyard is the record of intent and
+            # outranks whatever is lying on disk.
+            try:
+                if name in (self.deleted_fires or {}):
+                    sys.stderr.write(
+                        '[fires] %s: a directory for this name exists '
+                        'but the fire was deleted; not reviving it\n'
+                        % name)
+                    continue
+            except Exception:
+                pass
             fire_dir = os.path.join(self.output_root, name)
             if not os.path.isdir(fire_dir):
                 continue

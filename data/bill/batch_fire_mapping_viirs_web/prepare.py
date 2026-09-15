@@ -1139,6 +1139,36 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
                 f'[warm] {fire.fire_numbe}: {mode} for {key}: '
                 f'{exc}\n')
 
+    # Record what exists now, so deletion never has to guess.
+    #
+    # The manifest is the authoritative list of this fire's files; a
+    # filename pattern is not, because names and identity hashes are
+    # shared by more than one thing.
+    try:
+        from . import manifest as _mf
+        _items = []
+        for _sfx in ('.bin', '.hdr', '_dates.json', '_overlays.json'):
+            _p = os.path.splitext(stack_path)[0] + _sfx
+            if os.path.isfile(_p):
+                _items.append((_mf.KIND_STACK, _p, key))
+        _pd = os.path.join(fire.cache_dir, f'previews_{key}')
+        if os.path.isdir(_pd):
+            _items.append((_mf.KIND_PREVIEW, _pd, key))
+        _rw = os.path.join(fire.cache_dir, '_redwins')
+        if os.path.isdir(_rw):
+            import glob as _g2
+            for _h in _g2.glob(os.path.join(_rw, f'*_{key}_hint.*')):
+                _items.append((_mf.KIND_HINT, _h, key))
+        _cv = os.path.join(fire.cache_dir, 'coverage',
+                           f'{key}_dates.json')
+        if os.path.isfile(_cv):
+            _items.append((_mf.KIND_COVERAGE, _cv, key))
+        if _items:
+            _mf.record_many(fire, _items)
+    except Exception as _mexc:
+        sys.stderr.write(
+            f'[manifest] {fire.fire_numbe}: record failed: {_mexc}\n')
+
     msg = (f'[warm] {fire.fire_numbe}: {key} ready to switch '
            f'({out["previews"]} preview(s), {out["hints"]} hint(s)'
            + (f', {len(out["errors"])} error(s)' if out['errors'] else '')

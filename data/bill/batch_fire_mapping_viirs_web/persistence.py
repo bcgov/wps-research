@@ -237,6 +237,10 @@ def _save_fire_state():
         # Names the user deleted. Persisted so a restart cannot bring
         # them back via the output-directory scan.
         try:
+            # Tombstoned names never get a fire entry written.
+            for _dead in list(
+                    (getattr(state, 'deleted_fires', {}) or {}).keys()):
+                data.pop(_dead, None)
             data['deleted_fires'] = {
                 str(k): float(v) for k, v in
                 (getattr(state, 'deleted_fires', {}) or {}).items()}
@@ -541,6 +545,23 @@ def _load_fire_state():
                     fire.fire_size_ha = float(saved_size)
                 except (TypeError, ValueError):
                     pass
+
+        # A deleted fire is deleted.
+        #
+        # The tombstone is authoritative. A lingering entry -- from a
+        # save that raced the delete, or a file restored from a backup
+        # -- must not put the fire back in the list, and the "its cache
+        # is intact, so un-hide it" rule below must not apply to it
+        # either: background work recreates a cache directory routinely
+        # (a preview render makes one), so presence of that directory
+        # says nothing about intent.
+        try:
+            if fn in (getattr(state, 'deleted_fires', {}) or {}):
+                sys.stderr.write(
+                    '[persistence] %s: deleted; not restoring it\n' % fn)
+                continue
+        except Exception:
+            pass
 
         # Restore hidden flag.
         #

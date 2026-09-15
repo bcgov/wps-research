@@ -401,7 +401,21 @@ class FireListRoutes:
         except Exception as exc:
             sys.stderr.write(f'[remove] download cache: {exc}\n')
 
-        # Purge by IDENTITY first, regardless of crop_bin.
+        # The MANIFEST first: the authoritative list of this fire's
+        # own files. Everything below is a safety net for anything
+        # created before the manifest existed, or by a path that forgot
+        # to record itself.
+        try:
+            from ..manifest import purge as _mpurge, sync_from_disk
+            try:
+                sync_from_disk(fire, state)
+            except Exception:
+                pass
+            _mpurge(fire)
+        except Exception as exc:
+            sys.stderr.write(f'[remove] manifest purge: {exc}\n')
+
+        # Purge by IDENTITY second, regardless of crop_bin.
         #
         # Everything below hangs off the stack this fire is pointing
         # at, so a fire in the error state -- which by definition has
@@ -441,15 +455,16 @@ class FireListRoutes:
                     except OSError as exc:
                         sys.stderr.write(
                             f'[remove] {os.path.basename(f)}: {exc}\n')
-            # Clustering work directories are named kgc_<fire>_<hash>,
-            # so they are reachable by name even when crop_bin is gone.
-            for d in glob.glob(os.path.join(RAM_DIR,
-                                            f'kgc_{_safe0}_[0-9a-f]*')):
-                try:
-                    shutil.rmtree(d, ignore_errors=True)
-                    _gone += 1
-                except OSError:
-                    pass
+            # Clustering work directories are NOT matched by name.
+            #
+            # 'kgc_K51490_*' also matches 'kgc_K51490_ash_...', and so
+            # does 'kgc_K51490_[0-9a-f]*' -- the 'a' of "ash" is a hex
+            # digit. Deleting one fire would have destroyed another's
+            # clustering work. Ownership is decided further below by
+            # reading each directory's .stack marker and comparing it
+            # with THIS fire's stacks, which is the only test that
+            # cannot be fooled by a name that merely starts the same
+            # way. The manifest covers them too.
             if _gone:
                 sys.stderr.write(
                     f'[remove] {fire_numbe}: purged {_gone} file(s) by '
