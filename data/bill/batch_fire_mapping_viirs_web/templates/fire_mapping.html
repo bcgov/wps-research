@@ -2189,7 +2189,7 @@ function capturePaneFrame(pane) {
                     const kx = c.width / cw, ky = c.height / chh;
                     ctx.save();
                     ctx.scale(kx, ky);
-                    paintOverlayVectors(ctx, kx, 1);
+                    paintOverlayVectors(ctx, kx, 1, overlaysForPane(pane));
                     ctx.restore();
                 } catch (_) { /* frame without overlays is still usable */ }
             }
@@ -3068,8 +3068,35 @@ function drawOverlayLayer(pane) {
     const { area, img } = getPaneElements(pane);
     if (!cv || !area) return;
 
-    if (!overlaysVisible || !_fireOverlays || !img || !img.src
-            || img.style.display === 'none') {
+    // Each pane draws ITS OWN product's overlays.
+    //
+    // _fireOverlays is one module-level variable, so in split view --
+    // or just after a switch -- both panes drew whichever set was
+    // fetched last. Overlay coordinates are per stack, so the wrong
+    // set lands in the wrong place, or off the image entirely, which
+    // is how the tile grid and BCWS features went missing on some
+    // products but not others.
+    let _ov = null;
+    try {
+        _ov = _overlayCache.get(paneProductKey(pane)) || null;
+    } catch (_) { _ov = null; }
+    if (!_ov) _ov = _fireOverlays;
+    // Not fetched yet? Ask for it, and redraw when it lands.
+    if (!_ov && overlaysVisible) {
+        try {
+            const _k = paneProductKey(pane);
+            if (_k && !_overlayPending.has(_k)) {
+                _overlayPending.add(_k);
+                loadOverlaysForProduct(_k).then((d) => {
+                    _overlayPending.delete(_k);
+                    if (d) drawOverlayLayer(pane);
+                }).catch(() => _overlayPending.delete(_k));
+            }
+        } catch (_) {}
+    }
+    if (!overlaysVisible || !_ov || !img || !img.src
+            || img.style.display === 'none'
+            || img.style.visibility === 'hidden') {
         cv.style.display = 'none';
         return;
     }
@@ -3105,8 +3132,10 @@ function drawOverlayLayer(pane) {
     const ar = area.getBoundingClientRect();
     if (!ir.width || !ir.height) return;
 
-    const cw = _fireOverlays.width || 0;
-    const ch = _fireOverlays.height || 0;
+    // From the pane's OWN overlay set, not the shared one: these are
+    // the crop dimensions the coordinates below are expressed in.
+    const cw = _ov.width || 0;
+    const ch = _ov.height || 0;
     if (!cw || !ch) return;
 
     // The overlay's grid must be the grid this pane is showing.
@@ -3147,7 +3176,7 @@ function drawOverlayLayer(pane) {
     // paintOverlayVectors divides widths and font sizes by the unit it
     // is given, so passing the on-screen scale makes them land at a
     // fixed number of CSS pixels at any zoom.
-    paintOverlayVectors(ctx, sx, 1);
+    paintOverlayVectors(ctx, sx, 1, _ov);
     ctx.restore();
 }
 
@@ -3229,7 +3258,28 @@ window.addEventListener('resize', () => {
     try { drawAllOverlayLayers(); } catch (_) {}
 });
 
-function paintOverlayVectors(ctx, unit, sizeMul) {
+// The overlay set belonging to one pane's CURRENT product.
+//
+// One rule, used by every painter, so the canvas overlay, the baked
+// bitmap and a captured frame can never disagree about which
+// product's vectors they are drawing.
+function overlaysForPane(pane) {
+    try {
+        const k = paneProductKey(pane);
+        const hit = k ? _overlayCache.get(k) : null;
+        if (hit) return hit;
+    } catch (_) { /* fall through */ }
+    return _fireOverlays;
+}
+
+function paintOverlayVectors(ctx, unit, sizeMul, ov) {
+    // The set to paint is passed in.
+    //
+    // Reading the module-level _fireOverlays meant the vectors always
+    // came from whichever product was fetched last, even when the
+    // caller had correctly resolved this pane's own set -- so the
+    // dimensions were right and the geometry was not.
+    const _fireOverlays = ov || window._fireOverlaysFallback || null;
     if (!_fireOverlays) return;
     const _m = (sizeMul && sizeMul > 0) ? sizeMul : 1;
     const lw = (px) => Math.max(0.25 * _m, (px * _m) / unit);
@@ -3329,6 +3379,9 @@ function bakeOverlaysIntoImage(pane, viewKey) {
 
 
 let overlaysVisible = true;
+// Products whose overlays are already being fetched, so a redraw storm
+// cannot issue the same request a dozen times.
+const _overlayPending = new Set();
 
 
 
@@ -7030,7 +7083,10 @@ function previewUrlFor(viewKey, pane) {
 // Composite the vector overlays onto a decoded image, returning a blob
 // URL. Returns null when there is nothing to draw, so the caller can
 // use the original bytes untouched.
-async function compositeOverlays(bitmap, cropW, cropH, sizeMul) {
+// `pane` decides which product's overlays are composited; it defaults
+// to the left pane, which is what the only historical caller meant.
+async function compositeOverlays(bitmap, cropW, cropH, sizeMul,
+                                 pane = 'left') {
     if (!overlaysVisible || !_fireOverlays) return null;
     const W = bitmap.naturalWidth || bitmap.width;
     const H = bitmap.naturalHeight || bitmap.height;
@@ -7048,7 +7104,7 @@ async function compositeOverlays(bitmap, cropW, cropH, sizeMul) {
     ctx.drawImage(bitmap, 0, 0, W, H);
     ctx.save();
     ctx.scale(kx, ky);
-    paintOverlayVectors(ctx, kx, sizeMul);
+    paintOverlayVectors(ctx, kx, sizeMul, overlaysForPane(pane));
     ctx.restore();
     return await new Promise((res) => {
         try { off.toBlob((b) => res(b ? URL.createObjectURL(b) : null),

@@ -3203,6 +3203,26 @@ class FireRoutes:
                     if src == 'l2' and not os.path.isfile(
                             date_polygons_path(cand)):
                         continue
+                    # Does this stack actually cover this AOI?
+                    #
+                    # The filename proves only which fire NAME built
+                    # it. A stack produced while the bounding box was
+                    # wrong -- which happened -- carries the right name
+                    # and another incident's ground. Offering it puts
+                    # someone else's imagery in this fire's selector,
+                    # which is exactly what was seen.
+                    try:
+                        from ..durable import _grid_of, grid_matches_bbox
+                        _g = _grid_of(cand)
+                        if _g and not grid_matches_bbox(fire, _g):
+                            sys.stderr.write(
+                                '[persist] %s: WITHHOLDING %s -- its '
+                                'grid does not cover this AOI (built '
+                                'when the bbox was wrong)\n'
+                                % (fire_numbe, os.path.basename(cand)))
+                            continue
+                    except Exception:
+                        pass
                     seen.add(key)
                     out.append({'key': key, 'source': src,
                                 'date': start or post,

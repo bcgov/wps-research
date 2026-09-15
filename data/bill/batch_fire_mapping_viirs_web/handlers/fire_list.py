@@ -444,7 +444,7 @@ class FireListRoutes:
             # Clustering work directories are named kgc_<fire>_<hash>,
             # so they are reachable by name even when crop_bin is gone.
             for d in glob.glob(os.path.join(RAM_DIR,
-                                            f'kgc_{_safe0}_*')):
+                                            f'kgc_{_safe0}_[0-9a-f]*')):
                 try:
                     shutil.rmtree(d, ignore_errors=True)
                     _gone += 1

@@ -286,6 +286,37 @@ def grids_match(a, b, tol: float = 0.51) -> bool:
     return abs(ga[0] - gb[0]) <= tol and abs(ga[3] - gb[3]) <= tol
 
 
+def grid_matches_bbox(fire, grid, slack_px: float = 1.5) -> bool:
+    """Does this grid actually cover the fire's recorded AOI?
+
+    The authoritative answer, because it comes from bbox_native --
+    which the operator drew and which every other check derives from.
+    A stack built while the bounding box was wrong carries a perfectly
+    correct FILENAME and completely different ground; only the
+    geotransform gives it away.
+    """
+    bb = getattr(fire, 'bbox_native', None)
+    if not bb or not grid:
+        return True                 # nothing to check against
+    try:
+        xmin, ymin, xmax, ymax = (float(v) for v in bb)
+        w, h, gt = grid
+        px = abs(float(gt[1])) or 20.0
+        py = abs(float(gt[5])) or px
+        tol_x, tol_y = px * slack_px, py * slack_px
+        if abs(float(gt[0]) - xmin) > tol_x:
+            return False
+        if abs(float(gt[3]) - ymax) > tol_y:
+            return False
+        if abs(w * px - (xmax - xmin)) > tol_x * 2:
+            return False
+        if abs(h * py - (ymax - ymin)) > tol_y * 2:
+            return False
+        return True
+    except (TypeError, ValueError):
+        return True
+
+
 def reference_grid(fire):
     """The grid this fire's AOI is on now, or None if unknowable."""
     cb = getattr(fire, 'crop_bin', '') or ''
@@ -340,7 +371,8 @@ def durable_products(fire) -> list:
         if not os.path.isfile(os.path.splitext(cand)[0] + '.hdr'):
             continue
         g = _grid_of(cand)
-        if not g or not grids_match(ref, g):
+        if not g or not grids_match(ref, g) \
+                or not grid_matches_bbox(fire, g):
             rejected += 1
             continue
         out.append(cand)
@@ -527,11 +559,12 @@ def recover_identity(fire, log=None) -> bool:
         # another's bounding box. Recovering nothing is correct when
         # the fire's own files are absent; recovering somebody else's
         # AOI is not.
-        try:
-            from .aoi_stack import sanitize_identifier
-            safe = sanitize_identifier(fire.fire_numbe)
-        except Exception:
-            safe = ''
+        # The FULL prefix: sanitized name AND identity hash.
+        #
+        # fire_prefix() gives '<safe>_<hash>'. Using the name alone
+        # matched longer names that merely start the same way, so
+        # K51490 could adopt K51490_ash's grid.
+        safe = fire_prefix(fire)
         if not safe:
             sys.stderr.write(
                 f'[recover] {getattr(fire, "fire_numbe", "?")}: cannot '
@@ -541,8 +574,17 @@ def recover_identity(fire, log=None) -> bool:
         for root in (os.path.dirname(cb) or '/ram', store_dir()):
             if not root or not os.path.isdir(root):
                 continue
+            # Anchored on the full prefix, hash included.
+            #
+            # '*_stack_K51490_*' also matches K51490_ash -- a different
+            # incident whose name merely starts the same way. Recovery
+            # would then hand this fire the other one's bounding box,
+            # and every product built afterwards would cover the wrong
+            # ground under the right name.
             candidates.extend(sorted(glob.glob(os.path.join(
                 root, f'*_stack_{safe}_*_overlays.json')), reverse=True))
+            candidates.extend(sorted(glob.glob(os.path.join(
+                root, f'*_stack_{safe}_overlays.json')), reverse=True))
         # The fire's own cache directory -- per fire by construction.
         cache = getattr(fire, 'cache_dir', '') or ''
         if cache and os.path.isdir(cache):
