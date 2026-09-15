@@ -141,7 +141,7 @@
     <span id="selected-count">0 selected</span>
     <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
     <button class="btn btn-danger" id="btn-batch-cancel" onclick="batchCancel()" style="display:none">Cancel Batch</button>
-    <button class="btn btn-danger" onclick="batchRemove()">Remove Selected</button>
+    <button class="btn btn-danger" onclick="batchRemove()">Delete Selected</button>
     <details class="report-menu" style="display:inline-block;position:relative">
         <summary class="btn btn-success"
                  style="list-style:none;cursor:pointer;user-select:none">
@@ -856,16 +856,34 @@ function toggleSelectAll(master) {
 // -----------------------------------------------------------------------
 async function batchRemove() {
     const fires = [...selectedFires];
-    if (!confirm(`Remove ${fires.length} fire(s) from the list?`)) return;
+    if (!confirm(`Delete ${fires.length} fire(s)?\n\nThis deletes `
+            + `everything recorded for them: imagery layers, previews, `
+            + `hint masks, classification results and cached `
+            + `downloads. It cannot be undone.`)) return;
+    const failed = [];
     for (const fn of fires) {
         try {
-            await fetch(`/api/fire/${encodeURIComponent(fn)}/remove`,
+            const r = await fetch(
+                `/api/fire/${encodeURIComponent(fn)}/remove`,
                 {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+            const j = await r.json().catch(() => ({}));
+            // Only drop it from the view if the server agreed. This
+            // used to remove the row whatever came back, so a refusal
+            // looked like a success until the next refresh.
+            if (!r.ok || j.error) {
+                failed.push(`${fn}: ${j.error || 'HTTP ' + r.status}`);
+                continue;
+            }
             allFires = allFires.filter(f => f.fire_numbe !== fn);
-        } catch {}
+        } catch (err) {
+            failed.push(`${fn}: ${err.message}`);
+        }
     }
     selectedFires.clear();
     render();
+    if (failed.length) {
+        alert('Could not delete:\n' + failed.join('\n'));
+    }
 }
 
 // -----------------------------------------------------------------------

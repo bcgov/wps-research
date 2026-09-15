@@ -13,7 +13,7 @@
     <a id="btn-prev" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Prev</a>
     <h1 id="fire-title">{{ fire_numbe }}</h1>
     <a id="btn-next" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;display:none" href="#">Next</a>
-    <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Remove</button>
+    <button class="btn btn-danger" style="font-size:11px;padding:3px 10px" onclick="removeFire()">Delete</button>
     <button id="btn-rename" class="btn btn-secondary"
             style="font-size:11px;padding:3px 10px"
             onclick="startRename()">Rename</button>
@@ -8575,12 +8575,30 @@ async function applyRename(oldName, newName) {
 }
 
 async function removeFire() {
-    if (!confirm(`Remove fire "${FIRE}" from the list?\nThis hides it from the fire list. Accepted results are not deleted.`)) return;
+    if (!confirm(`Delete fire "${FIRE}"?\n\nThis removes the fire from `
+            + `the list and deletes everything recorded for it: `
+            + `imagery layers, previews, hint masks, classification `
+            + `results and cached downloads. It cannot be undone.`)) {
+        return;
+    }
     try {
-        await fetch(`/api/fire/${encodeURIComponent(FIRE)}/remove`, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/remove`,
+            {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+        // CHECK the response. This used to navigate away regardless,
+        // so a refusal looked exactly like a success: the list
+        // reloaded and the fire was still on it, with nothing said.
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            const msg = j.error || `HTTP ${r.status}`;
+            log(`Delete failed: ${msg}`, 'error');
+            alert(`Could not delete "${FIRE}": ${msg}`);
+            return;
+        }
         window.location.href = '/';
     } catch (err) {
-        log('Remove failed: ' + err.message, 'error');
+        log('Delete failed: ' + err.message, 'error');
+        alert('Could not delete: ' + err.message);
     }
 }
 

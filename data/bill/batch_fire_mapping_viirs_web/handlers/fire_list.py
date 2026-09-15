@@ -289,9 +289,14 @@ class FireListRoutes:
     _VALID_FN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_. -]*$')
 
     def handle_api_remove(self, fire_numbe):
-        if getattr(self, '_role', '') != 'admin':
-            self._send_json({'error': 'Admin only'}, 403)
-            return
+        # No admin gate.
+        #
+        # Ordinary use needs no login now, so `_role` is empty for
+        # everyone browsing normally and this returned 403 to every
+        # delete anyone attempted. The client discarded the response
+        # and navigated away, so the fire simply reappeared with no
+        # error shown -- which is exactly what was reported, three
+        # times, while the actual deletion code was never reached.
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
