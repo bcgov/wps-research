@@ -2943,8 +2943,41 @@ window.addEventListener('resize', drawDatePlot);
 // lag between the imagery appearing and the vectors following.
 const _overlayCache = new Map();
 
+// Fetch one product's overlays into the cache, without disturbing
+// which product the panes are currently baking from.
+async function loadOverlaysForProduct(key) {
+    if (!key) return null;
+    const hit = _overlayCache.get(key);
+    if (hit) return hit;
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/overlays`
+            + `?prod=${encodeURIComponent(key)}`);
+        if (!r.ok) return null;
+        const data = await r.json();
+        if (data && !data.error) {
+            _overlayCache.set(key, data);
+            log(`[overlays] ${key}: ${(data.tiles || []).length} tile(s), `
+                + `${((data.bcws || {}).polygons || []).length} polygon(s)`,
+                'dim');
+            return data;
+        }
+    } catch (err) {
+        log(`[overlays] ${key}: ${err.message}`, 'dim');
+    }
+    return null;
+}
+
 async function loadFireOverlays() {
-    const src = currentPostSource || 'l2';
+    // Keyed by PRODUCT, not by source.
+    //
+    // Overlay coordinates are in crop pixels, so each product has its
+    // own set. Caching them under 'l2' or 'mrap' meant stepping from
+    // one dated composite to another reused the previous product's
+    // coordinates -- which is why the tile boundaries and the BCWS
+    // features sometimes sat wrong, or vanished when the two grids
+    // were different sizes.
+    const src = currentProductKey() || currentPostSource || 'l2';
     const cached = _overlayCache.get(src);
     if (cached) {
         _fireOverlays = cached;
@@ -2956,7 +2989,8 @@ async function loadFireOverlays() {
     try {
         const t0 = performance.now();
         const r = await fetch(
-            `/api/fire/${encodeURIComponent(FIRE)}/overlays`);
+            `/api/fire/${encodeURIComponent(FIRE)}/overlays`
+            + `?prod=${encodeURIComponent(src)}`);
         const tH = performance.now();
         if (!r.ok) return;
         const txt = await r.text();
@@ -7230,13 +7264,16 @@ async function loadPaneImage(pane, viewKey) {
                 // ones the full image will use unchanged.
                 applyPaneImageBox(img, fullW || probe.naturalWidth,
                                   fullH || probe.naturalHeight);
-                const fs0 = _paneFitState[pane];
-                if (!fs0.fitted || fs0.fitW !== fullW
-                        || fs0.fitH !== fullH) {
-                    zoomFitPane(pane);
-                } else {
-                    updateTransformForPane(pane);
-                }
+                // Go through applyPaneFit, not zoomFitPane.
+                //
+                // This is the proxy (low-resolution) path, and it was
+                // refitting outright whenever the dimensions differed
+                // from the last product -- which is exactly the case a
+                // source switch creates. applyPaneFit() preserves the
+                // operator's zoom and pan across a dimension change,
+                // so routing through it keeps one rule for the view
+                // instead of two that disagree.
+                applyPaneFit(pane, img);
                 if (pane === 'left' && loadMsg) {
                     loadMsg.style.display = 'none';
                 }
@@ -7476,6 +7513,19 @@ async function onRightPostSourceChange() {
                                 : 'Loading MRAP composite (right)');
     try {
         await loadPaneImage('right', rightView || 'post');
+        // Overlays for the RIGHT pane's product.
+        //
+        // Overlay coordinates are per stack, so a right pane showing a
+        // different product needs that product's set. Nothing
+        // refreshed them here, so the tile grid and BCWS features were
+        // whatever the left pane had last fetched -- and absent
+        // entirely if the left had none yet.
+        try {
+            await loadOverlaysForProduct(_rkey);
+            bakeOverlaysIntoImage('right', rightView || 'post');
+        } catch (err) {
+            log(`[overlays] right pane: ${err.message}`, 'dim');
+        }
         // Both, since the left label gains or loses its source tag
         // depending on whether the two panes now differ.
         updateSubtitle('right', rightView || 'post');

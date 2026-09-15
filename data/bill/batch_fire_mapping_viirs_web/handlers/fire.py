@@ -409,8 +409,23 @@ class FireRoutes:
         fire = state.fires[fire_numbe]
         try:
             from ..fire_overlays import build_fire_overlays
-            self._send_json(build_fire_overlays(state, fire))
+            from ..prepare import stack_path_for_product
+            _q = parse_qs(urlparse(self.path).query)
+            _prod = (_q.get('prod') or [''])[0].strip()
+            _crop = ''
+            if _prod and re.fullmatch(
+                    r'(mrap|l2)(_p\d{8}|_d\d{8})?', _prod):
+                _crop = stack_path_for_product(fire, _prod)
+                if not _crop:
+                    sys.stderr.write(
+                        '[persist] overlays %s: no stack for %s; '
+                        'using the loaded product\n'
+                        % (fire_numbe, _prod))
+            self._send_json(build_fire_overlays(state, fire,
+                                                crop_path=_crop))
         except Exception as exc:
+            sys.stderr.write(
+                f'[overlays] {fire_numbe}: {exc}\n')
             self._send_json({'error': str(exc)}, 500)
 
     def _coverage_cache_path(self, fire, product_key: str) -> str:

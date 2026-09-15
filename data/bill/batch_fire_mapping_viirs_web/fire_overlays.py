@@ -246,7 +246,8 @@ def overlay_cache_path(crop_bin: str) -> str:
     return os.path.splitext(crop_bin)[0] + '_overlays.json'
 
 
-def build_fire_overlays(state, fire, force: bool = False) -> dict:
+def build_fire_overlays(state, fire, force: bool = False,
+                        crop_path: str = '') -> dict:
     """Tile grid + BCWS features for *fire*, in crop pixel coordinates.
 
     Cached on the ramdisk next to the stack; rebuilt automatically when
@@ -254,7 +255,14 @@ def build_fire_overlays(state, fire, force: bool = False) -> dict:
     newer than the cache (a padding change resized it, which invalidates
     every pixel coordinate in here).
     """
-    crop = getattr(fire, 'crop_bin', '')
+    # A specific product's stack, when asked for.
+    #
+    # Overlay coordinates are in CROP PIXELS, so they belong to one
+    # stack. Serving the fire's currently loaded stack while the pane
+    # shows a different product put the tile grid and the BCWS
+    # features in the wrong place -- or, when the grids differed in
+    # size, dropped them off the image entirely.
+    crop = crop_path or getattr(fire, 'crop_bin', '')
     if not crop or not os.path.isfile(crop):
         return {'tiles': [], 'bcws': {}, 'width': 0, 'height': 0}
 
