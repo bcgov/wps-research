@@ -1644,6 +1644,11 @@ async function prepareFire(padding) {
         try { refreshSourceSelectors(data.products); } catch (_) {}
         try { installSourceSelectGuard(); } catch (_) {}
         try { startProductWatch(); } catch (_) {}
+        // Pick up a batch that is already running for this fire --
+        // started before the operator navigated away and came back.
+        // The first tick clears itself if nothing is queued, and says
+        // nothing, because it never saw a batch running.
+        try { startBuildWatch(); } catch (_) {}
         try { applySavedUiState(data.ui_state, data.kgc_params); }
         catch (err) {
             log(`[ui] could not restore the saved view: ${err.message}`,
@@ -4478,6 +4483,17 @@ async function applyMrapDateSelection() {
 // Enable/disable Apply from one place, so the button always reflects
 // whether a batch is running.
 function setApplyEnabled(on) {
+    // The whole dialog locks, not just the button.
+    //
+    // Leaving the checkboxes live while a batch ran invited a second
+    // selection that could not be applied -- the operator ticks dates,
+    // presses a disabled button, and nothing explains why.
+    try {
+        for (const el of document.querySelectorAll(
+                '#date-picker-list input[type=checkbox]')) {
+            el.disabled = !on;
+        }
+    } catch (_) {}
     const btn = document.getElementById('btn-apply-date');
     if (!btn) return;
     // Never enable while this fire still has builds queued.
@@ -5117,6 +5133,8 @@ let _buildWatch = null;
 // opening the dialog when nothing is queued would announce "Builds
 // finished" for builds that never started.
 let _buildSeen = false;
+// Whether the bottom progress bar is currently reporting OUR builds.
+let _buildBarOn = false;
 function startBuildWatch() {
     if (_buildWatch) return;
     _buildSeen = false;
@@ -5130,6 +5148,24 @@ function startBuildWatch() {
             if (j.running) {
                 _buildSeen = true;
                 setApplyEnabled(false);
+                // Also report in the bottom progress bar, so closing
+                // the dialog does not hide the fact that work is still
+                // running. That bar is the same one every other long
+                // operation uses; it sits below the viewer and never
+                // moves the imagery -- the pane transform is in pixels
+                // from the pane's own top-left corner, and no resize
+                // handler refits.
+                try {
+                    const _lbl = `Building ${j.current || 'products'}`
+                        + ` \u2014 ${j.done + 1} of ${j.total}`;
+                    if (!_buildBarOn) {
+                        _buildBarOn = true;
+                        layerBusyBegin(_lbl);
+                    } else {
+                        _layerLabel = _lbl;
+                        layerStatusPaint();
+                    }
+                } catch (_) {}
                 if (prog) {
                     prog.style.display = '';
                     // Exhaustive on purpose: which product, where in the
@@ -5166,6 +5202,11 @@ function startBuildWatch() {
             } else {
                 clearInterval(_buildWatch);
                 _buildWatch = null;
+                // Hand the bottom bar back.
+                if (_buildBarOn) {
+                    _buildBarOn = false;
+                    try { layerBusyEnd(); } catch (_) {}
+                }
                 setApplyEnabled(true);
                 // Close the dialog once the batch it started has
                 // finished. Leaving it open makes the operator dismiss

@@ -751,7 +751,7 @@ function render() {
             <td>${mlSize}</td>
             <td>${agr}</td>
             <td style="white-space:nowrap">${fmtCreated(f.created_at)}</td>
-            <td>${prevBadge}${badge}${subStage}${errMsg}</td>
+            <td>${prevBadge}${badge}${subStage}${buildBadge(f)}${errMsg}</td>
             <td>${overrideBadge}<button class="btn btn-secondary" style="font-size:11px;padding:2px 6px" onclick="openOverrideModal('${fireEnc}')">Edit</button></td>
             <td><a href="/fire/${fireEnc}" class="btn" onclick="markFireOpened('${fireEnc}')" onmouseenter="prefetchFirePreview('${fireEnc}', ${f.created_at || 0})">Open</a>${cancelBtn}</td>
         `;
@@ -991,6 +991,21 @@ function paramInput(name, val, type, width) {
     const w = width || 55;
     return `<label class="sp-label">${name}<input type="${type||'number'}" ` +
            `data-param="${name}" value="${val == null ? '' : val}" style="width:${w}px"></label>`;
+}
+
+// "Building 2 of 5" while a dated-product batch runs for this fire.
+//
+// The work continues on the server after the operator closes the Date
+// select dialog or leaves the fire, so the list is where they would
+// look to see whether it is still going.
+function buildBadge(f) {
+    const b = f && f.building;
+    if (!b || !b.total) return '';
+    const what = b.current ? ` \u00b7 ${b.current}` : '';
+    return `<span class="status-badge" style="background:#e3f0ff;`
+        + `color:#1a4f8a;margin-left:4px" title="Dated product builds `
+        + `running in the background${what}">building `
+        + `${(b.done || 0) + 1} of ${b.total}</span>`;
 }
 
 function renderSettingsRow(row, idx, opts) {

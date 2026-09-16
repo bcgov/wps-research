@@ -204,6 +204,19 @@ class FireListRoutes:
 
     # -- API handlers --
 
+    @staticmethod
+    def _build_progress_for(name):
+        """{done,total,current} while this fire has queued builds."""
+        try:
+            job = (getattr(state, 'product_builds', None) or {}).get(name)
+            if not job or not job.get('running'):
+                return None
+            return {'done': int(job.get('done', 0)),
+                    'total': int(job.get('total', 0)),
+                    'current': str(job.get('current', '') or '')}
+        except Exception:
+            return None
+
     def _top_up_missing_sizes(self):
         """Fill in a zero size when the layer has one now.
 
@@ -238,6 +251,12 @@ class FireListRoutes:
             fires = [
                 {
                     'fire_numbe': f.fire_numbe,
+                    # Dated-product builds running for this fire.
+                    #
+                    # Surfaced on the list so an operator who started a
+                    # batch and walked away can see it is still going,
+                    # rather than having to reopen the fire to find out.
+                    'building': self._build_progress_for(f.fire_numbe),
                     # Creation time doubles as a cache generation: a
                     # fire recreated under a name that was deleted is a
                     # different fire, and must not be shown the old
