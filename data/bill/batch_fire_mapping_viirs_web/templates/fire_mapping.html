@@ -764,6 +764,23 @@
 // Constants
 // -----------------------------------------------------------------------
 const FIRE = {{{ fire_numbe_json }}};
+// Whether this fire was left in split mode, known before any request.
+const SPLIT_AT_LOAD = {{{ split_at_load }}};
+// Lay the panes out AT ONCE, before any imagery is requested.
+//
+// The split used to be applied when /prepare came back, so a fire
+// saved in split mode drew one wide pane, loaded into it, and then
+// jumped to two. Doing it on first paint means the pane geometry
+// never changes under the imagery.
+document.addEventListener('DOMContentLoaded', () => {
+    if (!SPLIT_AT_LOAD) return;
+    try {
+        const right = document.getElementById('image-area-right');
+        const cont = document.querySelector('.image-viewer-container');
+        if (right) right.style.display = '';
+        if (cont) cont.classList.add('split');
+    } catch (_) { /* toggleSplit() settles it either way */ }
+});
 let cropW = 0, cropH = 0;
 let isMapping = false;
 let hasComparison = false;
@@ -4713,6 +4730,16 @@ async function warmAllProducts(views) {
             const url = `/api/fire/${encodeURIComponent(FIRE)}/preview/`
                 + `${encodeURIComponent(j.view)}`
                 + `?src=${encodeURIComponent(parseProductKey(j.key).source)}`
+                // The l2 date is part of the pane's URL, so it must be
+                // part of the warmer's too. Without it the warmer
+                // filled `?src=l2&prod=...` while the pane asked for
+                // `?src=l2&l2=<date>&prod=...` -- a different cache
+                // entry, so every L2 switch still went to the server,
+                // which then rendered it. That is the extra lag on a
+                // pane showing a product the fire is not loaded on.
+                + (parseProductKey(j.key).source === 'l2'
+                   ? `&l2=${parseProductKey(j.key).date || 'latest'}`
+                   : '')
                 + `&prod=${encodeURIComponent(j.key)}`
                 + `&t=${j.stamp || _previewStamp}`;
             try {
@@ -7184,7 +7211,16 @@ const _paneGen = {left: 0, right: 0};
 function previewUrlFor(viewKey, pane) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
     if (runActive && viewKey === 'result') {
-        return `/api/fire/${encodeURIComponent(FIRE)}/serial/${selectedRun}/image?t=${Date.now()}`;
+        // A STABLE stamp, not Date.now().
+        //
+        // Date.now() made every request a new URL, so the browser
+        // cache could never hold a classification overlay and warming
+        // it was wasted -- re-entering the fire, or switching back to
+        // "ML classification", re-fetched and re-rendered every time.
+        // The product stamp changes when the imagery actually changes,
+        // which is exactly when a refetch is wanted.
+        return `/api/fire/${encodeURIComponent(FIRE)}/serial/`
+            + `${selectedRun}/image?t=${previewStamp(pane)}`;
     }
     // 'result_prebrush' deliberately has NO branch here: it is an
     // ordinary preview and falls through to the generic URL below.
@@ -7322,6 +7358,20 @@ function applyPaneFit(pane, img, provisional) {
     fs.fitted = true;
     fs.fitW = _d.w;
     fs.fitH = _d.h;
+
+    // Re-establish the pairing after ANY load in split mode.
+    //
+    // Only the inherit branch above synced, so a right-pane product
+    // change that went through the dimension-compensation branch left
+    // the panes on independent transforms -- they drifted apart as the
+    // forward/back buttons were used. The left pane is the reference;
+    // syncing from it is idempotent, so doing it after every load
+    // costs nothing and cannot accumulate error.
+    try {
+        if (splitActive && syncPanes && !inheritFromLeft) {
+            syncOtherPane('left');
+        }
+    } catch (_) {}
 }
 
 // ---- Imagery loading indicator -----------------------------------
@@ -9172,7 +9222,7 @@ function renderSerialCard(r, opts) {
 
     div.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px">
-            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${Date.now()}"
+            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${_previewStamp}"
                  style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
                  data-run-id="${r.run_id}" data-retries="0"
                  onclick="viewSerialRun(${r.run_id})"

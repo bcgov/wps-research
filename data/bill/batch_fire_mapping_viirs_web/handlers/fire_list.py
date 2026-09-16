@@ -195,6 +195,15 @@ class FireListRoutes:
             'fire_year': str(fire.fire_year),
             'fire_size_ha': str(fire.fire_size_ha),
             'fire_status': fire.status.value,
+            # Split state, known at render time.
+            #
+            # It used to be applied only after /prepare returned, so a
+            # fire saved in split mode drew one wide pane first and
+            # then jumped to two. The server has the fire in hand here;
+            # saying so up front costs nothing and the layout is right
+            # from the first paint.
+            'split_at_load': json.dumps(bool(
+                (getattr(fire, 'ui_state', None) or {}).get('split'))),
             'padding': str(state.padding),
             'sample_rate': str(state.sample_rate),
             'min_samples': str(state.min_samples),

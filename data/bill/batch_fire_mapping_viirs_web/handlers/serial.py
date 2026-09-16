@@ -485,7 +485,8 @@ class SerialRoutes:
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}.png')
             if os.path.isfile(comp_path):
-                self._send_file(comp_path, 'image/png')
+                self._send_file(comp_path, 'image/png',
+                           cache_seconds=86400)
                 return
             self._send_json(
                 {'error': 'Comparison not found for this run'}, 404)
@@ -496,7 +497,8 @@ class SerialRoutes:
                 fire.cache_dir,
                 f'{fire_numbe}_serial_{run_id}_brush.png')
             if os.path.isfile(brush_path):
-                self._send_file(brush_path, 'image/png')
+                self._send_file(brush_path, 'image/png',
+                           cache_seconds=86400)
                 return
             self._send_json(
                 {'error': 'Brush comparison not found for this run'},
@@ -575,6 +577,7 @@ class SerialRoutes:
             except Exception:
                 hdrs = None
             self._send_file(overlay_path, 'image/png',
+                           cache_seconds=86400,
                             extra_headers=hdrs)
             return
         # Do NOT fall back to the comparison figure here — the gallery
