@@ -263,8 +263,33 @@ def build_fire_overlays(state, fire, force: bool = False,
     # features in the wrong place -- or, when the grids differed in
     # size, dropped them off the image entirely.
     crop = crop_path or getattr(fire, 'crop_bin', '')
+
+    # Fall back to the fire's loaded stack when the requested product
+    # is not on disk right now.
+    #
+    # Every product of a fire covers the SAME AOI on the same grid, so
+    # another product's overlay coordinates are correct for this one.
+    # Returning an empty set instead was the bug behind "the tile grid
+    # and BCWS features vanish for certain sources": a product whose
+    # stack lives only in the durable store answered with no content,
+    # the client cached that as authoritative, and the overlays never
+    # came back for the rest of the session.
+    if crop_path and not os.path.isfile(crop_path):
+        _own = getattr(fire, 'crop_bin', '')
+        if _own and os.path.isfile(_own):
+            sys.stderr.write(
+                '[fire_overlays] %s: %s is not on disk; using the '
+                'loaded stack, which is the same AOI grid\n'
+                % (getattr(fire, 'fire_numbe', '?'),
+                   os.path.basename(crop_path)))
+            crop = _own
+
     if not crop or not os.path.isfile(crop):
-        return {'tiles': [], 'bcws': {}, 'width': 0, 'height': 0}
+        # An explicit error, NOT an empty success. The client must be
+        # able to tell "nothing to draw" from "could not build it",
+        # because it caches the first and retries the second.
+        return {'tiles': [], 'bcws': {}, 'width': 0, 'height': 0,
+                'error': 'no readable stack for this fire yet'}
 
     gt, proj, w, h = _crop_info(crop)
 

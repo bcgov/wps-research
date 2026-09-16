@@ -2978,13 +2978,19 @@ async function loadOverlaysForProduct(key) {
             + `?prod=${encodeURIComponent(key)}`);
         if (!r.ok) return null;
         const data = await r.json();
-        if (data && !data.error) {
+        // Cache only a payload that can actually be drawn. An empty
+        // one means the server could not build it yet; caching that
+        // made the absence permanent.
+        if (overlaysUsable(data)) {
             _overlayCache.set(key, data);
             log(`[overlays] ${key}: ${(data.tiles || []).length} tile(s), `
                 + `${((data.bcws || {}).polygons || []).length} polygon(s)`,
                 'dim');
             return data;
         }
+        log(`[overlays] ${key}: nothing usable returned`
+            + `${data && data.error ? ' (' + data.error + ')' : ''}`
+            + '; will retry', 'dim');
     } catch (err) {
         log(`[overlays] ${key}: ${err.message}`, 'dim');
     }
@@ -3099,16 +3105,23 @@ function drawOverlayLayer(pane) {
     // set lands in the wrong place, or off the image entirely, which
     // is how the tile grid and BCWS features went missing on some
     // products but not others.
-    let _ov = null;
-    try {
-        _ov = _overlayCache.get(paneProductKey(pane)) || null;
-    } catch (_) { _ov = null; }
-    if (!_ov) _ov = _fireOverlays;
-    // Not fetched yet? Ask for it, and redraw when it lands.
-    if (!_ov && overlaysVisible) {
+    // ONE resolution rule, shared with every other painter.
+    //
+    // This used to resolve the overlay set inline, which is how the
+    // painters drifted apart: the canvas, the baked bitmap and a
+    // captured frame each decided for themselves which product's
+    // vectors to use.
+    const _ov = overlaysForPane(pane);
+
+    // Always fetch this product's own set if we do not have it yet,
+    // even when a sibling product's set is being drawn in the
+    // meantime -- so the pane converges on its own coordinates rather
+    // than settling for a stand-in.
+    if (overlaysVisible) {
         try {
             const _k = paneProductKey(pane);
-            if (_k && !_overlayPending.has(_k)) {
+            if (_k && !overlaysUsable(_overlayCache.get(_k))
+                    && !_overlayPending.has(_k)) {
                 _overlayPending.add(_k);
                 loadOverlaysForProduct(_k).then((d) => {
                     _overlayPending.delete(_k);
@@ -3175,9 +3188,22 @@ function drawOverlayLayer(pane) {
                 window._ovlWarned = `${cw}x${ch}|${g.rw}x${g.rh}`;
                 log(`[overlay] not drawing: vectors are for `
                     + `${cw}x${ch} but this pane shows ${g.rw}x${g.rh}. `
-                    + `Reloading overlays.`, 'error');
-                try { loadFireOverlays(); } catch (_) {}
+                    + `Fetching this product's own overlays.`, 'error');
             }
+            // Outside the warning throttle: the fetch must happen
+            // every time the mismatch is seen, or one early mismatch
+            // leaves the pane without overlays for good.
+            try {
+                const _mk = paneProductKey(pane);
+                if (_mk && !_overlayPending.has(_mk)) {
+                    _overlayPending.add(_mk);
+                    _overlayCache.delete(_mk);
+                    loadOverlaysForProduct(_mk).then((d) => {
+                        _overlayPending.delete(_mk);
+                        if (d) drawOverlayLayer(pane);
+                    }).catch(() => _overlayPending.delete(_mk));
+                }
+            } catch (_) {}
             cv.style.display = 'none';
             return;
         }
@@ -3286,13 +3312,50 @@ window.addEventListener('resize', () => {
 // One rule, used by every painter, so the canvas overlay, the baked
 // bitmap and a captured frame can never disagree about which
 // product's vectors they are drawing.
+// Is this payload actually usable for drawing?
+//
+// width/height are the crop dimensions every overlay coordinate is
+// expressed in. A payload without them cannot be drawn, and -- this is
+// the part that mattered -- must never be cached, or the product it
+// was fetched for stays blank for the rest of the session.
+function overlaysUsable(d) {
+    return !!(d && !d.error && (d.width > 0) && (d.height > 0));
+}
+
 function overlaysForPane(pane) {
+    // 1. This product's own set.
     try {
         const k = paneProductKey(pane);
         const hit = k ? _overlayCache.get(k) : null;
-        if (hit) return hit;
+        if (overlaysUsable(hit)) return hit;
     } catch (_) { /* fall through */ }
-    return _fireOverlays;
+    // 2. A sibling product's set, PREFERRING one whose crop
+    //    dimensions match this pane's raster.
+    //
+    //    Products of a fire share the AOI grid, so a sibling's
+    //    coordinates are correct here -- but the painter refuses to
+    //    draw a set whose dimensions disagree with the pane, so a
+    //    mismatched sibling would be fetched and then discarded.
+    //    Matching first makes the fallback actually reach the canvas.
+    try {
+        let anyUsable = null;
+        let want = null;
+        try {
+            const { img } = getPaneElements(pane);
+            const d = paneImageDims(img);
+            if (d && d.w > 0 && d.h > 0) want = d;
+        } catch (_) { want = null; }
+        for (const v of _overlayCache.values()) {
+            if (!overlaysUsable(v)) continue;
+            if (!anyUsable) anyUsable = v;
+            if (want && v.width === want.w && v.height === want.h) {
+                return v;
+            }
+        }
+        if (anyUsable) return anyUsable;
+    } catch (_) { /* fall through */ }
+    // 3. Whatever was loaded for the fire as a whole.
+    return overlaysUsable(_fireOverlays) ? _fireOverlays : null;
 }
 
 function paintOverlayVectors(ctx, unit, sizeMul, ov) {
