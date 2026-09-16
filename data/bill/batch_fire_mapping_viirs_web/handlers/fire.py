@@ -567,6 +567,39 @@ class FireRoutes:
                     l2_start_date=(start if src == 'l2' else ''),
                     mrap_date=(post if src == 'mrap' else ''))
                 path = (info or {}).get('path', '')
+
+                # Did we build the product that was ASKED for?
+                #
+                # ensure_aoi_stack() decides the output name from the
+                # dates it resolves. If it ever falls back to a
+                # different date -- a missing source mosaic, a default
+                # applied somewhere -- the file it returns is a
+                # perfectly good stack for the WRONG product, and the
+                # requested key simply never appears. Reporting that as
+                # an error names the problem instead of leaving an
+                # operator to wonder why a date they asked for is
+                # missing.
+                from ..prepare import product_key_for_path as _pkfp
+                _made = _pkfp(path) if path else ''
+                if _made and _made != key:
+                    return key, '', (
+                        f'built {_made} instead of {key} -- the '
+                        f'requested date could not be produced'
+                    ), time.time() - t0
+
+                # And does it cover this AOI? A stack that does not
+                # will be withheld from the selector, so treat it as a
+                # failure here rather than a silent disappearance.
+                try:
+                    from ..aoi_stack import stack_covers_bbox
+                    if stack_covers_bbox(path, fire.bbox_native) is False:
+                        return key, '', (
+                            'the stack built for this date does not '
+                            'cover the fire AOI'
+                        ), time.time() - t0
+                except Exception:
+                    pass
+
                 # Make it switch-ready here, not on first switch.
                 try:
                     from ..prepare import warm_product_artifacts

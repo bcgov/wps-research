@@ -5286,6 +5286,8 @@ function _haveProduct(key) {
 // Everything the operator asked for in the current batch, so the end
 // of the batch can be checked against it rather than assumed.
 let _buildRequested = [];
+// Per-product failure reasons from the last batch.
+let _lastBuildErrors = [];
 
 function reportBatchOutcome() {
     if (!_buildRequested.length) return;
@@ -5293,16 +5295,26 @@ function reportBatchOutcome() {
     _buildRequested = [];
     const missing = want.filter((k) => !_haveProduct(k));
     const got = want.length - missing.length;
+    // The server records a reason per product; show it rather than
+    // only naming what is absent.
+    const why = new Map();
+    for (const e of (_lastBuildErrors || [])) {
+        const ix = String(e).indexOf(':');
+        if (ix > 0) why.set(String(e).slice(0, ix).trim(),
+                            String(e).slice(ix + 1).trim());
+    }
     if (missing.length) {
         log(`[build] ${got} of ${want.length} requested product(s) `
             + `are present; MISSING: ${missing.join(', ')}. `
-            + `They were requested but did not appear -- see the `
-            + `server log for the build error.`, 'error');
+            + missing.map((k) => `\n    ${k}: ${why.get(k)
+                || 'no reason reported by the server'}`).join(''),
+            'error');
         const prog = document.getElementById('date-picker-progress');
         if (prog) {
             prog.style.display = '';
             prog.textContent = `${got} of ${want.length} built. `
-                + `Did not appear: ${missing.join(', ')}.`;
+                + missing.map((k) => `${k}: ${why.get(k)
+                    || 'no reason reported by the server'}`).join(' | ');
         }
     } else {
         log(`[build] all ${want.length} requested product(s) are `
@@ -5356,9 +5368,22 @@ function startBuildWatch() {
                     // batch, which stage of that build, how far into the
                     // stage, elapsed, and both estimates.
                     const parts = [];
-                    parts.push(`Building ${productLabel(
-                        _products.find((q) => q.key === j.current)
-                        || parseProductKey(j.current || ''))}`);
+                    // j.current can name SEVERAL products: the server
+                    // builds a batch in parallel and joins their keys
+                    // with commas. Passing that string to
+                    // parseProductKey() matched nothing, so
+                    // productLabel() fell through to its default --
+                    // which is why a batch of MRAP composites was
+                    // announced as "Building L2 recent tile". The
+                    // builds were correct; only this line was wrong.
+                    parts.push('Building ' + String(j.current || '')
+                        .split(',')
+                        .map((k) => k.trim())
+                        .filter(Boolean)
+                        .map((k) => productLabel(
+                            _products.find((q) => q.key === k)
+                            || parseProductKey(k)))
+                        .join(' + '));
                     parts.push(`${j.done + 1} of ${j.total}`);
                     if (j.stage) {
                         const pct = (typeof j.stage_fraction === 'number')
@@ -5422,8 +5447,10 @@ function startBuildWatch() {
                         ? `Finished with ${j.errors.length} error(s).`
                         : 'Builds finished.';
                 }
-                if ((j.errors || []).length) {
-                    log(`[build] ${j.errors.join('; ')}`, 'error');
+                _lastBuildErrors = j.errors || [];
+                if (_lastBuildErrors.length) {
+                    log(`[build] ${_lastBuildErrors.join('; ')}`,
+                        'error');
                 }
                 await checkForNewProducts('builds finished');
                 // Compare what arrived against what was asked for.
