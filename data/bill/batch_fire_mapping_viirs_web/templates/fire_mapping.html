@@ -4374,6 +4374,8 @@ async function openMrapDatePicker(dlg, list, note, prog) {
             return `<label style="display:flex;gap:8px;align-items:center;
                         padding:3px 0;cursor:pointer">
                 <input type="checkbox" name="mrap-date" value="${d.date}"
+                       ${_haveProduct('mrap_p' + d.date)
+                         ? 'disabled title="Already built"' : ''}
                        ${d.date === cur ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="font-family:monospace">${d.date}</span>
@@ -4474,7 +4476,10 @@ async function openDatePicker() {
               <label style="display:flex;align-items:center;gap:8px;
                             font-size:12px;cursor:pointer">
                 <input type="checkbox" name="l2-date" class="date-pick"
-                       value="${d.date}" ${d.date === sel ? 'checked' : ''}>
+                       value="${d.date}"
+                       ${_haveProduct('l2_d' + d.date)
+                         ? 'disabled title="Already built"' : ''}
+                       ${d.date === sel ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="min-width:6.5em">${pretty}</span>
                 <span style="color:#888;min-width:7em">${d.zips} zip(s),
@@ -4525,6 +4530,9 @@ async function applyMrapDateSelection() {
     const toBuild = keys.filter((k) => !already.has(k));
     const target = keys[keys.length - 1];
 
+    // Remember the request, so the end of the batch can be checked
+    // against it instead of assumed successful.
+    _buildRequested = keys.slice();
     _dateApplying = true;
     setApplyEnabled(false);
     try {
@@ -4545,8 +4553,13 @@ async function applyMrapDateSelection() {
             await switchToProduct(target);
             closeDatePicker();
         } else if (prog) {
-            prog.textContent = 'Building. You can close this and carry '
-                + 'on; the builds continue.';
+            prog.textContent =
+                `Queued ${toBuild.length} build(s): `
+                + `${toBuild.map((k) => parseProductKey(k).post
+                                       || parseProductKey(k).date
+                                       || k).join(', ')}`
+                + '. Progress appears here; you can close this window '
+                + 'and the builds carry on.';
             // Show it as soon as the queue produces it.
             _switchWhenBuilt = target;
         }
@@ -4627,6 +4640,9 @@ async function applyDateSelection() {
     const toBuild = keys.filter((k) => !already.has(k));
     const target = keys[keys.length - 1];
 
+    // Remember the request, so the end of the batch can be checked
+    // against it instead of assumed successful.
+    _buildRequested = keys.slice();
     _dateApplying = true;
     setApplyEnabled(false);
     try {
@@ -4653,8 +4669,12 @@ async function applyDateSelection() {
             await switchToProduct(target);
             closeDatePicker();
         } else if (prog) {
-            prog.textContent = 'Building. You can close this and carry '
-                + 'on; the builds continue and the product appears in '
+            prog.textContent =
+                `Queued ${toBuild.length} build(s): `
+                + `${toBuild.map((k) => parseProductKey(k).date
+                                       || k).join(', ')}`
+                + '. Progress appears here; the builds carry on and '
+                + 'each product appears in '
                 + 'the selector when it is ready.';
             _switchWhenBuilt = target;
         }
@@ -5223,11 +5243,61 @@ let _buildWatch = null;
 // opening the dialog when nothing is queued would announce "Builds
 // finished" for builds that never started.
 let _buildSeen = false;
+// Ticks the watcher will wait before believing a batch is not running.
+let _buildGrace = 0;
 // Whether the bottom progress bar is currently reporting OUR builds.
 let _buildBarOn = false;
+// Is this product already built and offered?
+//
+// Used to grey out a date the fire already has: ticking it achieves
+// nothing, and the server skips it anyway, so offering it only invites
+// the impression that a build was requested and lost.
+function _haveProduct(key) {
+    try {
+        return _products.some((q) => q && q.key === key
+                              && q.built !== false);
+    } catch (_) { return false; }
+}
+
+// Everything the operator asked for in the current batch, so the end
+// of the batch can be checked against it rather than assumed.
+let _buildRequested = [];
+
+function reportBatchOutcome() {
+    if (!_buildRequested.length) return;
+    const want = _buildRequested.slice();
+    _buildRequested = [];
+    const missing = want.filter((k) => !_haveProduct(k));
+    const got = want.length - missing.length;
+    if (missing.length) {
+        log(`[build] ${got} of ${want.length} requested product(s) `
+            + `are present; MISSING: ${missing.join(', ')}. `
+            + `They were requested but did not appear -- see the `
+            + `server log for the build error.`, 'error');
+        const prog = document.getElementById('date-picker-progress');
+        if (prog) {
+            prog.style.display = '';
+            prog.textContent = `${got} of ${want.length} built. `
+                + `Did not appear: ${missing.join(', ')}.`;
+        }
+    } else {
+        log(`[build] all ${want.length} requested product(s) are `
+            + `present`, 'dim');
+    }
+}
+
 function startBuildWatch() {
     if (_buildWatch) return;
     _buildSeen = false;
+    // Ticks to allow before believing "nothing is running".
+    //
+    // The first tick fires immediately, which can be before the queue
+    // POST has registered the job. Concluding "finished" there
+    // re-enabled Apply and stopped the watch a moment before the
+    // builds actually started -- which is exactly why Apply did not
+    // grey out and the dialog showed a bare "Building" line with no
+    // progress behind it.
+    _buildGrace = 6;
     const tick = async () => {
         try {
             const r = await fetch(
@@ -5289,6 +5359,18 @@ function startBuildWatch() {
                     }
                     prog.textContent = parts.join(' \u00b7 ');
                 }
+            } else if (!_buildSeen && _buildGrace > 0 && _dateApplying) {
+                // Only while an Apply is actually in flight. On a plain
+                // page load the first "not running" is the truth and
+                // should be acted on at once.
+                // Not registered yet. Keep Apply locked and wait.
+                _buildGrace -= 1;
+                setApplyEnabled(false);
+                if (prog) {
+                    prog.style.display = '';
+                    prog.textContent = 'Queued. Waiting for the builder '
+                        + 'to pick this batch up ...';
+                }
             } else {
                 clearInterval(_buildWatch);
                 _buildWatch = null;
@@ -5297,7 +5379,7 @@ function startBuildWatch() {
                     _buildBarOn = false;
                     try { layerBusyEnd(); } catch (_) {}
                 }
-                setApplyEnabled(true);
+                if (!_dateApplying) setApplyEnabled(true);
                 // Close the dialog once the batch it started has
                 // finished. Leaving it open makes the operator dismiss
                 // a window whose work is done; it stays open while
@@ -5318,6 +5400,8 @@ function startBuildWatch() {
                     log(`[build] ${j.errors.join('; ')}`, 'error');
                 }
                 await checkForNewProducts('builds finished');
+                // Compare what arrived against what was asked for.
+                try { reportBatchOutcome(); } catch (_) {}
                 // Show the product the operator asked for, now that it
                 // exists.
                 if (_switchWhenBuilt) {
