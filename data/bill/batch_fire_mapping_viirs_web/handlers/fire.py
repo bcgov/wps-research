@@ -529,6 +529,18 @@ class FireRoutes:
         todo = [k for k in sorted(set(keys), reverse=True)
                 if k not in have]
         skipped = len(set(keys)) - len(todo)
+        # Say what was asked for and what will actually be built.
+        #
+        # "Nothing happened" has two very different causes -- the
+        # request was skipped as already-built, or it was queued and
+        # failed -- and they are indistinguishable from the outside.
+        sys.stderr.write(
+            '[build] %s: requested %s | already built: %s | queuing: '
+            '%s\n'
+            % (fire_numbe, ', '.join(sorted(set(keys))) or '-',
+               ', '.join(sorted(k for k in set(keys) if k in have))
+               or 'none',
+               ', '.join(todo) or 'nothing'))
 
         with state.lock:
             jobs = getattr(state, 'product_builds', None)
@@ -590,9 +602,21 @@ class FireRoutes:
                 # And does it cover this AOI? A stack that does not
                 # will be withheld from the selector, so treat it as a
                 # failure here rather than a silent disappearance.
+                #
+                # The log line names the file, its grid and the verdict,
+                # so "the build said it worked but the product is not in
+                # the menu" can be answered from the log alone.
                 try:
-                    from ..aoi_stack import stack_covers_bbox
-                    if stack_covers_bbox(path, fire.bbox_native) is False:
+                    from ..aoi_stack import (stack_covers_bbox,
+                                             existing_hdr)
+                    _cov = stack_covers_bbox(path, fire.bbox_native)
+                    sys.stderr.write(
+                        '[build] %s: %s -> %s (hdr=%s, rebuilt=%s, '
+                        'covers_aoi=%s)\n'
+                        % (fire_numbe, key, os.path.basename(path),
+                           os.path.basename(existing_hdr(path) or 'NONE'),
+                           (info or {}).get('rebuilt'), _cov))
+                    if _cov is False:
                         return key, '', (
                             'the stack built for this date does not '
                             'cover the fire AOI'
@@ -3262,6 +3286,16 @@ class FireRoutes:
         except OSError:
             return 0
 
+    @staticmethod
+    def _hdr_exists(bin_path):
+        """Either ENVI header convention counts."""
+        try:
+            from ..aoi_stack import existing_hdr
+            return bool(existing_hdr(bin_path))
+        except Exception:
+            return os.path.isfile(
+                os.path.splitext(bin_path or '')[0] + '.hdr')
+
     def _built_products(self, fire_numbe, fire):
         """Every product on disk for this AOI, newest first.
 
@@ -3301,7 +3335,11 @@ class FireRoutes:
                     # Complete means usable: a bare .bin from an
                     # interrupted build would offer an entry that
                     # cannot be displayed.
-                    if not os.path.isfile(stem + '.hdr'):
+                    # Either header convention: a raster written with
+                    # <name>.bin.hdr is just as readable as one with
+                    # <stem>.hdr, and both exist in this data.
+                    from ..aoi_stack import existing_hdr as _ehdr
+                    if not _ehdr(cand):
                         continue
                     src, start, post = product_parts(key)
                     if src == 'l2' and not os.path.isfile(
@@ -3990,7 +4028,7 @@ class FireRoutes:
                     stem = os.path.splitext(path)[0]
                     return (os.path.isfile(path)
                             and os.path.getsize(path) > 0
-                            and os.path.isfile(stem + '.hdr')
+                            and self._hdr_exists(cand)
                             and os.path.isfile(date_polygons_path(path)))
 
                 hits = [h for h in hits if _complete(h)]

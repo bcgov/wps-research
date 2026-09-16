@@ -380,7 +380,13 @@ def durable_products(fire) -> list:
         # diagnose from the outside: the file is on disk and the menu
         # does not list it. One line per decision turns that into a
         # five-second answer.
-        if not os.path.isfile(os.path.splitext(cand)[0] + '.hdr'):
+        # Either ENVI header convention counts: <stem>.hdr or
+        # <name>.bin.hdr. Both are present in this data, and a raster
+        # written with the second was being treated as headerless.
+        _h = (os.path.splitext(cand)[0] + '.hdr')
+        if not os.path.isfile(_h) and os.path.isfile(cand + '.hdr'):
+            _h = cand + '.hdr'
+        if not os.path.isfile(_h):
             rejected += 1
             sys.stderr.write(
                 '[persist] %s: skip %s -- no .hdr beside it\n'

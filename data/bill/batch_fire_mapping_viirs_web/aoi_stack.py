@@ -87,10 +87,10 @@ def list_mrap_dates(mrap_dir: str = MRAP_DIR) -> list:
             if not m:
                 continue
             path = os.path.join(mrap_dir, name)
-            stem = os.path.splitext(path)[0]
             # A mosaic that cannot be opened -- no header, or still
             # being written -- would only produce a failed build later.
-            if not os.path.isfile(stem + '.hdr'):
+            # Either header convention counts: see existing_hdr().
+            if not existing_hdr(path):
                 continue
             if not mosaic_is_readable(path):
                 sys.stderr.write(
@@ -114,9 +114,13 @@ def find_mrap_for_date(date: str, mrap_dir: str = MRAP_DIR):
     if not re.fullmatch(r'\d{8}', date or ''):
         return None, None
     cand = os.path.join(mrap_dir, f'{date}_mrap.bin')
-    if os.path.isfile(cand) and os.path.isfile(
-            os.path.splitext(cand)[0] + '.hdr'):
+    # Either header convention counts: see existing_hdr().
+    if os.path.isfile(cand) and existing_hdr(cand):
         return date, cand
+    if os.path.isfile(cand):
+        sys.stderr.write(
+            '[mrap] %s exists but has no .hdr in either form; it '
+            'cannot be opened\n' % os.path.basename(cand))
     return None, None
 
 
@@ -133,7 +137,7 @@ def mosaic_is_readable(path: str) -> bool:
     """
     if not path or not os.path.isfile(path):
         return False
-    if not os.path.isfile(_hdr_for(path)):
+    if not existing_hdr(path):
         return False
     try:
         ds = gdal.Open(path, gdal.GA_ReadOnly)
@@ -197,7 +201,29 @@ def find_latest_mrap(mrap_dir: str = MRAP_DIR):
 
 
 def _hdr_for(bin_path: str) -> str:
+    """The header path to WRITE for a raster: <stem>.hdr."""
     return os.path.splitext(bin_path)[0] + '.hdr'
+
+
+def existing_hdr(bin_path: str) -> str:
+    """The header that actually exists for a raster, or ''.
+
+    ENVI has two conventions: <stem>.hdr, and <name>.bin.hdr with the
+    extension appended rather than replaced. GDAL reads either. The
+    mosaics in /data/mrap_bc all use the first form; some older STACKS
+    in the durable store carry the second. Accepting both costs
+    nothing and removes a whole class of "the file is right there"
+    failure -- but it was NOT the cause of the missing dated MRAP
+    composites, and this docstring said so before the mosaic listing
+    proved otherwise.
+    """
+    if not bin_path:
+        return ''
+    for cand in (os.path.splitext(bin_path)[0] + '.hdr',
+                 bin_path + '.hdr'):
+        if os.path.isfile(cand):
+            return cand
+    return ''
 
 
 def _parse_band_names(hdr_path: str):
@@ -466,8 +492,10 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                     f'{xsize}x{ysize}')
             n_band = min(n_band, ds_override.RasterCount)
 
-        pre_names = _parse_band_names(_hdr_for(pre_bin))
-        post_names = _parse_band_names(_hdr_for(post_bin))
+        pre_names = _parse_band_names(existing_hdr(pre_bin)
+                                      or _hdr_for(pre_bin))
+        post_names = _parse_band_names(existing_hdr(post_bin)
+                                       or _hdr_for(post_bin))
         pre_date = _date_from_band_names(pre_names)
         # Suffixes ("B12 2190nm MRAP") drive every generated band name,
         # exactly as sentinel2_anomaly3 does.
@@ -752,11 +780,12 @@ def stack_is_valid(path: str, expect_w: int = 0, expect_h: int = 0) -> bool:
 
     Checks the header exists too: a .bin with no .hdr is unreadable as
     ENVI, which is exactly the state a partially-cleared ramdisk can
-    leave behind.
+    leave behind. Either header convention counts -- see
+    existing_hdr() -- because both are present in this data.
     """
     if not path or not os.path.isfile(path):
         return False
-    if not os.path.isfile(_hdr_for(path)):
+    if not existing_hdr(path):
         return False
     try:
         if os.path.getsize(path) == 0:
@@ -861,6 +890,9 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             raise AoiStackError(
                 f'No province-wide MRAP mosaic for {mrap_date} in '
                 f'{MRAP_DIR}.')
+        sys.stderr.write(
+            '[aoi_stack] %s: MRAP %s -> %s\n'
+            % (identifier, mrap_date, os.path.basename(post_bin)))
     if not post_bin:
         post_date, post_bin = find_latest_mrap()
     out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir,
@@ -885,21 +917,27 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
         ds = None
         return info
 
+    # A stack from a DIFFERENT extent is not an input, and deleting it
+    # is not enough.
+    #
+    # A fire deleted and recreated leaves a stack at exactly the path a
+    # new build writes: same name, same identity hash, same product
+    # key. Removing the file and carrying on does not work, because the
+    # durable-restore step below then copies the very same stale file
+    # back from .stacks and the build is skipped again. Forcing the
+    # rebuild skips both the reuse and the restore, which is the only
+    # way the requested date actually gets made.
+    if not force and stack_is_valid(out_bin) \
+            and stack_covers_bbox(out_bin, bbox_native) is False:
+        sys.stderr.write(
+            '[aoi_stack] %s covers a different extent than this AOI; '
+            'forcing a rebuild (its durable copy is stale too, so a '
+            'plain delete would just be restored)\n'
+            % os.path.basename(out_bin))
+        force = True
+
     if not force and stack_is_valid(out_bin):
-        _cov = stack_covers_bbox(out_bin, bbox_native)
-        if _cov is False:
-            sys.stderr.write(
-                '[aoi_stack] %s exists but covers a different extent '
-                'than this AOI; rebuilding rather than reporting a '
-                'product that the selector would then withhold\n'
-                % os.path.basename(out_bin))
-            for _sfx in ('.bin', '.hdr'):
-                try:
-                    os.remove(os.path.splitext(out_bin)[0] + _sfx)
-                except OSError:
-                    pass
-        else:
-            return _describe(False)
+        return _describe(False)
 
     # A present-but-unreadable stack is rubbish, not a build input.
     #
