@@ -258,6 +258,27 @@ def _grid_of(path: str):
     on the books IS that AOI's, and one that does not belongs to a
     different incident that merely shared a name.
     """
+    # The RASTER is the authority on its own grid.
+    #
+    # The sidecar is written beside the stack and is not always
+    # rewritten when the stack is: a retired-and-rebuilt product keeps
+    # the old _overlays.json, so the enumeration judged a perfectly
+    # good new stack by the grid of the one it replaced -- and withheld
+    # it from the selector with no error anywhere, because the build
+    # itself had succeeded. Read the file when it is there.
+    if path.endswith('.bin') and os.path.isfile(path):
+        try:
+            from osgeo import gdal
+            ds = gdal.Open(path, gdal.GA_ReadOnly)
+            if ds is not None:
+                gt = ds.GetGeoTransform()
+                w, h = ds.RasterXSize, ds.RasterYSize
+                ds = None
+                if gt and w > 0 and h > 0:
+                    return w, h, [float(v) for v in gt]
+        except Exception:
+            pass
+
     stem = os.path.splitext(path)[0]
     for side in (stem + '_overlays.json', stem + '_dates.json'):
         try:

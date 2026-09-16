@@ -271,6 +271,33 @@ def _date_from_band_names(names, fallback: str = '') -> str:
 # Window geometry
 # ----------------------------------------------------------------------
 
+def _read_window_padded(band, xoff, yoff, xsize, ysize,
+                        raster_w, raster_h):
+    """Read a window that may extend beyond the raster.
+
+    Returns a full xsize-by-ysize float32 array; anything outside the
+    raster is NaN. GDAL refuses an out-of-range window, so the caller
+    used to avoid that by CLIPPING the window to the source -- which is
+    what made a fire's products come out on different grids: a source
+    covering less than the AOI produced a smaller, shifted stack, and
+    the overlays, the zoom and every grid comparison then disagreed
+    between products of the same fire.
+    """
+    out = np.full((ysize, xsize), np.nan, dtype=np.float32)
+    sx0 = max(0, xoff)
+    sy0 = max(0, yoff)
+    sx1 = min(raster_w, xoff + xsize)
+    sy1 = min(raster_h, yoff + ysize)
+    if sx1 <= sx0 or sy1 <= sy0:
+        return out                       # no overlap at all
+    data = band.ReadAsArray(sx0, sy0, sx1 - sx0, sy1 - sy0)
+    if data is None:
+        return out
+    out[sy0 - yoff:sy1 - yoff, sx0 - xoff:sx1 - xoff] = \
+        np.asarray(data, dtype=np.float32)
+    return out
+
+
 def _window_for_bbox(gt, raster_w, raster_h, xmin, ymin, xmax, ymax):
     """Map a native-CRS bbox to an integer pixel window.
 
@@ -301,14 +328,29 @@ def _window_for_bbox(gt, raster_w, raster_h, xmin, ymin, xmax, ymax):
     y0 = int(np.floor(min(rows)))
     y1 = int(np.ceil(max(rows)))
 
-    x0c = max(0, min(raster_w, x0))
-    x1c = max(0, min(raster_w, x1))
-    y0c = max(0, min(raster_h, y0))
-    y1c = max(0, min(raster_h, y1))
+    # The window is the AOI, NOT the part of it this source happens to
+    # cover.
+    #
+    # Clipping to the raster made the output grid depend on the source:
+    # a mosaic or tile set covering less than the AOI produced a
+    # smaller stack at a shifted origin, so two products of the same
+    # fire ended up on different grids -- 1445x1737 for one date,
+    # 1495x1739 for another. Everything downstream then disagreed: the
+    # overlays refused to draw, the view jumped when stepping between
+    # products, and each new build retired the others as "old grid".
+    # The AOI is a property of the FIRE, so it is the same for every
+    # product; pixels the source does not reach are nodata.
+    x0c, x1c, y0c, y1c = x0, x1, y0, y1
 
     xsize = x1c - x0c
     ysize = y1c - y0c
     if xsize <= 0 or ysize <= 0:
+        raise AoiStackError('degenerate AOI window')
+    # Still require SOME overlap: a stack with no data at all is not
+    # worth building, and silently producing one would hide a genuine
+    # mismatch between the AOI and the source.
+    if (min(raster_w, x1) - max(0, x0) <= 0
+            or min(raster_h, y1) - max(0, y0) <= 0):
         raise AoiStackError(
             'AOI does not overlap the source raster extent')
 
@@ -479,6 +521,14 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
             gt, ds_pre.RasterXSize, ds_pre.RasterYSize,
             xmin, ymin, xmax, ymax)
+        # The grid this product will have. Identical for every product
+        # of a fire now, so any difference in this line between two
+        # builds of the same fire is a bug worth reporting.
+        sys.stderr.write(
+            '[aoi_stack] window %dx%d at (%.3f, %.3f) px %.6f  '
+            'from %s\n'
+            % (xsize, ysize, win_gt[0], win_gt[3], win_gt[1],
+               os.path.basename(out_bin)))
 
         if ds_override is not None:
             # The override was built on this same window, but guard
@@ -551,16 +601,19 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         for i in range(n_band):
             _p(f'reading band {i + 1}/{n_band}',
                0.05 + 0.85 * (i / max(1, n_band)))
-            pre_a = ds_pre.GetRasterBand(i + 1).ReadAsArray(
-                xoff, yoff, xsize, ysize).astype(np.float32)
+            pre_a = _read_window_padded(
+                ds_pre.GetRasterBand(i + 1), xoff, yoff, xsize, ysize,
+                ds_pre.RasterXSize, ds_pre.RasterYSize)
             if ds_override is not None:
                 # Already cropped to the AOI window and on the same
                 # grid, so it is read whole rather than windowed.
                 post_a = ds_override.GetRasterBand(
                     i + 1).ReadAsArray().astype(np.float32)
             else:
-                post_a = ds_post.GetRasterBand(i + 1).ReadAsArray(
-                    xoff, yoff, xsize, ysize).astype(np.float32)
+                post_a = _read_window_padded(
+                    ds_post.GetRasterBand(i + 1), xoff, yoff,
+                    xsize, ysize,
+                    ds_post.RasterXSize, ds_post.RasterYSize)
 
             # Anomaly, matching sentinel2_anomaly3.cpp exactly. That
             # code does the raw float division with no zero guard, so
@@ -935,6 +988,16 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             'plain delete would just be restored)\n'
             % os.path.basename(out_bin))
         force = True
+        # Drop the sidecars as well. They describe the OLD grid, and
+        # anything that reads them afterwards -- the product
+        # enumeration, the overlay builder -- would judge the new stack
+        # by the old one's dimensions.
+        _stem = os.path.splitext(out_bin)[0]
+        for _side in ('_overlays.json', '_dates.json'):
+            try:
+                os.remove(_stem + _side)
+            except OSError:
+                pass
 
     if not force and stack_is_valid(out_bin):
         return _describe(False)
