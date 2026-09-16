@@ -776,6 +776,56 @@ def stack_is_valid(path: str, expect_w: int = 0, expect_h: int = 0) -> bool:
     return True
 
 
+def stack_covers_bbox(path: str, bbox_native, slack_px: float = 1.5):
+    """Does the stack at *path* actually cover this bounding box?
+
+    A file being readable says nothing about WHERE it is. A fire that
+    was deleted and recreated, or whose bounding box was repaired,
+    leaves a stack from its previous extent at exactly the path a new
+    build would write -- same fire name, same identity hash, same
+    product key. Reusing it reports "already built" for a product
+    covering somebody else's ground, and the selector then withholds
+    that product because its grid does not match the AOI. From the
+    operator's side the date was requested, the build reported
+    success, and nothing appeared.
+
+    True when it covers the box, False when it does not, None when
+    that cannot be determined -- the caller treats None as "no
+    opinion" and leaves the file alone.
+    """
+    if not bbox_native or not path or not os.path.isfile(path):
+        return None
+    try:
+        xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
+    except (TypeError, ValueError):
+        return None
+    ds = None
+    try:
+        ds = gdal.Open(path, gdal.GA_ReadOnly)
+        if ds is None:
+            return None
+        gt = ds.GetGeoTransform()
+        w, h = ds.RasterXSize, ds.RasterYSize
+        if not gt or not w or not h:
+            return None
+        px = abs(float(gt[1])) or 20.0
+        py = abs(float(gt[5])) or px
+        tol_x, tol_y = px * slack_px, py * slack_px
+        if abs(float(gt[0]) - xmin) > tol_x:
+            return False
+        if abs(float(gt[3]) - ymax) > tol_y:
+            return False
+        if abs(w * px - (xmax - xmin)) > tol_x * 2:
+            return False
+        if abs(h * py - (ymax - ymin)) > tol_y * 2:
+            return False
+        return True
+    except Exception:
+        return None
+    finally:
+        ds = None
+
+
 def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                      ram_dir: str = RAM_DIR, force: bool = False,
                      instance_key: str = '',
@@ -836,7 +886,20 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
         return info
 
     if not force and stack_is_valid(out_bin):
-        return _describe(False)
+        _cov = stack_covers_bbox(out_bin, bbox_native)
+        if _cov is False:
+            sys.stderr.write(
+                '[aoi_stack] %s exists but covers a different extent '
+                'than this AOI; rebuilding rather than reporting a '
+                'product that the selector would then withhold\n'
+                % os.path.basename(out_bin))
+            for _sfx in ('.bin', '.hdr'):
+                try:
+                    os.remove(os.path.splitext(out_bin)[0] + _sfx)
+                except OSError:
+                    pass
+        else:
+            return _describe(False)
 
     # A present-but-unreadable stack is rubbish, not a build input.
     #
@@ -866,7 +929,20 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             from .durable import restore_stack
             if restore_stack(out_bin, log=log_cb) \
                     and stack_is_valid(out_bin):
-                return _describe(False)
+                _cov = stack_covers_bbox(out_bin, bbox_native)
+                if _cov is False:
+                    sys.stderr.write(
+                        '[aoi_stack] the durable copy of %s covers a '
+                        'different extent; discarding it and building '
+                        'fresh\n' % os.path.basename(out_bin))
+                    for _sfx in ('.bin', '.hdr'):
+                        try:
+                            os.remove(
+                                os.path.splitext(out_bin)[0] + _sfx)
+                        except OSError:
+                            pass
+                else:
+                    return _describe(False)
         except Exception as _dexc:
             sys.stderr.write(f'[aoi_stack] durable restore: {_dexc}\n')
 

@@ -4567,8 +4567,20 @@ async function applyMrapDateSelection() {
         if (prog) prog.textContent = 'Failed: ' + err.message;
         log(`[products] MRAP apply failed: ${err.message}`, 'error');
     } finally {
-        _dateApplying = false;
-        setApplyEnabled(true);
+        // Hand over to the build watcher rather than declaring the
+        // apply finished here.
+        //
+        // The watcher is started by queueProductBuilds(), but its
+        // first poll resolves AFTER this block. Clearing the flag and
+        // re-enabling Apply here meant that poll -- which usually
+        // still sees "not running", because the queue has only just
+        // been handed over -- took the terminal branch and un-greyed
+        // the button a moment before the builds began. While a watcher
+        // is running, it owns both the flag and the button.
+        if (!_buildWatch) {
+            _dateApplying = false;
+            setApplyEnabled(true);
+        }
         checkForNewProducts('mrap apply');
     }
 }
@@ -4682,8 +4694,20 @@ async function applyDateSelection() {
         if (prog) prog.textContent = 'Failed: ' + err.message;
         log(`[products] L2 apply failed: ${err.message}`, 'error');
     } finally {
-        _dateApplying = false;
-        setApplyEnabled(true);
+        // Hand over to the build watcher rather than declaring the
+        // apply finished here.
+        //
+        // The watcher is started by queueProductBuilds(), but its
+        // first poll resolves AFTER this block. Clearing the flag and
+        // re-enabling Apply here meant that poll -- which usually
+        // still sees "not running", because the queue has only just
+        // been handed over -- took the terminal branch and un-greyed
+        // the button a moment before the builds began. While a watcher
+        // is running, it owns both the flag and the button.
+        if (!_buildWatch) {
+            _dateApplying = false;
+            setApplyEnabled(true);
+        }
         checkForNewProducts('l2 apply');
     }
 }
@@ -5379,7 +5403,9 @@ function startBuildWatch() {
                     _buildBarOn = false;
                     try { layerBusyEnd(); } catch (_) {}
                 }
-                if (!_dateApplying) setApplyEnabled(true);
+                // The batch is over: the watcher releases both.
+                _dateApplying = false;
+                setApplyEnabled(true);
                 // Close the dialog once the batch it started has
                 // finished. Leaving it open makes the operator dismiss
                 // a window whose work is done; it stays open while
