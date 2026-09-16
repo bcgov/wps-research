@@ -774,12 +774,22 @@ const SPLIT_AT_LOAD = {{{ split_at_load }}};
 // never changes under the imagery.
 document.addEventListener('DOMContentLoaded', () => {
     if (!SPLIT_AT_LOAD) return;
+    // Use the real toggle, not hand-edited classes.
+    //
+    // An earlier version set the CSS class directly so the layout
+    // would be right on the first paint. That left `splitActive`
+    // false while the page LOOKED split, so the variable and the
+    // screen disagreed: the Split button reported the wrong state,
+    // and the next toggle flipped a flag that was already wrong --
+    // which is how toggling split appeared not to persist.
+    // toggleSplit() sets the variable, the classes and the right-pane
+    // controls together, and the DOM is parsed by now.
     try {
-        const right = document.getElementById('image-area-right');
-        const cont = document.querySelector('.image-viewer-container');
-        if (right) right.style.display = '';
-        if (cont) cont.classList.add('split');
-    } catch (_) { /* toggleSplit() settles it either way */ }
+        if (!splitActive) toggleSplit(false);
+    } catch (err) {
+        log(`[ui] could not restore split layout: ${err.message}`,
+            'dim');
+    }
 });
 let cropW = 0, cropH = 0;
 let isMapping = false;
@@ -3612,12 +3622,17 @@ function saveUiState() {
     // request each would be pointless traffic.
     _uiSaveTimer = setTimeout(async () => {
         try {
+            const _st = collectUiState();
             await fetch(
                 `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json',
                               'X-Requested-With': 'fetch'},
-                    body: JSON.stringify({ui_state: collectUiState()})});
+                    body: JSON.stringify({ui_state: _st})});
+            log(`[ui] saved: split=${_st.split} `
+                + `left=${_st.left_key}/${_st.left_view} `
+                + `right=${_st.right_key}/${_st.right_view} `
+                + `overlays=${_st.overlays}`, 'dim');
         } catch (_) { /* a lost GUI preference is not worth a dialog */ }
     }, 800);
 }
@@ -3656,6 +3671,10 @@ document.addEventListener('visibilitychange', () => {
 function applySavedUiState(ui, kgcParams) {
     restoreUiState(ui, kgcParams);          // parameter boxes
     if (!ui) return;
+    log(`[ui] restoring: split=${ui.split} `
+        + `left=${ui.left_key}/${ui.left_view} `
+        + `right=${ui.right_key}/${ui.right_view} `
+        + `overlays=${ui.overlays}`, 'dim');
     _uiRestoring = true;
     try {
         const views = new Set(Array.from(
@@ -3728,8 +3747,18 @@ function applySavedUiState(ui, kgcParams) {
         // Split last: it reads the values above when it opens, and
         // openSplit(false) means "restoring", not "the user clicked",
         // so it must not re-derive the right pane's source.
-        if (ui.split && !splitActive && typeof toggleSplit === 'function') {
+        // Both directions.
+        //
+        // This only ever turned split ON, so a fire saved with split
+        // OFF stayed split if anything had already opened it -- the
+        // setting looked like it was not persisting when it was only
+        // ever being applied one way.
+        if (typeof ui.split === 'boolean'
+                && typeof toggleSplit === 'function'
+                && ui.split !== splitActive) {
             toggleSplit(false);
+        }
+        if (ui.split && splitActive) {
             setSel('view-select-right', rightView);
             setSourceSelectValue(
                 document.getElementById('post-source-select-right'),

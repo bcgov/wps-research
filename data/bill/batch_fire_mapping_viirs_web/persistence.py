@@ -835,10 +835,37 @@ def _load_fire_state():
 
             # Validate critical files exist before restoring status
             if saved_status in ('ready', 'mapped'):
-                crop_ok = (fire.crop_bin
-                           and os.path.isfile(fire.crop_bin))
-                hint_ok = (fire.hint_bin
-                           and os.path.isfile(fire.hint_bin))
+                # A file missing from the RAMDISK is not a missing
+                # file.
+                #
+                # /ram is tmpfs, so a reboot empties it while the
+                # durable store on real disk still holds every stack.
+                # Treating that as "the saved state is corrupt" sent
+                # every fire back to PENDING and re-prepared it from
+                # scratch -- minutes of rebuilding, after a restart in
+                # which nothing had actually changed. ensure_aoi_stack()
+                # restores from the store on first use, so a fire whose
+                # stack is in the store is ready, not pending.
+                def _have(path):
+                    if not path:
+                        return False
+                    if os.path.isfile(path):
+                        return True
+                    try:
+                        from .durable import store_dir
+                        d = store_dir()
+                        return bool(d) and os.path.isfile(
+                            os.path.join(d, os.path.basename(path)))
+                    except Exception:
+                        return False
+
+                crop_ok = _have(fire.crop_bin)
+                hint_ok = _have(fire.hint_bin)
+                if crop_ok and not os.path.isfile(fire.crop_bin or ''):
+                    sys.stderr.write(
+                        '[persistence] %s: stack is in the durable '
+                        'store, not on the ramdisk; keeping its saved '
+                        'status instead of re-preparing\n' % fn)
                 if crop_ok and hint_ok:
                     fire.status = FireStatus(saved_status)
                     restored += 1

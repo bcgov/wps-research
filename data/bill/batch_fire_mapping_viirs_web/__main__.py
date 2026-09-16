@@ -1199,6 +1199,44 @@ def main():
             for f in app_state.fires.values():
                 if f.status in (FireStatus.PENDING, FireStatus.PREPARING):
                     stuck.append(f)
+        # A fire whose work is actually FINISHED does not need redoing.
+        #
+        # PENDING/PREPARING only means a worker thread was alive when
+        # the server stopped -- it says nothing about whether that
+        # thread had already produced everything. A fire with a valid
+        # stack on its own AOI grid and rendered previews is ready; a
+        # full re-prepare would re-download VIIRS, re-extract tiles and
+        # rebuild the stack to arrive back where it already is, which
+        # is the wait after every restart.
+        ready_already = []
+        for f in list(stuck):
+            try:
+                from .aoi_stack import stack_is_valid, stack_covers_bbox
+                cb = getattr(f, 'crop_bin', '') or ''
+                prev = os.path.join(getattr(f, 'cache_dir', '') or '',
+                                    'previews', 'post.png')
+                if (cb and stack_is_valid(cb)
+                        and stack_covers_bbox(cb, f.bbox_native) is not False
+                        and os.path.isfile(prev)):
+                    stuck.remove(f)
+                    ready_already.append(f)
+            except Exception:
+                pass
+        if ready_already:
+            with app_state.lock:
+                for f in ready_already:
+                    f.status = FireStatus.READY
+                    f.progress = {}
+                    f.error_msg = ''
+            _log(f'      {len(ready_already)} fire(s) were marked '
+                 f'preparing but their stack and previews are complete; '
+                 f'marking ready without rebuilding: '
+                 + ', '.join(f.fire_numbe for f in ready_already))
+            try:
+                _save_fire_state()
+            except Exception:
+                pass
+
         if stuck:
             _log(f'      {len(stuck)} fire(s) were still preparing when '
                  f'the server stopped; resubmitting:')
