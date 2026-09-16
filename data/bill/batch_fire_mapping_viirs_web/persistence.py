@@ -402,6 +402,31 @@ def _save_fire_state():
         state_path = os.path.join(state.output_root, 'fire_state.yaml')
         _carry_forward_identity(state_path, data)
         _atomic_yaml_dump(state_path, data, mode=0o644)
+
+        # Mirror each fire's settings into its own manifest, written
+        # together with the YAML so the two cannot drift.
+        #
+        # fire_state.yaml stays the file the server loads from. The
+        # manifest is the complete per-fire record -- its files AND its
+        # settings, in one place beside its data -- and the safety net
+        # that fills in anything the YAML later loses.
+        _mn_ok = _mn_fail = 0
+        for _f in list(state.fires.values()):
+            try:
+                from .manifest import save_state as _msave
+                if _msave(_f):
+                    _mn_ok += 1
+                else:
+                    _mn_fail += 1
+            except Exception as _mexc:
+                _mn_fail += 1
+                sys.stderr.write(
+                    f'[manifest] {getattr(_f, "fire_numbe", "?")}: '
+                    f'state mirror failed: {_mexc}\n')
+        if _mn_fail:
+            sys.stderr.write(
+                f'[manifest] state mirrored for {_mn_ok} fire(s), '
+                f'{_mn_fail} failed\n')
     except Exception as exc:
         sys.stderr.write(
             f'[save] WARNING: Failed to save fire state: {exc}\n')
@@ -562,6 +587,19 @@ def _load_fire_state():
                 continue
         except Exception:
             pass
+
+        # Fill any gap from the fire's own manifest.
+        #
+        # Gap-filling only: whatever the YAML supplied above wins. This
+        # is what makes a fire survive a truncated or partially
+        # rewritten fire_state.yaml -- the settings and the results
+        # come back from the record beside its data.
+        try:
+            from .manifest import restore_state
+            restore_state(fire)
+        except Exception as _mexc:
+            sys.stderr.write(
+                f'[manifest] {fn}: state restore skipped: {_mexc}\n')
 
         # Restore hidden flag.
         #

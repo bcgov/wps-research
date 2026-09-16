@@ -128,6 +128,9 @@ class BaseHandler:
         (re.compile(r'^/api/bcws/overlay$'), 'handle_api_bcws_overlay'),
         (re.compile(r'^/api/tiles/overlay$'), 'handle_api_tiles_overlay'),
         (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/manifest$'),
+         'handle_api_fire_manifest'),
+        (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/overlays$'),
          'handle_api_fire_overlays'),
         (re.compile(

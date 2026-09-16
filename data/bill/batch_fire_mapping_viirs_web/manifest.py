@@ -492,3 +492,111 @@ def mirror_to_store(fire) -> str:
     except Exception as exc:
         sys.stderr.write(f'[manifest] mirror failed: {exc}\n')
         return ''
+
+
+# ---------------------------------------------- the fire's own state
+#
+# Everything the application knows about a fire, in one file beside
+# its data. fire_state.yaml remains the file the server LOADS from --
+# changing that would put every existing fire at risk for no benefit.
+# This is a complete, self-describing mirror written alongside it, so
+# that:
+#
+#   * there is one place to look that lists a fire's files AND the
+#     settings that go with them;
+#   * a fire survives the loss of fire_state.yaml, because the mirror
+#     can fill in anything the YAML no longer has;
+#   * the durable copy in .stacks/ makes a fire reconstructible from
+#     the store alone.
+#
+# The two are written together, so they cannot drift.
+
+STATE_FIELDS = (
+    # identity and extent
+    'fire_year', 'created_at', 'bbox_native', 'bbox_wgs84',
+    'padding_used', 'crop_w', 'crop_h',
+    'viirs_start_date', 'viirs_end_date', 'acc_start', 'acc_end',
+    'l2_start_date',
+    # what is loaded, and what the operator chose
+    'post_source', 'user_product', 'crop_bin', 'cache_dir',
+    'accepted_dir', 'hint_bin', 'viirs_bin', 'perim_bin',
+    'available_views', 'perimeter_type',
+    # GUI state: selectors, toggles, scaling, hint mode
+    'ui_state', 'hint_mode', 'restrict_hint_bcws', 'clip_to_bcws',
+    'scaling', 'band_override', 'exclude_b8', 'exclude_pre_fire',
+    'exclude_diff', 'diff_only',
+    # mapping inputs and outputs
+    'kgc_params', 'last_params', 'serial_settings', 'serial_results',
+    'sample_size', 'recommended_override', 'ml_area_ha',
+    'agreement_pct', 'fire_size_ha', 'hint_size_ha',
+    'previously_accepted', 'previously_accepted_agreement_pct',
+    'last_comparison', 'rebrush_dirty',
+)
+
+
+def _jsonable(v):
+    """Values a JSON file can hold, leaving anything else out."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, (list, tuple)):
+        return [_jsonable(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _jsonable(x) for k, x in v.items()}
+    val = getattr(v, 'value', None)          # enums (FireStatus)
+    if isinstance(val, (str, int)):
+        return val
+    return None
+
+
+def save_state(fire) -> bool:
+    """Write the fire's settings and results into its manifest."""
+    with _lock:
+        man = load(fire)
+        state_out = {}
+        for name in STATE_FIELDS:
+            if not hasattr(fire, name):
+                continue
+            state_out[name] = _jsonable(getattr(fire, name))
+        st = getattr(fire, 'status', None)
+        state_out['status'] = _jsonable(st)
+        man['state'] = state_out
+        man['state_saved_at'] = time.time()
+        return save(fire, man)
+
+
+def restore_state(fire) -> int:
+    """Fill in anything the loaded record is missing. Never overwrite.
+
+    Deliberately gap-filling only. fire_state.yaml is what the server
+    loads from; if it has a value, that value wins. This restores the
+    fields it no longer carries -- which is what turns the manifest
+    into a safety net rather than a second source of truth that can
+    disagree.
+    """
+    man = load(fire)
+    st = man.get('state') or {}
+    if not st:
+        return 0
+    filled = []
+    for name, val in st.items():
+        if name == 'status' or val is None:
+            continue
+        if name not in STATE_FIELDS:
+            continue
+        cur = getattr(fire, name, None)
+        # "Missing" means absent or empty -- not merely falsy in a way
+        # the operator chose: False and 0 are real settings and are
+        # left alone when the attribute exists at all.
+        if cur is None or cur == '' or cur == [] or cur == {}:
+            try:
+                setattr(fire, name, val)
+                filled.append(name)
+            except Exception:
+                pass
+    if filled:
+        sys.stderr.write(
+            '[manifest] %s: restored %d field(s) the saved state no '
+            'longer had: %s\n'
+            % (getattr(fire, 'fire_numbe', '?'), len(filled),
+               ', '.join(sorted(filled)[:8])))
+    return len(filled)

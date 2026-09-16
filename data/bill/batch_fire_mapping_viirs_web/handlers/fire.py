@@ -400,6 +400,41 @@ class FireRoutes:
                              f'response: {exc}\n')
         self._send_json(result)
 
+    def handle_api_fire_manifest(self, fire_numbe):
+        """The fire's complete record: its files and its settings.
+
+        So there is one URL to look at when something is missing, and
+        no guessing about where a product was restored from.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            from ..manifest import (load, manifest_path, stack_entries,
+                                    mirror_to_store)
+            man = load(fire)
+            # Where the two copies live, so the answer to "where does
+            # this come from" is in the response itself.
+            man['_paths'] = {
+                'authoritative': manifest_path(fire),
+                'durable_copy': mirror_to_store(fire),
+                'fire_state_yaml': os.path.join(
+                    getattr(state, 'output_root', '') or '',
+                    'fire_state.yaml'),
+            }
+            # Which recorded stacks are actually present right now.
+            present, missing = [], []
+            for p in stack_entries(fire):
+                (present if os.path.isfile(p) else missing).append(p)
+            man['_stacks_present'] = present
+            man['_stacks_missing'] = missing
+            self._send_json(man)
+        except Exception as exc:
+            sys.stderr.write(f'[manifest] read failed: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_fire_overlays(self, fire_numbe):
         """Vector overlays (S2 tile grid + BCWS) in crop pixel coords."""
         fire_numbe = unquote(fire_numbe)
