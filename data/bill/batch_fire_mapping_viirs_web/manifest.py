@@ -95,6 +95,12 @@ def save(fire, man: dict) -> bool:
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(man, f, indent=1)
         os.replace(tmp, p)
+        # Second copy in the durable store. Deliberately best-effort:
+        # the SSD copy beside the cache is the authoritative one.
+        try:
+            mirror_to_store(fire)
+        except Exception:
+            pass
         return True
     except OSError as exc:
         sys.stderr.write(f'[manifest] could not save: {exc}\n')
@@ -438,3 +444,51 @@ def recover_all_results(state, log=None) -> int:
     if total and log:
         log(f'[results] recovered {total} classification result(s)')
     return total
+
+
+def stack_entries(fire) -> list:
+    """Every stack path this fire has recorded, newest first.
+
+    The manifest is written when a product is built, so it knows about
+    products that a directory scan can miss -- a ramdisk cleared by a
+    reboot, a durable copy not yet mirrored, a file moved by an
+    operator. Enumeration consults it alongside the two directories,
+    and the caller still applies the grid checks: being recorded proves
+    the product was OURS, not that the file on disk today is usable.
+    """
+    out = []
+    for e in load(fire).get('entries', []):
+        if e.get('kind') != KIND_STACK:
+            continue
+        p = e.get('path') or ''
+        if not p.endswith('.bin') or '.kgc' in os.path.basename(p):
+            continue
+        out.append(p)
+    return sorted(set(out), reverse=True)
+
+
+def mirror_to_store(fire) -> str:
+    """Copy the manifest into the durable store.
+
+    The manifest lives beside the fire's cache on the SSD. A second
+    copy in the durable store means a fire can be reconstructed from
+    the store alone, and makes it obvious where to look when the two
+    disagree.
+    """
+    try:
+        import shutil
+        from .durable import store_dir, fire_prefix
+        dest = store_dir()
+        pfx = fire_prefix(fire)
+        src = manifest_path(fire)
+        if not dest or not pfx or not src or not os.path.isfile(src):
+            return ''
+        os.makedirs(dest, exist_ok=True)
+        dst = os.path.join(dest, f'manifest_{pfx}.json')
+        tmp = dst + '.part'
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+        return dst
+    except Exception as exc:
+        sys.stderr.write(f'[manifest] mirror failed: {exc}\n')
+        return ''

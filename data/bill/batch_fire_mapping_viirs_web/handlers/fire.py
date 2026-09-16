@@ -3270,6 +3270,7 @@ class FireRoutes:
                                 # what makes the browser cache usable
                                 # across reloads and restarts.
                                 'stamp': self._stack_stamp(cand),
+                                '_path': cand,
                                 'built': True})
                 # Also offer products that survive only in the
                 # DURABLE STORE.
@@ -3301,6 +3302,7 @@ class FireRoutes:
                                     'label': product_label(key),
                                     'stamp': self._stack_stamp(cand),
                                     'durable': True,
+                                    '_path': cand,
                                     'built': True})
                         sys.stderr.write(
                             '[persist] %s: offering %s from the '
@@ -3308,8 +3310,83 @@ class FireRoutes:
                 except Exception as dexc:
                     sys.stderr.write(
                         f'[products] durable scan failed: {dexc}\n')
+
+                # Finally the MANIFEST: the authoritative record of
+                # what this fire has built.
+                #
+                # A directory scan can miss a product -- a ramdisk
+                # cleared by a reboot before the mirror ran, a file an
+                # operator moved -- and the operator then has no way to
+                # tell a missing product from one that never existed.
+                # The manifest knows, and the same grid checks still
+                # apply: being recorded proves the product was this
+                # fire's, not that today's file is usable.
+                try:
+                    from ..manifest import stack_entries
+                    from ..durable import _grid_of, grid_matches_bbox
+                    for cand in stack_entries(fire):
+                        key = product_key_for_path(cand)
+                        if not key or key in seen:
+                            continue
+                        if not os.path.isfile(cand):
+                            sys.stderr.write(
+                                '[persist] %s: %s is recorded but its '
+                                'file is gone (%s)\n'
+                                % (fire_numbe, key, cand))
+                            continue
+                        _g = _grid_of(cand)
+                        if _g and not grid_matches_bbox(fire, _g):
+                            sys.stderr.write(
+                                '[persist] %s: recorded %s does not '
+                                'cover this AOI; not offering it\n'
+                                % (fire_numbe, key))
+                            continue
+                        src2, start2, post2 = product_parts(key)
+                        if src2 == 'l2' and not os.path.isfile(
+                                date_polygons_path(cand)):
+                            continue
+                        seen.add(key)
+                        out.append({'key': key, 'source': src2,
+                                    'date': start2 or post2,
+                                    'label': product_label(key),
+                                    'stamp': self._stack_stamp(cand),
+                                    'from_manifest': True,
+                                    '_path': cand,
+                                    'built': True})
+                        sys.stderr.write(
+                            '[persist] %s: offering %s from the '
+                            'manifest\n' % (fire_numbe, key))
+                except Exception as mexc:
+                    sys.stderr.write(
+                        f'[products] manifest scan failed: {mexc}\n')
         except Exception as exc:
             sys.stderr.write(f'[products] scan failed: {exc}\n')
+
+        # Record everything we just offered.
+        #
+        # This is the one place every product passes through, whichever
+        # path built it, so recording here keeps the manifest complete
+        # without a hook in each builder -- and back-fills products
+        # made before the manifest existed. Only paths that passed the
+        # grid checks above reach this point.
+        try:
+            from ..manifest import record_many, KIND_STACK
+            _rec = []
+            for _e in out:
+                _p = _e.get('_path') or ''
+                if _p and os.path.isfile(_p):
+                    _rec.append((KIND_STACK, _p, _e.get('key', '')))
+            if _rec:
+                record_many(fire, _rec)
+        except Exception as _rexc:
+            sys.stderr.write(
+                f'[manifest] recording offered products failed: '
+                f'{_rexc}\n')
+        finally:
+            # _path is internal bookkeeping; the browser gets keys and
+            # labels, never server paths.
+            for _e in out:
+                _e.pop('_path', None)
 
         # The two base sources are always offered, even before their
         # first build: MRAP's stack is created by a background

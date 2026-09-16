@@ -359,26 +359,63 @@ def durable_products(fire) -> list:
     ref = reference_grid(fire)
     if not ref:
         sys.stderr.write(
-            '[persist] %s: no reference grid; not adopting durable '
-            'stacks (cannot prove they are this AOI)\n'
-            % getattr(fire, 'fire_numbe', '?'))
+            '[persist] %s: NO REFERENCE GRID (crop_bin=%r) -- not '
+            'adopting any durable stack, because nothing can prove '
+            'they belong to this AOI. Every dated product will be '
+            'missing from the selector until this fire has one '
+            'readable stack with a sidecar.\n'
+            % (getattr(fire, 'fire_numbe', '?'),
+               getattr(fire, 'crop_bin', '')))
         return []
     out, rejected = [], 0
     for cand in sorted(glob.glob(os.path.join(
             dest, '*_stack_%s*.bin' % pref)), reverse=True):
-        if '.kgc' in os.path.basename(cand):
+        base = os.path.basename(cand)
+        if '.kgc' in base:
             continue
+
+        # Say WHY, for every candidate.
+        #
+        # A product silently missing from the selector is impossible to
+        # diagnose from the outside: the file is on disk and the menu
+        # does not list it. One line per decision turns that into a
+        # five-second answer.
         if not os.path.isfile(os.path.splitext(cand)[0] + '.hdr'):
+            rejected += 1
+            sys.stderr.write(
+                '[persist] %s: skip %s -- no .hdr beside it\n'
+                % (getattr(fire, 'fire_numbe', '?'), base))
             continue
         g = _grid_of(cand)
-        if not g or not grids_match(ref, g) \
-                or not grid_matches_bbox(fire, g):
+        if not g:
             rejected += 1
+            sys.stderr.write(
+                '[persist] %s: skip %s -- no sidecar, so its grid is '
+                'unknown\n' % (getattr(fire, 'fire_numbe', '?'), base))
+            continue
+        if not grids_match(ref, g):
+            rejected += 1
+            sys.stderr.write(
+                '[persist] %s: skip %s -- grid %dx%d at (%.1f, %.1f) '
+                'differs from this AOI %dx%d at (%.1f, %.1f)\n'
+                % (getattr(fire, 'fire_numbe', '?'), base,
+                   g[0], g[1], g[2][0], g[2][3],
+                   ref[0], ref[1], ref[2][0], ref[2][3]))
+            continue
+        if not grid_matches_bbox(fire, g):
+            rejected += 1
+            _bb = getattr(fire, 'bbox_native', None) or (0, 0, 0, 0)
+            sys.stderr.write(
+                '[persist] %s: skip %s -- grid origin (%.1f, %.1f) '
+                'does not cover the recorded bbox (%.1f, %.1f, %.1f, '
+                '%.1f)\n'
+                % (getattr(fire, 'fire_numbe', '?'), base,
+                   g[2][0], g[2][3], _bb[0], _bb[1], _bb[2], _bb[3]))
             continue
         out.append(cand)
     sys.stderr.write(
         '[persist] %s: %d durable product(s) match this AOI, '
-        '%d rejected (different grid under the same name)\n'
+        '%d rejected\n'
         % (getattr(fire, 'fire_numbe', '?'), len(out), rejected))
     return out
 
