@@ -2176,6 +2176,42 @@ class FireRoutes:
             + ',X-Preview-Format,X-Preview-Png-Bytes'
             + ',X-Preview-Source,X-Preview-Requested-Source'
             + ',X-Product,X-Product-Requested').strip(',')
+        # LAST GUARD: never answer a product request with a different
+        # product's picture.
+        #
+        # `png` starts as the LIVE previews path -- the product the
+        # fire is currently loaded on. Every branch below is supposed
+        # to repoint it, but if the requested product's stash exists
+        # yet is not current, and the on-demand render then fails, the
+        # default survives and the live image is sent. The response
+        # looks perfectly normal, so the pane shows the other product's
+        # imagery under the right label. That is what made the RIGHT
+        # pane display MRAP while its selector said L2: the right pane
+        # is the one that routinely asks for a product the fire is not
+        # loaded on.
+        #
+        # A 409 is the honest answer -- the client already retries it
+        # and says the layer is still being generated.
+        if _req_prod and view in ('post', 'pre', 'diff1'):
+            _served_from = os.path.basename(os.path.dirname(serve_path))
+            _ok = (_served_from == f'previews_{_req_key}')
+            if not _ok and _served_from == 'previews':
+                # The live directory is acceptable only when it really
+                # holds the requested product.
+                _ok = (_live_key == _req_key) or (
+                    not _live_key and _req_key == _cur_key)
+            if not _ok:
+                sys.stderr.write(
+                    '[preview] %s: REFUSING to serve %s for a request '
+                    'for %s (would have shown the wrong product)\n'
+                    % (fire_numbe, _served_from or serve_path,
+                       _req_key))
+                self._send_json(
+                    {'error': 'not ready', 'product': _req_key,
+                     'detail': 'this product is still being rendered'},
+                    409)
+                return
+
         self._send_file(serve_path, serve_type, cache_seconds=86400,
                         extra_headers=_hdrs)
 
