@@ -5298,6 +5298,24 @@ function scheduleProductResync(why) {
 
 // Options come from _products only. Rebuilt wholesale, so nothing can
 // accumulate across switches.
+// Date first, for the SOURCE SELECTORS ONLY.
+//
+// The server names a product "MRAP composite 20260914"; reading a
+// column of those means scanning past the same two words on every row
+// to reach the part that differs. Putting the date in front makes the
+// time sequence readable at a glance.
+//
+// This is purely cosmetic. The option's VALUE stays the product key,
+// which is what every callback, every save and every server request
+// uses -- nothing anywhere reads an option's displayed text. The
+// server's product_label(), the pane subtitles, the stored ui_state
+// and the manifest are all untouched.
+function selectorLabel(p) {
+    const base = productLabel(p) || (p && p.key) || '';
+    const m = /^(.*\S)\s+(\d{8})$/.exec(base);
+    return m ? `${m[2]} ${m[1]}` : base;
+}
+
 function buildOptions(sel, wantKey) {
     if (!sel) return;
     const list = (_products.length ? _products : [])
@@ -5309,7 +5327,7 @@ function buildOptions(sel, wantKey) {
         seen.add(p.key);
         const o = document.createElement('option');
         o.value = p.key;
-        o.textContent = productLabel(p) || p.key;
+        o.textContent = selectorLabel(p) || p.key;
         sel.appendChild(o);
     }
     if (!sel.options.length) {
