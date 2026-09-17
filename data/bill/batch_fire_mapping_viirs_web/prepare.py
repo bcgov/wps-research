@@ -2996,6 +2996,14 @@ def _accept_fire_sync(fire_numbe: str) -> str:
         # AUDIT-M4: yaml is a hard dependency; the prior `except ImportError`
         # was unreachable. Run the dict construction inline and narrow the
         # except to OSError around the actual disk write.
+        # Which source layer this run consumed. Looked up here, once,
+        # so the deliverable's own record names its input.
+        try:
+            from .workers import result_attribution
+            _attrib = result_attribution(fire)
+        except Exception:
+            _attrib = {}
+
         # Write params YAML
         params_dict = {
             'fire': {
@@ -3006,6 +3014,11 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 # area for the incident, hint_size_ha is the area of
                 # the mask this run was seeded with.
                 'hint_size_ha': getattr(fire, 'hint_size_ha', 0.0),
+                # The source layer this run consumed, named the same
+                # way the selector and the manifest name it, so the
+                # deliverable says what it was derived from.
+                'source_product': _attrib.get('product', ''),
+                'source_stack': _attrib.get('stack', ''),
                 'ml_area_ha': ml_area_ha,
                 'ml_area_m2': ml_area_m2,
                 'agreement_pct': fire.agreement_pct,
@@ -3151,6 +3164,11 @@ def _accept_fire_sync(fire_numbe: str) -> str:
                 # area for the incident, hint_size_ha is the area of
                 # the mask this run was seeded with.
                 'hint_size_ha': getattr(fire, 'hint_size_ha', 0.0),
+                # The source layer this run consumed, named the same
+                # way the selector and the manifest name it, so the
+                # deliverable says what it was derived from.
+                'source_product': _attrib.get('product', ''),
+                'source_stack': _attrib.get('stack', ''),
                     'agreement_pct': fire.agreement_pct,
                     'padding': fire.padding_used,
                     'timestamp': datetime.datetime.now().isoformat(

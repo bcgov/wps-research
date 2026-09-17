@@ -1407,3 +1407,55 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     .control-panel.is-collapsed > *:not(.panel-tab) { display: revert !important; }
     .control-panel.is-collapsed .panel-tab { display: none; }
 }
+
+
+/* ---------------------------------------------------------------
+   Sources panel (left)
+   --------------------------------------------------------------- */
+.sources-panel {
+    width: 290px;
+    min-width: 290px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-right: 1px solid #ddd;
+    overflow: hidden;
+}
+.sources-panel.is-collapsed {
+    width: 24px;
+    min-width: 24px;
+    background: #f7f7f7;
+    overflow: visible;
+}
+.sources-panel.is-collapsed > *:not(.panel-tab) { display: none !important; }
+.sources-panel.is-collapsed .panel-tab { display: block; }
+.sources-list { overflow: auto; padding: 2px 6px 10px; flex: 1; }
+.src-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 2px;
+    font-size: 11px;
+    border-bottom: 1px solid #f0f0f0;
+}
+.src-row.is-current { background: #fffbe6; }
+.src-name { flex: 1; font-family: monospace; white-space: nowrap; }
+.src-size { color: #777; white-space: nowrap; font-size: 10px; }
+/* Readiness: blue when a switch would be instant, hatched grey while
+   the background fill is still working on it. */
+.src-ready {
+    width: 12px; height: 12px; border-radius: 2px;
+    flex: none; background: #2f6fd0;
+}
+.src-ready.not-ready {
+    background: repeating-linear-gradient(45deg, #ccc, #ccc 2px,
+                                          #eee 2px, #eee 4px);
+}
+.src-why { color: #888; font-size: 10px; white-space: nowrap; }
+@media (max-width: 900px) {
+    .sources-panel { width: 100%; min-width: 0; }
+    .sources-panel.is-collapsed { width: 100%; min-width: 0; }
+    .sources-panel.is-collapsed > *:not(.panel-tab) { display: revert !important; }
+    .sources-panel.is-collapsed .panel-tab { display: none; }
+}

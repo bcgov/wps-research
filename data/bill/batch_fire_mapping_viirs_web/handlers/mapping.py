@@ -153,6 +153,15 @@ class MappingRoutes:
                 _prev_status = fire.status
                 if fire.status == FireStatus.ACCEPTED:
                     fire.previously_accepted = True
+                    # Remember WHICH layer that accepted result came
+                    # from, before this run changes what is loaded.
+                    try:
+                        from ..workers import result_attribution
+                        fire.previously_accepted_product = (
+                            result_attribution(fire).get('product')
+                            or '')
+                    except Exception:
+                        pass
                     if fire.agreement_pct >= 0:
                         fire.previously_accepted_agreement_pct = (
                             fire.agreement_pct)

@@ -62,6 +62,30 @@
 <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
 <div class="main-content">
+        <!-- Sources panel (left). Collapsible like the controls panel
+             on the right, so either side can be given up for the
+             other. -->
+        <div class="sources-panel" id="sources-panel">
+          <button class="panel-tab" id="sources-restore"
+                  onclick="toggleSourcesPanel()"
+                  title="Show the sources panel">sources &#9654;</button>
+          <div class="panel-head" style="justify-content:space-between">
+            <span style="font-size:11px;font-weight:600;color:#444">
+              Sources</span>
+            <span>
+              <button class="btn btn-danger" id="sources-delete"
+                      style="display:none;font-size:10px;padding:1px 7px"
+                      onclick="deleteSelectedSources()">Delete</button>
+              <button class="panel-collapse" onclick="toggleSourcesPanel()"
+                      title="Collapse this panel">&#9664; Collapse</button>
+            </span>
+          </div>
+          <div class="sources-list" id="sources-list">
+            <div style="color:#888;font-size:11px;padding:6px">
+              Loading ...</div>
+          </div>
+        </div>
+
 
     <!-- =============================================================== -->
     <!-- LEFT: Image viewer                                              -->
@@ -3640,6 +3664,7 @@ function collectUiState() {
         split: !!splitActive,
         overlays: !!overlaysVisible,
         panel_collapsed: !!_panelCollapsed,
+        sources_collapsed: !!_sourcesCollapsed,
         use_hdbscan: c('use-hdbscan'),
         eraser_size: v('p-eraser_size'),
         eraser_on: c('eraser-on'),
@@ -3783,6 +3808,10 @@ function applySavedUiState(ui, kgcParams) {
         if (typeof ui.panel_collapsed === 'boolean'
                 && ui.panel_collapsed !== _panelCollapsed) {
             toggleControlPanel(ui.panel_collapsed);
+        }
+        if (typeof ui.sources_collapsed === 'boolean'
+                && ui.sources_collapsed !== _sourcesCollapsed) {
+            toggleSourcesPanel(ui.sources_collapsed);
         }
 
         const setSel = (id, val) => {
@@ -5669,6 +5698,10 @@ function fillSourceSelect(sel, wantKey) {
 }
 
 function refreshSourceSelectors(products) {
+    // The Sources panel lists exactly what these selectors offer, so
+    // it refreshes from the same place rather than on its own
+    // schedule -- which is what keeps the two from disagreeing.
+    try { setTimeout(refreshSourcesPanel, 0); } catch (_) {}
     // Single path: adopt the list, then rebuild both selectors from it
     // and from the product each pane is on. Everything that used to
     // patch the selectors individually now goes through here, so there
@@ -9839,6 +9872,155 @@ function syncRightPaneControls() {
     if (!grp) return;
     grp.style.visibility = 'visible';
     grp.style.display = splitActive ? 'inline-flex' : 'none';
+}
+
+// ---------------------------------------------------------------
+// Sources panel
+// ---------------------------------------------------------------
+let _sourcesCollapsed = false;
+let _srcSelected = new Set();
+let _srcTimer = null;
+
+function toggleSourcesPanel(force) {
+    const panel = document.getElementById('sources-panel');
+    if (!panel) return;
+    _sourcesCollapsed = (typeof force === 'boolean')
+        ? force : !_sourcesCollapsed;
+    panel.classList.toggle('is-collapsed', _sourcesCollapsed);
+    setTimeout(() => {
+        try {
+            updateTransformForPane('left');
+            if (splitActive) updateTransformForPane('right');
+            drawAllOverlayLayers();
+        } catch (_) {}
+    }, 50);
+    try { saveUiState(); } catch (_) {}
+}
+
+// The same cloud cell the Date select menu draws, so the two read
+// alike. MRAP composites are cloud-free by construction, so they get
+// hatching and "NA" rather than a number that would imply a
+// measurement nobody made.
+function srcCloudCell(e) {
+    if (e.source !== 'l2') {
+        return '<span style="display:inline-block;width:54px;height:9px;'
+            + 'background:repeating-linear-gradient(45deg,#ddd,#ddd 2px,'
+            + '#f4f4f4 2px,#f4f4f4 4px);vertical-align:middle" '
+            + 'title="MRAP composites are cloud-free by '
+            + 'construction"></span>'
+            + '<span style="color:#aaa;font-size:10px"> NA</span>';
+    }
+    if (e.cloud === null || e.cloud === undefined) {
+        return '<span style="display:inline-block;width:54px;height:9px;'
+            + 'background:repeating-linear-gradient(45deg,#ddd,#ddd 2px,'
+            + '#f4f4f4 2px,#f4f4f4 4px);vertical-align:middle" '
+            + 'title="cloud cover not fetched yet"></span>'
+            + '<span style="color:#aaa;font-size:10px"> ...</span>';
+    }
+    const pct = Math.max(0, Math.min(100, Number(e.cloud)));
+    const w = Math.round(54 * pct / 100);
+    return `<span style="display:inline-block;width:54px;height:9px;`
+        + `background:#2a7;vertical-align:middle" title="${pct.toFixed(0)}% `
+        + `cloud">`
+        + `<span style="display:inline-block;width:${w}px;height:9px;`
+        + `background:#c33"></span></span>`
+        + `<span style="color:#666;font-size:10px"> ${pct.toFixed(0)}%</span>`;
+}
+
+function renderSourcesList(data) {
+    const box = document.getElementById('sources-list');
+    if (!box) return;
+    const rows = (data && data.sources) || [];
+    if (!rows.length) {
+        box.innerHTML = '<div style="color:#888;font-size:11px;'
+            + 'padding:6px">No products yet.</div>';
+        return;
+    }
+    // Drop selections for products that no longer exist.
+    const live = new Set(rows.map((r) => r.key));
+    for (const k of [..._srcSelected]) {
+        if (!live.has(k)) _srcSelected.delete(k);
+    }
+    box.innerHTML = rows.map((e) => {
+        const size = [e.ram_mb != null ? `${e.ram_mb} MB ram` : '',
+                      e.ssd_mb != null ? `${e.ssd_mb} MB ssd` : '']
+                     .filter(Boolean).join(' · ') || 'no file';
+        return `<div class="src-row${e.current ? ' is-current' : ''}">
+            <input type="checkbox" data-src-key="${e.key}"
+                   ${_srcSelected.has(e.key) ? 'checked' : ''}
+                   ${e.current ? 'disabled title="currently loaded"' : ''}>
+            <span class="src-name" title="${e.key}">${e.label}</span>
+            ${srcCloudCell(e)}
+            <span class="src-size">${size}</span>
+            <span class="src-ready${e.ready ? '' : ' not-ready'}"
+                  title="${e.ready ? 'cached: switching is instant'
+                                   : (e.status || 'not ready')}"></span>
+            ${e.ready ? '' : `<span class="src-why">${e.status}</span>`}
+        </div>`;
+    }).join('');
+    box.querySelectorAll('input[data-src-key]').forEach((cb) => {
+        cb.addEventListener('change', () => {
+            if (cb.checked) _srcSelected.add(cb.dataset.srcKey);
+            else _srcSelected.delete(cb.dataset.srcKey);
+            syncSourcesDeleteButton();
+        });
+    });
+    syncSourcesDeleteButton();
+}
+
+function syncSourcesDeleteButton() {
+    const b = document.getElementById('sources-delete');
+    if (b) b.style.display = _srcSelected.size ? '' : 'none';
+}
+
+async function refreshSourcesPanel() {
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/sources`,
+            {headers: {'X-Requested-With': 'fetch'}});
+        if (!r.ok) return;
+        const d = await r.json();
+        renderSourcesList(d);
+        // Keep polling while anything is still caching or any cloud
+        // figure is outstanding: this panel exists to show that the
+        // background work is happening.
+        const busy = (d.sources || []).some((e) => !e.ready)
+            || d.cloud_pending;
+        clearTimeout(_srcTimer);
+        if (busy) _srcTimer = setTimeout(refreshSourcesPanel, 4000);
+    } catch (_) { /* panel is informational */ }
+}
+
+async function deleteSelectedSources() {
+    const keys = [..._srcSelected];
+    if (!keys.length) return;
+    if (!confirm(`Delete ${keys.length} product(s)?\n\n`
+            + `${keys.join(', ')}\n\nThis removes their imagery from `
+            + `the ramdisk and the durable store, their previews and `
+            + `hint masks, and any classification result derived from `
+            + `them. Other products of this fire are untouched.`)) {
+        return;
+    }
+    try {
+        const r = await fetch(
+            `/api/fire/${encodeURIComponent(FIRE)}/sources/delete`,
+            {method: 'POST',
+             headers: {'Content-Type': 'application/json',
+                       'X-Requested-With': 'fetch'},
+             body: JSON.stringify({keys})});
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) {
+            alert(`Could not delete: ${j.error || 'HTTP ' + r.status}`);
+            return;
+        }
+        log(`[sources] deleted ${(j.deleted || []).join(', ')} `
+            + `(${j.files} file(s), ${j.freed_mb} MB)`, 'dim');
+        _srcSelected.clear();
+        await checkForNewProducts('sources deleted');
+        refreshSourcesPanel();
+    } catch (err) {
+        alert('Could not delete: ' + err.message);
+    }
 }
 
 function toggleSplit(manual) {

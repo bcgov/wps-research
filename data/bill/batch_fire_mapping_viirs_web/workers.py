@@ -51,6 +51,46 @@ _clone_setting = None
 _stream_subprocess = None
 
 
+def result_attribution(fire) -> dict:
+    """Which source layer a classification run was produced FROM.
+
+    Recorded on every result at the moment it is made, because it
+    cannot be reconstructed afterwards: the fire moves on to other
+    products, and a raster on disk carries no note of which stack fed
+    the clustering. Without it a result can only be guessed at, which
+    is no basis for deleting one or for reporting what a perimeter was
+    derived from.
+
+    ``product``  the product key, e.g. 'l2_d20260913' -- the same key
+                 the source selector and the manifest use.
+    ``product_label`` how that product reads in the interface.
+    ``stack``    the exact raster the run consumed.
+    ``stack_grid`` its size and geotransform, so a result can still be
+                 matched to its input after the stack is rebuilt.
+    """
+    out = {'product': '', 'product_label': '', 'stack': '',
+           'stack_grid': None}
+    try:
+        crop = getattr(fire, 'crop_bin', '') or ''
+        out['stack'] = crop
+        from .prepare import product_key_for_path, product_label
+        key = product_key_for_path(crop) or ''
+        out['product'] = key
+        if key:
+            out['product_label'] = product_label(key)
+    except Exception:
+        pass
+    try:
+        from .durable import _grid_of
+        g = _grid_of(out['stack']) if out['stack'] else None
+        if g:
+            out['stack_grid'] = {'width': g[0], 'height': g[1],
+                                 'gt': list(g[2])}
+    except Exception:
+        pass
+    return out
+
+
 def init(app_state, helpers):
     """Bind shared globals and helper callables.
 
@@ -355,6 +395,16 @@ def _serial_snapshot_run0(fire, fire_numbe: str):
                 fire, s0_clf, 'serial_0', (0.9, 0.1, 0.0))
 
         fire.serial_results.append({
+            **result_attribution(fire),
+            # Run 0 is the PREVIOUSLY accepted result. It was produced
+            # from whatever layer was loaded then, which is not
+            # necessarily what is loaded now, so the attribution above
+            # is overridden with what was recorded at acceptance. Empty
+            # means genuinely unknown -- an honest blank beats a
+            # confident wrong answer, and nothing deletes on a blank.
+            'product': getattr(fire, 'previously_accepted_product',
+                               '') or '',
+            'product_label': '',
             'run_id': 0,
             'params': old_params,
             'agreement_pct': old_agreement,
@@ -446,6 +496,7 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 fire = state.fires[fire_numbe]
                 if fire.status == FireStatus.ERROR:
                     fire.serial_results.append({
+                        **result_attribution(fire),
                         'run_id': run_id,
                         'finished_at': time.time(),
                         'setting_idx': setting_idx,
@@ -727,6 +778,7 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                 _generate_result_preview(fire)
 
             fire.serial_results.append({
+                **result_attribution(fire),
                 'run_id': run_id,
 
                 'finished_at': time.time(),
@@ -755,6 +807,7 @@ def _serial_run_replicate(fire, fire_numbe: str, *, setting_idx: int,
                     f'  [diag:run{run_id}] unavailable: {_exc}')
         else:
             fire.serial_results.append({
+                **result_attribution(fire),
                 'run_id': run_id,
                 'finished_at': time.time(),
                 'setting_idx': setting_idx,
@@ -1198,6 +1251,7 @@ def _serial_map_worker(fire_numbe: str, settings: list[dict],
                 with state.lock:
                     state.current_job = None
                 fire.serial_results.append({
+                    **result_attribution(fire),
                     'run_id': run_id,
                     'finished_at': time.time(),
                     'setting_idx': setting_idx,

@@ -254,6 +254,14 @@ class FireInfo:
     notes: str = ""
     agreement_pct: float = -1.0   # -1 = not computed
     previously_accepted_agreement_pct: float = -1.0
+    # Which source layer the accepted result was produced from.
+    #
+    # Carried separately from the run list because an accepted result
+    # outlives the run that made it: the fire moves on to other
+    # products, and Run 0 -- the previously accepted result shown for
+    # comparison -- must be attributed to the layer it actually came
+    # from, not to whatever is loaded when the comparison is drawn.
+    previously_accepted_product: str = ''
     console_log: deque = field(
         default_factory=lambda: deque(maxlen=CONSOLE_LOG_MAX_LINES))
     serial_results: list = field(default_factory=list)

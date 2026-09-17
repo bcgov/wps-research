@@ -772,6 +772,289 @@ class FireRoutes:
             'l2_start_date': getattr(fire, 'l2_start_date', '') or '',
         })
 
+    def handle_api_sources_delete(self, fire_numbe):
+        """Delete the selected products, and only those.
+
+        Everything removed is addressed by the product KEY: the stack
+        and its sidecars on the ramdisk and in the durable store, that
+        product's preview directory, its hint masks, its coverage
+        sidecar, and any classification result derived from it. The
+        fire's other products, its AOI and its record are untouched,
+        and the manifest loses exactly the lines for what went.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        body = self._read_body()
+        if body is None:
+            return                      # _read_body already answered
+        keys = [k for k in (body.get('keys') or [])
+                if isinstance(k, str)
+                and re.fullmatch(r'(mrap|l2)(_[pd]\d{8})?', k)]
+        if not keys:
+            self._send_json({'error': 'no products named'}, 400)
+            return
+
+        # Never delete the product the fire is currently loaded on:
+        # the panes are showing it, and Map Fire and Download use it.
+        try:
+            from ..prepare import product_key_for_path
+            cur = product_key_for_path(
+                getattr(fire, 'crop_bin', '') or '') or ''
+        except Exception:
+            cur = ''
+        refused = [k for k in keys if k == cur]
+        keys = [k for k in keys if k != cur]
+        if not keys:
+            self._send_json(
+                {'error': 'that product is the one currently loaded; '
+                          'switch to another first',
+                 'refused': refused}, 409)
+            return
+
+        import glob as _g
+        import shutil as _sh
+        from ..prepare import stack_path_for_product
+        from ..durable import store_dir
+        removed, freed = [], 0
+
+        def _rm(path):
+            nonlocal freed
+            try:
+                if os.path.isdir(path):
+                    for r, _d, fs2 in os.walk(path):
+                        for f2 in fs2:
+                            try:
+                                freed += os.path.getsize(
+                                    os.path.join(r, f2))
+                            except OSError:
+                                pass
+                    _sh.rmtree(path, ignore_errors=True)
+                    removed.append(path)
+                elif os.path.isfile(path):
+                    try:
+                        freed += os.path.getsize(path)
+                    except OSError:
+                        pass
+                    os.remove(path)
+                    removed.append(path)
+            except OSError as exc:
+                sys.stderr.write(f'[sources] remove {path}: {exc}\n')
+
+        store = store_dir()
+        for key in keys:
+            # The stack and its sidecars, wherever they live.
+            path = stack_path_for_product(fire, key)
+            stems = []
+            if path:
+                stems.append(os.path.splitext(path)[0])
+                if store:
+                    stems.append(os.path.join(
+                        store,
+                        os.path.splitext(os.path.basename(path))[0]))
+            for stem in stems:
+                for sfx in ('.bin', '.hdr', '.bin.hdr',
+                            '_dates.json', '_overlays.json'):
+                    _rm(stem + sfx)
+            # Previews, hints and the coverage sidecar for this product.
+            _rm(os.path.join(fire.cache_dir, f'previews_{key}'))
+            for h in _g.glob(os.path.join(fire.cache_dir, '_redwins',
+                                          f'*_{key}_hint.*')):
+                _rm(h)
+            _rm(os.path.join(fire.cache_dir, 'coverage',
+                             f'{key}_dates.json'))
+            # Classification results derived from THIS product only.
+            try:
+                kept = []
+                for r in list(getattr(fire, 'serial_results', None)
+                              or []):
+                    if str(r.get('product') or '') == key:
+                        for p2 in (r.get('classified'), r.get('raw')):
+                            if p2:
+                                _rm(p2)
+                        _rm(os.path.join(
+                            fire.cache_dir, 'previews',
+                            f'serial_{r.get("run_id")}.png'))
+                    else:
+                        kept.append(r)
+                fire.serial_results = kept
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[sources] results for {key}: {exc}\n')
+            sys.stderr.write(
+                f'[sources] {fire_numbe}: deleted {key}\n')
+
+        # The manifest loses exactly those paths.
+        try:
+            from ..manifest import load as _mload, save as _msave
+            man = _mload(fire)
+            gone = set(os.path.abspath(p2) for p2 in removed)
+            before = len(man.get('entries') or [])
+            man['entries'] = [e for e in (man.get('entries') or [])
+                              if os.path.abspath(e.get('path') or '')
+                              not in gone]
+            _msave(fire, man)
+            sys.stderr.write(
+                '[sources] %s: manifest %d -> %d entries\n'
+                % (fire_numbe, before, len(man['entries'])))
+        except Exception as exc:
+            sys.stderr.write(f'[sources] manifest update: {exc}\n')
+
+        try:
+            from ..persistence import _save_fire_state
+            _save_fire_state()
+        except Exception:
+            pass
+        self._send_json({'deleted': keys, 'files': len(removed),
+                         'freed_mb': round(freed / 1048576.0, 1),
+                         'refused': refused})
+
+    def handle_api_sources(self, fire_numbe):
+        """Every product this fire can display, with size and readiness.
+
+        Feeds the Sources panel: the same list the source selectors
+        show, plus what each product costs on disk, whether switching
+        to it would be instant, and -- for L2 -- the cloud cover of the
+        day it came from. The cloud figures come from the SAME store
+        the Date select menu uses (.cloud_cover/cloud_cover.json under
+        the output root), so the two can never disagree, and a missing
+        figure starts the same background fill.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        try:
+            from ..prepare import product_parts, stack_path_for_product
+            from ..durable import store_dir
+
+            def _mb(path):
+                try:
+                    return round(os.path.getsize(path) / 1048576.0, 1)
+                except OSError:
+                    return None
+
+            prods = self._built_products(fire_numbe, fire)
+            store = store_dir()
+            ram_dir = os.path.dirname(
+                getattr(fire, 'crop_bin', '') or '') or '/ram'
+            cur_key = ''
+            try:
+                from ..prepare import product_key_for_path
+                cur_key = product_key_for_path(
+                    getattr(fire, 'crop_bin', '') or '') or ''
+            except Exception:
+                cur_key = ''
+
+            out = []
+            l2_days = []
+            for p in prods:
+                key = p.get('key') or ''
+                if not key or p.get('built') is False:
+                    continue
+                src, start, post = product_parts(key)
+                day = start or post or ''
+                if src == 'l2' and re.fullmatch(r'\d{8}', day or ''):
+                    l2_days.append(day)
+
+                path = stack_path_for_product(fire, key)
+                ram_mb = _mb(path) if path and path.startswith(
+                    ram_dir) else None
+                if ram_mb is None and path:
+                    ram_mb = _mb(path)
+                ssd_mb = None
+                if store and path:
+                    ssd_mb = _mb(os.path.join(store,
+                                              os.path.basename(path)))
+
+                # "Instant" means the preview this pane would request
+                # is already rendered: that is what makes a switch a
+                # file read rather than a render.
+                pdir = os.path.join(fire.cache_dir, f'previews_{key}')
+                have_prev = os.path.isfile(
+                    os.path.join(pdir, 'post.png'))
+                if key == cur_key:
+                    have_prev = have_prev or os.path.isfile(
+                        os.path.join(fire.cache_dir, 'previews',
+                                     'post.png'))
+                ready = bool(path and os.path.isfile(path)
+                             and have_prev)
+                if ready:
+                    why = ''
+                elif not path or not os.path.isfile(path):
+                    why = ('restoring from the durable store'
+                           if ssd_mb else 'not built yet')
+                else:
+                    why = 'rendering previews'
+
+                out.append({
+                    'key': key,
+                    'label': p.get('label') or key,
+                    'source': src,
+                    'date': day,
+                    'ram_mb': ram_mb,
+                    'ssd_mb': ssd_mb,
+                    'ready': ready,
+                    'status': why,
+                    'current': key == cur_key,
+                })
+
+            # Cloud cover for the L2 days, from the shared store.
+            cover, cc_pending = {}, False
+            if l2_days:
+                try:
+                    from .. import cloud_cover as _cc
+                    from ..l2_recent import tiles_intersecting_bbox
+                    crs = ''
+                    ref = (state.rasters_by_year.get(fire.fire_year)
+                           or state.raster_path)
+                    try:
+                        from osgeo import gdal
+                        ds = gdal.Open(ref, gdal.GA_ReadOnly) if ref \
+                            else None
+                        if ds is not None:
+                            crs = ds.GetProjection()
+                            ds = None
+                    except Exception:
+                        crs = ''
+                    tiles = sorted(set(
+                        tiles_intersecting_bbox(fire.bbox_native, crs)))
+                    if tiles:
+                        root = os.path.join(state.output_root,
+                                            '.cloud_cover')
+                        days = sorted(set(l2_days), reverse=True)
+                        cov = _cc.cached_coverage(root, tiles, days)
+                        cover = {d: v[0] for d, v in cov.items()}
+                        missing = [d for d in days if d not in cover]
+                        key = _cc.key_for(tiles)
+                        if missing and not _cc.is_fetching(key):
+                            _cc.fetch_in_background(root, tiles,
+                                                    missing, key)
+                        cc_pending = bool(missing)
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[sources] cloud cover unavailable: {exc}\n')
+
+            for e in out:
+                if e['source'] == 'l2' and e['date'] in cover:
+                    e['cloud'] = cover[e['date']]
+                else:
+                    # MRAP composites are cloud-free by construction,
+                    # so a figure would be meaningless rather than
+                    # merely missing.
+                    e['cloud'] = None
+            self._send_json({'sources': out,
+                             'cloud_pending': cc_pending,
+                             'cloud_store': os.path.join(
+                                 state.output_root, '.cloud_cover',
+                                 'cloud_cover.json')})
+        except Exception as exc:
+            sys.stderr.write(f'[sources] {fire_numbe}: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_cloud_cover(self, fire_numbe):
         """Cloud cover for the dates in the Date select menu.
 
@@ -3923,6 +4206,13 @@ class FireRoutes:
         serial_results = []
         for r in raw_serial:
             serial_results.append({
+                # Attribution travels with the result: which source
+                # layer produced it, and the exact raster consumed.
+                # Without it the gallery can show a perimeter with no
+                # way to say what it was derived from.
+                'product': r.get('product', ''),
+                'product_label': r.get('product_label', ''),
+                'stack': r.get('stack', ''),
                 'run_id': r.get('run_id'),
                 'setting_idx': r.get('setting_idx', 0),
                 'run_idx': r.get('run_idx', 0),
