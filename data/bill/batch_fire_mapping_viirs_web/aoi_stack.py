@@ -503,12 +503,32 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         raise AoiStackError(f'cannot open {post_bin}')
 
     try:
-        if (ds_pre.RasterXSize != ds_post.RasterXSize
-                or ds_pre.RasterYSize != ds_post.RasterYSize):
+        # Dimensions are NOT the thing that has to match.
+        #
+        # Two rasters can be the same size and start in different
+        # places. The pixel window below was computed from the PRE
+        # raster and then read verbatim from the POST raster, so
+        # whenever their origins differed the post-fire bands came from
+        # a different patch of ground than the pre-fire bands -- the
+        # product looked fine and showed the wrong area. What must
+        # match is the pixel SIZE (otherwise the two grids cannot be
+        # aligned without resampling); the offset is handled per raster
+        # a few lines down.
+        _gt_pre = ds_pre.GetGeoTransform()
+        _gt_post = ds_post.GetGeoTransform()
+        if (abs(abs(_gt_pre[1]) - abs(_gt_post[1])) > 1e-6
+                or abs(abs(_gt_pre[5]) - abs(_gt_post[5])) > 1e-6):
             raise AoiStackError(
-                f'pre/post dimensions differ: '
-                f'{ds_pre.RasterXSize}x{ds_pre.RasterYSize} vs '
-                f'{ds_post.RasterXSize}x{ds_post.RasterYSize}')
+                f'pre/post pixel sizes differ: '
+                f'{_gt_pre[1]:.9f}/{_gt_pre[5]:.9f} vs '
+                f'{_gt_post[1]:.9f}/{_gt_post[5]:.9f}')
+        if (abs(_gt_pre[0] - _gt_post[0]) > 1e-6
+                or abs(_gt_pre[3] - _gt_post[3]) > 1e-6):
+            sys.stderr.write(
+                '[aoi_stack] pre and post start in different places '
+                '(pre %.3f,%.3f vs post %.3f,%.3f); each is windowed '
+                'on its own grid so both cover the SAME ground\n'
+                % (_gt_pre[0], _gt_pre[3], _gt_post[0], _gt_post[3]))
         n_band = ds_pre.RasterCount
         if ds_post.RasterCount != n_band:
             raise AoiStackError(
@@ -524,10 +544,17 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         # The grid this product will have. Identical for every product
         # of a fire now, so any difference in this line between two
         # builds of the same fire is a bug worth reporting.
+        # Where that same ground rectangle sits in the POST raster.
+        # Whole pixels, because the pixel sizes are equal and both
+        # grids are north-up in the same CRS.
+        post_xoff = int(round((win_gt[0] - _gt_post[0]) / _gt_post[1]))
+        post_yoff = int(round((win_gt[3] - _gt_post[3]) / _gt_post[5]))
+
         sys.stderr.write(
             '[aoi_stack] window %dx%d at (%.3f, %.3f) px %.6f  '
-            'from %s\n'
+            'pre@(%d,%d) post@(%d,%d)  from %s\n'
             % (xsize, ysize, win_gt[0], win_gt[3], win_gt[1],
+               xoff, yoff, post_xoff, post_yoff,
                os.path.basename(out_bin)))
 
         if ds_override is not None:
@@ -610,8 +637,11 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                 post_a = ds_override.GetRasterBand(
                     i + 1).ReadAsArray().astype(np.float32)
             else:
+                # The POST raster's own offsets for the SAME ground
+                # rectangle. Reusing the pre raster's offsets is what
+                # made a product show a different area.
                 post_a = _read_window_padded(
-                    ds_post.GetRasterBand(i + 1), xoff, yoff,
+                    ds_post.GetRasterBand(i + 1), post_xoff, post_yoff,
                     xsize, ysize,
                     ds_post.RasterXSize, ds_post.RasterYSize)
 
