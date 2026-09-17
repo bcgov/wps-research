@@ -1432,22 +1432,40 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .sources-panel.is-collapsed .panel-tab { display: block; }
 .sources-list { overflow: auto; padding: 2px 6px 10px; flex: 1; }
 .src-row {
-    /* Fixed columns so every row lines up: checkbox, name, cloud,
-       readiness, size, and the reason when it is not ready. The
-       readiness box sits BEFORE the size so the status message that
-       follows it reads as an explanation of the box. The name is the
-       only elastic column and clips rather than pushing the rest out
-       of alignment. */
+    /* One grid for the WHOLE list, not one per row.
+       Each .src-row used to be its own grid container, so the last
+       column -- sized to its own content -- came out different on
+       every row, the elastic name column absorbed a different
+       remainder, and the columns drifted apart as soon as the panel
+       was wide enough for the name to grow past its floor. The list
+       is the grid now and every row is a set of cells in it, so a
+       column is one width down the whole panel.
+       Columns: checkbox | name | cloud | ready | size | reason. */
+    display: contents;
+}
+.sources-list {
     display: grid;
-    grid-template-columns: 16px minmax(9em, 1fr) 132px 12px 4.6em auto;
+    grid-template-columns:
+        16px minmax(7em, 1fr) 132px 12px 4.6em minmax(0, 10em);
     align-items: center;
-    gap: 6px;
-    padding: 3px 2px;
-    font-size: 11px;
+    column-gap: 6px;
+    row-gap: 0;
+    align-content: start;
+}
+/* Each cell keeps the row's padding and the separating rule, since
+   the row element itself no longer draws a box. */
+.sources-list > .src-row > * {
+    padding: 3px 0;
     border-bottom: 1px solid #f0f0f0;
+    font-size: 11px;
+    min-width: 0;
     cursor: pointer;
 }
-.src-row:hover { background: #f5f8ff; }
+.sources-list > .src-row > input[type=checkbox] { cursor: default; }
+/* Anything that is not a row -- "Loading ...", "No products yet" --
+   spans the whole width instead of sitting in the first column. */
+.sources-list > :not(.src-row) { grid-column: 1 / -1; }
+.src-row:hover > * { background: #f5f8ff; }
 .src-row input[type=checkbox] { cursor: default; }
 .src-row.is-current { background: #fffbe6; }
 .src-name {
@@ -1472,7 +1490,13 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     background: repeating-linear-gradient(45deg, #ccc, #ccc 2px,
                                           #eee 2px, #eee 4px);
 }
-.src-why { color: #888; font-size: 10px; white-space: nowrap; }
+.src-why {
+    color: #888;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 @media (max-width: 900px) {
     .sources-panel { width: 100%; min-width: 0; }
     .sources-panel.is-collapsed { width: 100%; min-width: 0; }
@@ -1482,10 +1506,8 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 
 
 /* The row whose product the LEFT pane is currently showing. */
-.src-row.is-shown {
-    background: #eaf2fd;
-    box-shadow: inset 3px 0 0 #2f6fd0;
-}
+.src-row.is-shown > * { background: #eaf2fd; }
+.src-row.is-shown > :first-child { box-shadow: inset 3px 0 0 #2f6fd0; }
 .src-row.is-shown .src-name { font-weight: 700; color: #16407e; }
 
 /* Drag handle on the panel's right edge, so the panel itself can be

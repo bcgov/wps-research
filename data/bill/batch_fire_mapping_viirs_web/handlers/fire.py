@@ -937,7 +937,8 @@ class FireRoutes:
                 except OSError:
                     return None
 
-            prods = self._built_products(fire_numbe, fire)
+            prods = self._built_products(fire_numbe, fire,
+                                         keep_paths=True)
             store = store_dir()
             ram_dir = os.path.dirname(
                 getattr(fire, 'crop_bin', '') or '') or '/ram'
@@ -960,15 +961,20 @@ class FireRoutes:
                 if src == 'l2' and re.fullmatch(r'\d{8}', day or ''):
                     l2_days.append(day)
 
-                path = stack_path_for_product(fire, key)
-                ram_mb = _mb(path) if path and path.startswith(
-                    ram_dir) else None
-                if ram_mb is None and path:
-                    ram_mb = _mb(path)
+                # Where the scan actually found it. Falling back to
+                # the by-key lookup only when the scan had nothing.
+                path = p.get('_path') or ''
+                if not path:
+                    path = stack_path_for_product(fire, key)
+                ram_mb = _mb(path) if path else None
                 ssd_mb = None
                 if store and path:
                     ssd_mb = _mb(os.path.join(store,
                                               os.path.basename(path)))
+                # A product that lives only in the store reports its
+                # size from there rather than reading as sizeless.
+                if ram_mb is None and ssd_mb is not None:
+                    ram_mb = ssd_mb
 
                 # "Instant" means the preview this pane would request
                 # is already rendered: that is what makes a switch a
@@ -982,13 +988,17 @@ class FireRoutes:
                                      'post.png'))
                 ready = bool(path and os.path.isfile(path)
                              and have_prev)
+                # Say what is actually true of THIS product.
                 if ready:
                     why = ''
-                elif not path or not os.path.isfile(path):
-                    why = ('restoring from the durable store'
-                           if ssd_mb else 'not built yet')
-                else:
+                elif path and os.path.isfile(path):
                     why = 'rendering previews'
+                elif ssd_mb is not None:
+                    why = 'in the durable store; restores on first use'
+                elif path:
+                    why = 'imagery missing; will rebuild on first use'
+                else:
+                    why = 'not built yet'
 
                 out.append({
                     'key': key,
@@ -3579,7 +3589,7 @@ class FireRoutes:
             return os.path.isfile(
                 os.path.splitext(bin_path or '')[0] + '.hdr')
 
-    def _built_products(self, fire_numbe, fire):
+    def _built_products(self, fire_numbe, fire, keep_paths=False):
         """Every product on disk for this AOI, newest first.
 
         One entry per STACK FILE, so last night's MRAP composite and
@@ -3773,9 +3783,15 @@ class FireRoutes:
                 f'{_rexc}\n')
         finally:
             # _path is internal bookkeeping; the browser gets keys and
-            # labels, never server paths.
-            for _e in out:
-                _e.pop('_path', None)
+            # labels, never server paths. An in-process caller can ask
+            # to keep it -- the Sources panel does, because it is the
+            # only record of WHERE a product was found, and rederiving
+            # it from the ramdisk alone reports a product held in the
+            # durable store or named only in the manifest as "not
+            # built yet".
+            if not keep_paths:
+                for _e in out:
+                    _e.pop('_path', None)
 
         # The two base sources are always offered, even before their
         # first build: MRAP's stack is created by a background
