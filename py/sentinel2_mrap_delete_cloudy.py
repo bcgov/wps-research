@@ -5,9 +5,11 @@ and optionally delete the cloudy ones.
 
 Method:
   1. Search MRAP_DIR (default /data/mrap_bc/, recursively) for yyyymmdd_mrap.bin
-     files that have an ENVI .hdr sidecar (yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr).
+     files that have an ENVI .hdr sidecar (yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr,
+     matched case-insensitively against the directory listing).
      Collect and sort their dates.
-  2. Get the BC Sentinel-2 tile IDs from bc_gid.py (last line of its output).
+  2. Get the BC Sentinel-2 tile IDs from sentinel2_bc_tiles_shp/bc_gid.py, located
+     relative to this source file (last line of its output).
   3. Run sentinel2_extract_cloud_cover_tiles.py (--L2) for all BC tiles over the
      date range [earliest MRAP date - lookback, latest MRAP date], and read its CSV.
   4. For each MRAP date D and each tile, take the cloud cover of that tile's most
@@ -63,7 +65,12 @@ PROD_TILE_RE = re.compile(r'_(T\d{2}[A-Z]{3})_')
 PROD_DATE_RE = re.compile(r'_(\d{8})T\d{6}_')   # first timestamp = sensing time
 
 CLOUD_SCRIPT = 'sentinel2_extract_cloud_cover_tiles.py'
-GID_SCRIPT = 'bc_gid.py'
+
+# bc_gid.py lives beside this source file, in sentinel2_bc_tiles_shp/
+# (realpath so that a symlinked / wrapped copy on the PATH still resolves to the
+#  actual source file in the wps-research repo)
+GID_SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                          'sentinel2_bc_tiles_shp', 'bc_gid.py')
 
 
 def err(msg):
@@ -75,6 +82,8 @@ def find_mrap(mrap_dir):
     found = []
     for root, dirs, files in os.walk(mrap_dir):
         dirs.sort()
+        # names present in this directory, keyed by lowercase name
+        here = {fn.lower(): fn for fn in files}
         for fn in files:
             m = MRAP_RE.match(fn)
             if not m:
@@ -85,7 +94,12 @@ def find_mrap(mrap_dir):
                 err(f"WARNING: bad date in filename, skipping: {os.path.join(root, fn)}")
                 continue
             bin_path = os.path.join(root, fn)
-            hdrs = [p for p in (bin_path[:-4] + '.hdr', bin_path + '.hdr') if os.path.isfile(p)]
+            # accept yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr, any case
+            hdrs = []
+            for cand in (fn[:-4] + '.hdr', fn + '.hdr'):
+                actual = here.get(cand.lower())
+                if actual is not None:
+                    hdrs.append(os.path.join(root, actual))
             if not hdrs:
                 err(f"WARNING: no .hdr sidecar for {bin_path}, skipping")
                 continue
@@ -96,7 +110,9 @@ def find_mrap(mrap_dir):
 
 def get_bc_tiles():
     """Run bc_gid.py and parse the space-separated tile ID list it prints last."""
-    r = subprocess.run([GID_SCRIPT], capture_output=True, text=True)
+    if not os.path.isfile(GID_SCRIPT):
+        sys.exit(f"ERROR: bc_gid.py not found at {GID_SCRIPT}")
+    r = subprocess.run([sys.executable, GID_SCRIPT], capture_output=True, text=True)
     if r.returncode != 0:
         err(r.stderr)
         sys.exit(f"ERROR: {GID_SCRIPT} failed (exit code {r.returncode})")
