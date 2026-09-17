@@ -9911,20 +9911,22 @@ function toggleSourcesPanel(force) {
 // other.
 function srcCloudCell(e) {
     if (e.source !== 'l2') {
-        // MRAP composites are cloud-free by construction, so a figure
-        // would imply a measurement nobody made.
-        return `<span style="display:inline-flex;align-items:center;
-                             gap:6px;flex:0 0 auto">
-          <span style="font-family:monospace;font-size:11px;color:#aaa;
-                       white-space:pre;width:3.9em;text-align:right"
-                title="MRAP composites are cloud-free by construction">
-            NA</span>
-          <span style="display:inline-block;width:70px;height:7px;
-                       background:repeating-linear-gradient(135deg,
-                           #e4e4e4 0 4px,#f4f4f4 4px 8px);
-                       border-radius:3px"
-                title="Not applicable to a MRAP composite"></span>
-        </span>`;
+        // NA sits in the NUMBER column, beside the bar -- not under
+        // it. The text is written on one line because that column is
+        // `white-space: pre`, so the indentation of a multi-line
+        // template literal became real spaces, widened the cell past
+        // the column and wrapped the bar onto a second row.
+        return '<span style="display:inline-flex;align-items:center;'
+            + 'gap:6px;flex:0 0 auto">'
+            + '<span style="font-family:monospace;font-size:11px;'
+            + 'color:#aaa;white-space:pre;width:3.9em;'
+            + 'text-align:right" title="MRAP composites are '
+            + 'cloud-free by construction">    NA</span>'
+            + '<span style="display:inline-block;width:70px;height:7px;'
+            + 'background:repeating-linear-gradient(135deg,'
+            + '#e4e4e4 0 4px,#f4f4f4 4px 8px);border-radius:3px" '
+            + 'title="Not applicable to a MRAP composite"></span>'
+            + '</span>';
     }
     try {
         return cloudCell(e.date);
@@ -9977,16 +9979,17 @@ function renderSourcesList(data) {
         const size = (mb != null) ? Math.round(mb) + ' MB' : '\u2014';
         const isShown = e.key === shown;
         return `<div class="src-row${isShown ? ' is-shown' : ''}"
-                     title="${e.key}">
+                     data-row-key="${e.key}"
+                     title="${e.key} — click to show this source">
             <input type="checkbox" data-src-key="${e.key}"
                    ${_srcSelected.has(e.key) ? 'checked' : ''}
                    ${e.current ? 'disabled title="currently loaded"' : ''}>
             <span class="src-name">${name}</span>
             <span class="src-cloud">${srcCloudCell(e)}</span>
-            <span class="src-size">${size}</span>
             <span class="src-ready${e.ready ? '' : ' not-ready'}"
                   title="${e.ready ? 'cached: switching to this is instant'
                                    : (e.status || 'not ready')}"></span>
+            <span class="src-size">${size}</span>
             <span class="src-why">${e.ready ? '' : (e.status || '')}</span>
         </div>`;
     }).join('');
@@ -9995,6 +9998,29 @@ function renderSourcesList(data) {
             if (cb.checked) _srcSelected.add(cb.dataset.srcKey);
             else _srcSelected.delete(cb.dataset.srcKey);
             syncSourcesDeleteButton();
+        });
+        // Ticking a box must not also switch the pane.
+        cb.addEventListener('click', (ev) => ev.stopPropagation());
+    });
+    // Clicking a row shows that source in the LEFT pane.
+    //
+    // Deliberately routed through the selector rather than switching
+    // directly: setting the control and firing its change handler is
+    // exactly what a click on the selector does, so the two cannot
+    // diverge in what they save, warm or redraw.
+    box.querySelectorAll('.src-row[data-row-key]').forEach((row) => {
+        row.addEventListener('click', () => {
+            const key = row.dataset.rowKey;
+            const sel = document.getElementById('post-source-select');
+            if (!key || !sel) return;
+            if (sel.value === key) return;      // already showing it
+            setSourceSelectValue(sel, key);
+            if (sel.value !== key) {
+                log(`[sources] ${key} is not in the selector yet`,
+                    'dim');
+                return;
+            }
+            onPostSourceChange();
         });
     });
     syncSourcesDeleteButton();

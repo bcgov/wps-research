@@ -1433,17 +1433,22 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .sources-list { overflow: auto; padding: 2px 6px 10px; flex: 1; }
 .src-row {
     /* Fixed columns so every row lines up: checkbox, name, cloud,
-       size, readiness, and the reason when it is not ready. The name
-       is the only elastic column, and it clips rather than pushing
-       the others out of alignment. */
+       readiness, size, and the reason when it is not ready. The
+       readiness box sits BEFORE the size so the status message that
+       follows it reads as an explanation of the box. The name is the
+       only elastic column and clips rather than pushing the rest out
+       of alignment. */
     display: grid;
-    grid-template-columns: 16px minmax(9em, 1fr) 132px 4.6em 12px auto;
+    grid-template-columns: 16px minmax(9em, 1fr) 132px 12px 4.6em auto;
     align-items: center;
     gap: 6px;
     padding: 3px 2px;
     font-size: 11px;
     border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
 }
+.src-row:hover { background: #f5f8ff; }
+.src-row input[type=checkbox] { cursor: default; }
 .src-row.is-current { background: #fffbe6; }
 .src-name {
     font-family: monospace;

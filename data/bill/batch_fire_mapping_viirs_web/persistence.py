@@ -153,7 +153,16 @@ def _carry_forward_identity(state_path: str, data: dict) -> None:
             # layer no longer supports. ml_area_ha stays -- it is our
             # own measurement of an accepted result, not an external
             # feed.
-            'ml_area_ha')
+            'ml_area_ha',
+            # The AOI dimensions and the accumulation window.
+            #
+            # Written only when non-zero, so one save taken before a
+            # prepare finished dropped them -- and since a fire whose
+            # stack is in the durable store now keeps its ready status
+            # instead of re-preparing, nothing recomputed them. The
+            # header then read "AOI: 0x0 px - Accum: ? -> ?" for a fire
+            # that was perfectly intact.
+            'crop_w', 'crop_h', 'acc_start', 'acc_end')
     try:
         import yaml            # imported locally, as elsewhere here
         if not os.path.isfile(state_path):
@@ -585,6 +594,30 @@ def _load_fire_state():
                 sys.stderr.write(
                     '[persistence] %s: deleted; not restoring it\n' % fn)
                 continue
+        except Exception:
+            pass
+
+        # Dimensions and accumulation dates, if the record lost them.
+        #
+        # The stack itself is the authority on its own size, and the
+        # accumulation window is the VIIRS window this fire was built
+        # with -- both recoverable without re-preparing anything.
+        try:
+            if not getattr(fire, 'crop_w', 0):
+                from .durable import _grid_of
+                g = _grid_of(getattr(fire, 'crop_bin', '') or '')
+                if g:
+                    fire.crop_w, fire.crop_h = int(g[0]), int(g[1])
+                    sys.stderr.write(
+                        '[persistence] %s: AOI size %dx%d read back '
+                        'from its stack\n' % (fn, g[0], g[1]))
+        except Exception:
+            pass
+        try:
+            if not getattr(fire, 'acc_start', ''):
+                if getattr(fire, 'viirs_start_date', ''):
+                    fire.acc_start = fire.viirs_start_date
+                    fire.acc_end = getattr(fire, 'viirs_end_date', '')
         except Exception:
             pass
 
