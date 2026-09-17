@@ -1336,3 +1336,74 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     background: #fff3a8;
     color: #7a5d00;
 }
+
+
+/* ---------------------------------------------------------------
+   Collapsing the right-hand panel
+   ---------------------------------------------------------------
+   The panel keeps its place in the flex row when collapsed, shrunk
+   to a thin strip carrying the button that brings it back. Nothing
+   is removed from the DOM, so the console keeps logging, any run in
+   progress keeps updating, and expanding it again shows current
+   state rather than a blank panel being rebuilt.
+
+   The image pane simply gets the width back. Pane transforms are in
+   pixels from the pane's own top-left corner and no resize handler
+   re-fits, so the imagery does not move when the width changes --
+   you just see more of it. */
+.control-panel.is-collapsed {
+    width: 24px;
+    min-width: 24px;
+    border-left: 1px solid #ddd;
+    background: #f7f7f7;
+    overflow: visible;
+}
+.control-panel.is-collapsed > *:not(.panel-tab) {
+    display: none !important;
+}
+.panel-tab {
+    display: none;
+    width: 24px;
+    height: 100%;
+    border: none;
+    background: #f7f7f7;
+    color: #555;
+    cursor: pointer;
+    padding: 8px 0;
+    font-size: 11px;
+    line-height: 1.2;
+    /* Reads bottom-to-top, so the label runs up the strip. */
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    letter-spacing: 0.04em;
+}
+.control-panel.is-collapsed .panel-tab {
+    display: block;
+}
+.panel-tab:hover { background: #ececec; color: #222; }
+.panel-head {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 2px 6px 0;
+    flex: none;
+}
+.panel-collapse {
+    border: 1px solid #ccc;
+    background: #fff;
+    color: #555;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 7px;
+    border-radius: 3px;
+}
+.panel-collapse:hover { background: #f0f0f0; color: #222; }
+
+/* On a narrow screen the panel stacks under the viewer and a
+   vertical strip would be useless, so collapsing is a no-op there. */
+@media (max-width: 900px) {
+    .control-panel.is-collapsed { width: 100%; min-width: 0; }
+    .control-panel.is-collapsed > *:not(.panel-tab) { display: revert !important; }
+    .control-panel.is-collapsed .panel-tab { display: none; }
+}

@@ -328,6 +328,14 @@
     <!-- RIGHT: Parameters + controls + console                          -->
     <!-- =============================================================== -->
     <div class="control-panel" id="control-panel">
+            <button class="panel-tab" id="panel-restore"
+                    onclick="toggleControlPanel()"
+                    title="Show the controls panel">&#9664; controls</button>
+            <div class="panel-head">
+              <button class="panel-collapse" id="panel-collapse"
+                      onclick="toggleControlPanel()"
+                      title="Collapse this panel">Collapse &#9654;</button>
+            </div>
 
         <div class="params-scroll" id="params-scroll">
 
@@ -3631,6 +3639,7 @@ function collectUiState() {
         right_key: concreteProductKey(rightProductKey()),
         split: !!splitActive,
         overlays: !!overlaysVisible,
+        panel_collapsed: !!_panelCollapsed,
         use_hdbscan: c('use-hdbscan'),
         eraser_size: v('p-eraser_size'),
         eraser_on: c('eraser-on'),
@@ -3673,7 +3682,8 @@ function saveUiState() {
             log(`[ui] saved: split=${_st.split} `
                 + `left=${_st.left_key}/${_st.left_view} `
                 + `right=${_st.right_key}/${_st.right_view} `
-                + `overlays=${_st.overlays}`, 'dim');
+                + `overlays=${_st.overlays} panel=${_st.panel_collapsed
+            ? 'collapsed' : 'open'}`, 'dim');
         } catch (_) { /* a lost GUI preference is not worth a dialog */ }
     }, 800);
 }
@@ -3770,6 +3780,10 @@ function applySavedUiState(ui, kgcParams) {
             }
         } catch (_) {}
         if (typeof ui.overlays === 'boolean') overlaysVisible = ui.overlays;
+        if (typeof ui.panel_collapsed === 'boolean'
+                && ui.panel_collapsed !== _panelCollapsed) {
+            toggleControlPanel(ui.panel_collapsed);
+        }
 
         const setSel = (id, val) => {
             const el = document.getElementById(id);
@@ -9957,22 +9971,60 @@ function toggleSplit(manual) {
 // -----------------------------------------------------------------------
 // Collapsible control panel
 // -----------------------------------------------------------------------
-function toggleControlPanel() {
+// Whether the right-hand panel is collapsed to its strip.
+let _panelCollapsed = false;
+
+function toggleControlPanel(force) {
     const panel = document.getElementById('control-panel');
+    if (!panel) return;
+    // Collapse to a STRIP rather than display:none.
+    //
+    // Hiding it outright took the panel out of the flex row, so the
+    // only way back was a floating tab pinned to the window edge.
+    // A 24px strip keeps its place in the layout and carries its own
+    // restore button, and -- because the panel stays in the DOM --
+    // the console keeps logging and a run in progress keeps updating
+    // behind it.
+    _panelCollapsed = (typeof force === 'boolean')
+        ? force : !_panelCollapsed;
+    panel.style.display = '';            // undo any older hidden state
+    panel.classList.toggle('is-collapsed', _panelCollapsed);
     const btn = document.getElementById('panel-toggle');
-    const hidden = panel.style.display === 'none';
-    panel.style.display = hidden ? '' : 'none';
-    btn.innerHTML = hidden ? '&#9654;' : '&#9664;';
-    localStorage.setItem('panelHidden', hidden ? '' : '1');
-    // Re-apply transforms after layout change (preserve zoom position)
-    setTimeout(() => { updateTransformForPane('left'); if (splitActive) updateTransformForPane('right'); }, 50);
+    if (btn) {
+        btn.innerHTML = _panelCollapsed ? '&#9664;' : '&#9654;';
+        btn.title = _panelCollapsed
+            ? 'Show the controls panel' : 'Collapse the controls panel';
+    }
+    const cbtn = document.getElementById('panel-collapse');
+    if (cbtn) {
+        cbtn.title = _panelCollapsed
+            ? 'Show the controls panel' : 'Collapse this panel';
+    }
+    try { localStorage.setItem('panelHidden',
+                               _panelCollapsed ? '1' : ''); } catch (_) {}
+    // The panes just changed width. Nothing re-fits -- a pane's
+    // transform is in pixels from its own top-left corner -- so the
+    // imagery does not move; only the overlay canvases, which are
+    // sized to the pane, need repainting.
+    setTimeout(() => {
+        try {
+            updateTransformForPane('left');
+            if (splitActive) updateTransformForPane('right');
+            drawAllOverlayLayers();
+        } catch (_) {}
+    }, 50);
+    try { saveUiState(); } catch (_) {}
 }
 
-// Restore panel state
-if (localStorage.getItem('panelHidden') === '1') {
-    document.getElementById('control-panel').style.display = 'none';
-    document.getElementById('panel-toggle').innerHTML = '&#9664;';
-}
+// Restore panel state through the toggle, so the collapsed strip and
+// its buttons are set up the same way here as when it is clicked.
+// (The old code set display:none directly, which now conflicts with
+// the strip: the panel would be gone rather than collapsed.)
+try {
+    if (localStorage.getItem('panelHidden') === '1') {
+        toggleControlPanel(true);
+    }
+} catch (_) { /* a fresh browser has no saved state */ }
 
 prepareFire(null);
 loadNotes();
