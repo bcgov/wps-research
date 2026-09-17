@@ -1432,7 +1432,12 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .sources-panel.is-collapsed .panel-tab { display: block; }
 .sources-list { overflow: auto; padding: 2px 6px 10px; flex: 1; }
 .src-row {
-    display: flex;
+    /* Fixed columns so every row lines up: checkbox, name, cloud,
+       size, readiness, and the reason when it is not ready. The name
+       is the only elastic column, and it clips rather than pushing
+       the others out of alignment. */
+    display: grid;
+    grid-template-columns: 16px minmax(9em, 1fr) 132px 4.6em 12px auto;
     align-items: center;
     gap: 6px;
     padding: 3px 2px;
@@ -1440,8 +1445,18 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     border-bottom: 1px solid #f0f0f0;
 }
 .src-row.is-current { background: #fffbe6; }
-.src-name { flex: 1; font-family: monospace; white-space: nowrap; }
-.src-size { color: #777; white-space: nowrap; font-size: 10px; }
+.src-name {
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.src-size {
+    color: #777;
+    white-space: nowrap;
+    font-size: 10px;
+    text-align: right;
+}
 /* Readiness: blue when a switch would be instant, hatched grey while
    the background fill is still working on it. */
 .src-ready {
@@ -1459,3 +1474,26 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
     .sources-panel.is-collapsed > *:not(.panel-tab) { display: revert !important; }
     .sources-panel.is-collapsed .panel-tab { display: none; }
 }
+
+
+/* The row whose product the LEFT pane is currently showing. */
+.src-row.is-shown {
+    background: #eaf2fd;
+    box-shadow: inset 3px 0 0 #2f6fd0;
+}
+.src-row.is-shown .src-name { font-weight: 700; color: #16407e; }
+
+/* Drag handle on the panel's right edge, so the panel itself can be
+   widened when product names are long. */
+.sources-panel { position: relative; }
+.sources-grip {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+}
+.sources-grip:hover { background: #cfe0f7; }
+.sources-panel.is-collapsed .sources-grip { display: none; }

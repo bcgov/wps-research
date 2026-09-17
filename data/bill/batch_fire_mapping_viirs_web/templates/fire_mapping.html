@@ -80,6 +80,8 @@
                       title="Collapse this panel">&#9664; Collapse</button>
             </span>
           </div>
+          <div class="sources-grip" id="sources-grip"
+               title="Drag to resize this panel"></div>
           <div class="sources-list" id="sources-list">
             <div style="color:#888;font-size:11px;padding:6px">
               Loading ...</div>
@@ -805,6 +807,7 @@ const SPLIT_AT_LOAD = {{{ split_at_load }}};
 // jumped to two. Doing it on first paint means the pane geometry
 // never changes under the imagery.
 document.addEventListener('DOMContentLoaded', () => {
+    try { initSourcesGrip(); } catch (_) {}
     if (!SPLIT_AT_LOAD) return;
     // Use the real toggle, not hand-edited classes.
     //
@@ -1246,6 +1249,8 @@ function stopSourceSwitchProgress() {
 }
 
 async function onPostSourceChange() {
+    // Keep the Sources highlight on whatever the left pane shows.
+    try { setTimeout(refreshSourcesPanel, 0); } catch (_) {}
     // Same method as the right pane: repaint from the client, then
     // tell the server.
     //
@@ -9897,65 +9902,92 @@ function toggleSourcesPanel(force) {
     try { saveUiState(); } catch (_) {}
 }
 
-// The same cloud cell the Date select menu draws, so the two read
-// alike. MRAP composites are cloud-free by construction, so they get
-// hatching and "NA" rather than a number that would imply a
-// measurement nobody made.
+// Cloud cell for a source row.
+//
+// Delegates to the Date select menu's cloudCell() so the two read
+// identically -- same number column, same red/green track, same three
+// states. Feeding the shared _cloudCover cache from this panel's
+// response also means whichever view is opened first fills it for the
+// other.
 function srcCloudCell(e) {
     if (e.source !== 'l2') {
-        return '<span style="display:inline-block;width:54px;height:9px;'
-            + 'background:repeating-linear-gradient(45deg,#ddd,#ddd 2px,'
-            + '#f4f4f4 2px,#f4f4f4 4px);vertical-align:middle" '
-            + 'title="MRAP composites are cloud-free by '
-            + 'construction"></span>'
-            + '<span style="color:#aaa;font-size:10px"> NA</span>';
+        // MRAP composites are cloud-free by construction, so a figure
+        // would imply a measurement nobody made.
+        return `<span style="display:inline-flex;align-items:center;
+                             gap:6px;flex:0 0 auto">
+          <span style="font-family:monospace;font-size:11px;color:#aaa;
+                       white-space:pre;width:3.9em;text-align:right"
+                title="MRAP composites are cloud-free by construction">
+            NA</span>
+          <span style="display:inline-block;width:70px;height:7px;
+                       background:repeating-linear-gradient(135deg,
+                           #e4e4e4 0 4px,#f4f4f4 4px 8px);
+                       border-radius:3px"
+                title="Not applicable to a MRAP composite"></span>
+        </span>`;
     }
-    if (e.cloud === null || e.cloud === undefined) {
-        return '<span style="display:inline-block;width:54px;height:9px;'
-            + 'background:repeating-linear-gradient(45deg,#ddd,#ddd 2px,'
-            + '#f4f4f4 2px,#f4f4f4 4px);vertical-align:middle" '
-            + 'title="cloud cover not fetched yet"></span>'
-            + '<span style="color:#aaa;font-size:10px"> ...</span>';
+    try {
+        return cloudCell(e.date);
+    } catch (_) {
+        return '<span></span>';
     }
-    const pct = Math.max(0, Math.min(100, Number(e.cloud)));
-    const w = Math.round(54 * pct / 100);
-    return `<span style="display:inline-block;width:54px;height:9px;`
-        + `background:#2a7;vertical-align:middle" title="${pct.toFixed(0)}% `
-        + `cloud">`
-        + `<span style="display:inline-block;width:${w}px;height:9px;`
-        + `background:#c33"></span></span>`
-        + `<span style="color:#666;font-size:10px"> ${pct.toFixed(0)}%</span>`;
 }
 
 function renderSourcesList(data) {
     const box = document.getElementById('sources-list');
     if (!box) return;
     const rows = (data && data.sources) || [];
+
+    // Feed the shared cloud cache, so this panel and the Date select
+    // menu draw from one set of figures rather than two.
+    try {
+        for (const e of rows) {
+            if (e.source === 'l2' && typeof e.cloud === 'number'
+                    && _cloudCover[e.date] === undefined) {
+                _cloudCover[e.date] = e.cloud;
+            }
+        }
+        const dlg = document.getElementById('date-picker');
+        const dlgOpen = dlg && dlg.style.display !== 'none';
+        if (!dlgOpen) _cloudSettled = !data.cloud_pending;
+    } catch (_) {}
+
     if (!rows.length) {
         box.innerHTML = '<div style="color:#888;font-size:11px;'
             + 'padding:6px">No products yet.</div>';
         return;
     }
-    // Drop selections for products that no longer exist.
-    const live = new Set(rows.map((r) => r.key));
     for (const k of [..._srcSelected]) {
-        if (!live.has(k)) _srcSelected.delete(k);
+        if (!rows.some((r) => r.key === k)) _srcSelected.delete(k);
     }
+    // The product the LEFT pane is showing. Tracked here rather than
+    // taken from the server's idea of the loaded product, because the
+    // two differ while a switch is in flight and the highlight should
+    // follow what is on screen.
+    let shown = '';
+    try { shown = currentProductKey() || ''; } catch (_) { shown = ''; }
+
     box.innerHTML = rows.map((e) => {
-        const size = [e.ram_mb != null ? `${e.ram_mb} MB ram` : '',
-                      e.ssd_mb != null ? `${e.ssd_mb} MB ssd` : '']
-                     .filter(Boolean).join(' · ') || 'no file';
-        return `<div class="src-row${e.current ? ' is-current' : ''}">
+        // Date first, exactly as the source selectors name it.
+        const name = selectorLabel({key: e.key, label: e.label});
+        const mb = (e.ram_mb != null) ? e.ram_mb
+                 : (e.ssd_mb != null) ? e.ssd_mb : null;
+        // One figure: the same imagery is held in both places, so
+        // reporting it twice said nothing extra.
+        const size = (mb != null) ? Math.round(mb) + ' MB' : '\u2014';
+        const isShown = e.key === shown;
+        return `<div class="src-row${isShown ? ' is-shown' : ''}"
+                     title="${e.key}">
             <input type="checkbox" data-src-key="${e.key}"
                    ${_srcSelected.has(e.key) ? 'checked' : ''}
                    ${e.current ? 'disabled title="currently loaded"' : ''}>
-            <span class="src-name" title="${e.key}">${e.label}</span>
-            ${srcCloudCell(e)}
+            <span class="src-name">${name}</span>
+            <span class="src-cloud">${srcCloudCell(e)}</span>
             <span class="src-size">${size}</span>
             <span class="src-ready${e.ready ? '' : ' not-ready'}"
-                  title="${e.ready ? 'cached: switching is instant'
+                  title="${e.ready ? 'cached: switching to this is instant'
                                    : (e.status || 'not ready')}"></span>
-            ${e.ready ? '' : `<span class="src-why">${e.status}</span>`}
+            <span class="src-why">${e.ready ? '' : (e.status || '')}</span>
         </div>`;
     }).join('');
     box.querySelectorAll('input[data-src-key]').forEach((cb) => {
@@ -9971,6 +10003,63 @@ function renderSourcesList(data) {
 function syncSourcesDeleteButton() {
     const b = document.getElementById('sources-delete');
     if (b) b.style.display = _srcSelected.size ? '' : 'none';
+}
+
+// Drag the panel's right edge to resize it.
+//
+// Width is remembered per browser rather than per fire: it is a
+// property of the screen being used, not of the incident.
+function initSourcesGrip() {
+    const grip = document.getElementById('sources-grip');
+    const panel = document.getElementById('sources-panel');
+    if (!grip || !panel) return;
+    try {
+        const saved = parseInt(
+            localStorage.getItem('sourcesWidth') || '', 10);
+        if (saved >= 180 && saved <= 900) {
+            panel.style.width = saved + 'px';
+            panel.style.minWidth = saved + 'px';
+        }
+    } catch (_) {}
+    let startX = 0, startW = 0, dragging = false;
+    const onMove = (ev) => {
+        if (!dragging) return;
+        // Bounded: narrow enough to be useless, or wide enough to
+        // squeeze the imagery out, are both worse than the limit.
+        const w = Math.max(180, Math.min(900,
+            startW + (ev.clientX - startX)));
+        panel.style.width = w + 'px';
+        panel.style.minWidth = w + 'px';
+    };
+    const onUp = () => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.style.cursor = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        try {
+            localStorage.setItem('sourcesWidth',
+                String(parseInt(panel.style.width, 10) || 290));
+        } catch (_) {}
+        // The panes changed width; nothing re-fits, but the overlay
+        // canvases are sized to the pane.
+        setTimeout(() => {
+            try {
+                updateTransformForPane('left');
+                if (splitActive) updateTransformForPane('right');
+                drawAllOverlayLayers();
+            } catch (_) {}
+        }, 30);
+    };
+    grip.addEventListener('mousedown', (ev) => {
+        dragging = true;
+        startX = ev.clientX;
+        startW = panel.getBoundingClientRect().width;
+        document.body.style.cursor = 'col-resize';
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        ev.preventDefault();
+    });
 }
 
 async function refreshSourcesPanel() {
