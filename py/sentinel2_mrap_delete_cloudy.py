@@ -4,9 +4,10 @@
 and optionally delete the cloudy ones.
 
 Method:
-  1. Search MRAP_DIR (default /data/mrap_bc/, recursively) for yyyymmdd_mrap.bin
-     files that have an ENVI .hdr sidecar (yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr,
-     matched case-insensitively against the directory listing).
+  1. Search MRAP_DIR (default /data/mrap_bc/, top level only — subfolders such as
+     small_yyyymmdd/ are not searched) for yyyymmdd_mrap.bin files that have an
+     ENVI .hdr sidecar (yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr, matched
+     case-insensitively against the directory listing).
      Collect and sort their dates.
   2. Get the BC Sentinel-2 tile IDs from sentinel2_bc_tiles_shp/bc_gid.py, located
      relative to this source file (last line of its output).
@@ -20,6 +21,9 @@ Method:
 Output (stdout): one line per yyyymmdd_mrap.bin:
     <path to yyyymmdd_mrap.bin> <estimated cloud cover %> [(*)]
 (*) marks entries whose estimate is strictly greater than the threshold.
+A plot of the estimates over time is written to MRAP_DIR as
+yyyymmdd1_yyyymmdd2_cloud_cover.png, where the dates are the first and last
+MRAP date considered in this run.
 Progress, warnings and the output of the child scripts go to stderr, so stdout
 stays a clean list.
 
@@ -59,6 +63,15 @@ import subprocess
 from datetime import datetime, timedelta
 from collections import defaultdict
 
+try:
+    import matplotlib
+    matplotlib.use('Agg')          # no display needed
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 MRAP_RE = re.compile(r'^(\d{8})_mrap\.bin$')
 TILE_RE = re.compile(r'^T\d{2}[A-Z]{3}$')
 PROD_TILE_RE = re.compile(r'_(T\d{2}[A-Z]{3})_')
@@ -78,32 +91,38 @@ def err(msg):
 
 
 def find_mrap(mrap_dir):
-    """Return sorted list of (date, bin_path, [hdr_paths])."""
+    """Return sorted list of (date, bin_path, [hdr_paths]).
+
+    Only the top level of mrap_dir is searched: subfolders (small_yyyymmdd/,
+    yyyymmdd/, per-tile L2_* folders, ...) are not descended into.
+    """
     found = []
-    for root, dirs, files in os.walk(mrap_dir):
-        dirs.sort()
-        # names present in this directory, keyed by lowercase name
-        here = {fn.lower(): fn for fn in files}
-        for fn in files:
-            m = MRAP_RE.match(fn)
-            if not m:
-                continue
-            try:
-                d = datetime.strptime(m.group(1), '%Y%m%d').date()
-            except ValueError:
-                err(f"WARNING: bad date in filename, skipping: {os.path.join(root, fn)}")
-                continue
-            bin_path = os.path.join(root, fn)
-            # accept yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr, any case
-            hdrs = []
-            for cand in (fn[:-4] + '.hdr', fn + '.hdr'):
-                actual = here.get(cand.lower())
-                if actual is not None:
-                    hdrs.append(os.path.join(root, actual))
-            if not hdrs:
-                err(f"WARNING: no .hdr sidecar for {bin_path}, skipping")
-                continue
-            found.append((d, bin_path, hdrs))
+    if not os.path.isdir(mrap_dir):
+        sys.exit(f"ERROR: not a directory: {mrap_dir}")
+    files = [fn for fn in os.listdir(mrap_dir)
+             if os.path.isfile(os.path.join(mrap_dir, fn))]
+    # names present in this directory, keyed by lowercase name
+    here = {fn.lower(): fn for fn in files}
+    for fn in files:
+        m = MRAP_RE.match(fn)
+        if not m:
+            continue
+        try:
+            d = datetime.strptime(m.group(1), '%Y%m%d').date()
+        except ValueError:
+            err(f"WARNING: bad date in filename, skipping: {os.path.join(mrap_dir, fn)}")
+            continue
+        bin_path = os.path.join(mrap_dir, fn)
+        # accept yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr, any case
+        hdrs = []
+        for cand in (fn[:-4] + '.hdr', fn + '.hdr'):
+            actual = here.get(cand.lower())
+            if actual is not None:
+                hdrs.append(os.path.join(mrap_dir, actual))
+        if not hdrs:
+            err(f"WARNING: no .hdr sidecar for {bin_path}, skipping")
+            continue
+        found.append((d, bin_path, hdrs))
     found.sort()
     return found
 
@@ -177,6 +196,56 @@ def estimate_mrap_cloud(d, series):
     return (sum(vals) / len(vals) if vals else None), len(vals)
 
 
+def plot_cloud_cover(points, threshold, out_file):
+    """Line plot of estimated MRAP cloud cover over time.
+
+    points   : list of (date, cloud_pct), chronological
+    threshold: threshold in percent, or None
+    out_file : PNG path to write
+    """
+    if not HAS_MATPLOTLIB:
+        err("WARNING: matplotlib not available, skipping plot")
+        return
+    if not points:
+        err("WARNING: nothing to plot")
+        return
+
+    dates = [datetime.combine(d, datetime.min.time()) for d, _ in points]
+    values = [v for _, v in points]
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+    ax.plot(dates, values, linestyle='-', marker='o', markersize=4,
+            linewidth=1.5, color='tab:blue', label='MRAP cloud cover (BC tile mean)')
+
+    if threshold is not None:
+        ax.axhline(threshold, linestyle='--', linewidth=1.5, color='red',
+                   label=f'Threshold {threshold:g}%')
+        over = [(d, v) for d, v in zip(dates, values) if v > threshold]
+        if over:
+            ax.scatter([d for d, _ in over], [v for _, v in over],
+                       marker='X', s=120, c='red', edgecolors='darkred',
+                       linewidths=1, zorder=10,
+                       label=f'Over threshold ({len(over)})')
+
+    ax.set_xlabel("Date", fontsize=12)
+    ax.set_ylabel("Estimated cloud cover (%)", fontsize=12)
+    ax.set_title("MRAP estimated cloud cover over time (BC Sentinel-2 tiles)", fontsize=14)
+    ax.set_ylim(0, 100)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.xticks(rotation=45, ha='right')
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right', fontsize=9)
+    plt.tight_layout()
+
+    try:
+        plt.savefig(out_file, dpi=150, bbox_inches='tight')
+        err(f"Plot saved to: {out_file}")
+    except OSError as e:
+        err(f"ERROR: could not write plot {out_file}: {e}")
+    plt.close(fig)
+
+
 def main():
     threshold = None
     delete = False
@@ -243,6 +312,7 @@ def main():
     # 4. Estimate, report, flag
     flagged = []
     partial = []
+    points = []
     for d, bin_path, hdrs in mrap:
         cc, n = estimate_mrap_cloud(d, series)
         if cc is None:
@@ -252,6 +322,7 @@ def main():
             partial.append(f"{d:%Y%m%d}({n}/{len(series)})")
         star = threshold is not None and cc > threshold
         print(f"{bin_path} {cc:.2f}" + (" (*)" if star else ""), flush=True)
+        points.append((d, cc))
         if star:
             flagged.append((bin_path, hdrs))
 
@@ -263,7 +334,11 @@ def main():
     if threshold is not None:
         err(f"{len(flagged)} of {len(mrap)} MRAP products exceed {threshold:g}% cloud cover")
 
-    # 5. Delete
+    # 5. Plot, into the target directory, named for the date range of this run
+    plot_cloud_cover(points, threshold,
+                     os.path.join(mrap_dir, f"{first:%Y%m%d}_{last:%Y%m%d}_cloud_cover.png"))
+
+    # 6. Delete
     if delete:
         for bin_path, hdrs in flagged:
             for p in [bin_path] + hdrs:
