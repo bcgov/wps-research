@@ -217,6 +217,10 @@ def plot_cloud_cover(points, threshold, out_file):
     ax.plot(dates, values, linestyle='-', marker='o', markersize=4,
             linewidth=1.5, color='tab:blue', label='MRAP cloud cover (BC tile mean)')
 
+    mean_cc = sum(values) / len(values)
+    ax.axhline(mean_cc, linestyle='--', linewidth=2, color='black',
+               label=f'Average {mean_cc:.2f}%')
+
     if threshold is not None:
         ax.axhline(threshold, linestyle='--', linewidth=1.5, color='red',
                    label=f'Threshold {threshold:g}%')
