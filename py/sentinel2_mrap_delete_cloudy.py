@@ -6,8 +6,8 @@ and optionally delete the cloudy ones.
 Method:
   1. Search MRAP_DIR (default /data/mrap_bc/, top level only — subfolders such as
      small_yyyymmdd/ are not searched) for yyyymmdd_mrap.bin files that have an
-     ENVI .hdr sidecar (yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr, matched
-     case-insensitively against the directory listing).
+     ENVI sidecar yyyymmdd_mrap.hdr (matched case-insensitively against the
+     directory listing).
      Collect and sort their dates.
   2. Get the BC Sentinel-2 tile IDs from sentinel2_bc_tiles_shp/bc_gid.py, located
      relative to this source file (last line of its output).
@@ -24,6 +24,8 @@ Output (stdout): one line per yyyymmdd_mrap.bin:
 A plot of the estimates over time is written to MRAP_DIR as
 yyyymmdd1_yyyymmdd2_cloud_cover.png, where the dates are the first and last
 MRAP date considered in this run.
+If a threshold is given without --delete, the space that --delete would free is
+reported at the end; with --delete, the space actually freed is reported.
 Progress, warnings and the output of the child scripts go to stderr, so stdout
 stays a clean list.
 
@@ -113,12 +115,11 @@ def find_mrap(mrap_dir):
             err(f"WARNING: bad date in filename, skipping: {os.path.join(mrap_dir, fn)}")
             continue
         bin_path = os.path.join(mrap_dir, fn)
-        # accept yyyymmdd_mrap.hdr or yyyymmdd_mrap.bin.hdr, any case
+        # sidecar: yyyymmdd_mrap.hdr (matched case-insensitively)
         hdrs = []
-        for cand in (fn[:-4] + '.hdr', fn + '.hdr'):
-            actual = here.get(cand.lower())
-            if actual is not None:
-                hdrs.append(os.path.join(mrap_dir, actual))
+        actual = here.get((fn[:-4] + '.hdr').lower())
+        if actual is not None:
+            hdrs.append(os.path.join(mrap_dir, actual))
         if not hdrs:
             err(f"WARNING: no .hdr sidecar for {bin_path}, skipping")
             continue
@@ -194,6 +195,26 @@ def estimate_mrap_cloud(d, series):
         if i >= 0:
             vals.append(ccs[i])
     return (sum(vals) / len(vals) if vals else None), len(vals)
+
+
+def human_bytes(n):
+    """Human-readable size, e.g. '1.42 TiB'."""
+    x = float(n)
+    for unit in ('B', 'KiB', 'MiB', 'GiB', 'TiB'):
+        if x < 1024.0 or unit == 'TiB':
+            return f"{x:.2f} {unit}" if unit != 'B' else f"{int(x)} B"
+        x /= 1024.0
+
+
+def total_size(paths):
+    """Sum of file sizes in bytes; unreadable files count as 0."""
+    total = 0
+    for p in paths:
+        try:
+            total += os.path.getsize(p)
+        except OSError as e:
+            err(f"WARNING: could not stat {p}: {e}")
+    return total
 
 
 def plot_cloud_cover(points, threshold, out_file):
@@ -351,6 +372,11 @@ def main():
 
     if threshold is not None:
         err(f"{len(flagged)} of {len(mrap)} MRAP products exceed {threshold:g}% cloud cover")
+        flagged_paths = [p for bin_path, hdrs in flagged for p in [bin_path] + hdrs]
+        flagged_bytes = total_size(flagged_paths)
+        if not delete:
+            err(f"Space that would be freed by --delete: {human_bytes(flagged_bytes)} "
+                f"({flagged_bytes} bytes in {len(flagged_paths)} files)")
 
     # 5. Plot, into the target directory, named for the date range of this run
     plot_cloud_cover(points, threshold,
@@ -358,13 +384,20 @@ def main():
 
     # 6. Delete
     if delete:
+        freed = 0
         for bin_path, hdrs in flagged:
             for p in [bin_path] + hdrs:
                 try:
+                    sz = os.path.getsize(p)
+                except OSError:
+                    sz = 0
+                try:
                     os.remove(p)
+                    freed += sz
                     err(f"deleted {p}")
                 except OSError as e:
                     err(f"ERROR: could not delete {p}: {e}")
+        err(f"Space freed: {human_bytes(freed)} ({freed} bytes)")
 
 
 if __name__ == '__main__':
