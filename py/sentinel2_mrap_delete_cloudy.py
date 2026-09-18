@@ -231,6 +231,20 @@ def plot_cloud_cover(points, threshold, out_file):
                        linewidths=1, zorder=10,
                        label=f'Over threshold ({len(over)})')
 
+    # label the five highest and five lowest values (date + percentage)
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    lowest = order[:5]
+    highest = [i for i in order[-5:] if i not in set(lowest)]
+    for idx_list, dy, va in ((highest, 12, 'bottom'), (lowest, -12, 'top')):
+        for i in idx_list:
+            ax.annotate(f"{points[i][0]:%Y%m%d}\n{values[i]:.2f}%",
+                        xy=(dates[i], values[i]),
+                        xytext=(0, dy), textcoords='offset points',
+                        ha='center', va=va, fontsize=7,
+                        bbox=dict(boxstyle='round,pad=0.2', fc='white',
+                                  ec='0.6', alpha=0.85),
+                        zorder=11, annotation_clip=False)
+
     ax.set_xlabel("Date", fontsize=12)
     ax.set_ylabel("Estimated cloud cover (%)", fontsize=12)
     ax.set_title("MRAP estimated cloud cover over time (BC Sentinel-2 tiles)", fontsize=14)
