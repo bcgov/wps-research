@@ -805,14 +805,49 @@ class FireRoutes:
                 getattr(fire, 'crop_bin', '') or '') or ''
         except Exception:
             cur = ''
-        refused = [k for k in keys if k == cur]
-        keys = [k for k in keys if k != cur]
-        if not keys:
-            self._send_json(
-                {'error': 'that product is the one currently loaded; '
-                          'switch to another first',
-                 'refused': refused}, 409)
-            return
+        # Deleting the loaded product is allowed: move off it first.
+        #
+        # Refusing meant a product could be viewed but never removed,
+        # which is precisely the case for a redundant layer an operator
+        # has just looked at to confirm it is redundant. The fire is
+        # switched to the newest OTHER product before anything is
+        # removed, so the panes and Map Fire keep a valid source.
+        refused = []
+        if cur in keys:
+            others = [p2.get('key') for p2 in
+                      self._built_products(fire_numbe, fire)
+                      if p2.get('key') and p2.get('key') != cur
+                      and p2.get('key') not in keys
+                      and p2.get('built') is not False]
+            if not others:
+                self._send_json(
+                    {'error': 'this is the only product left; deleting '
+                              'it would leave the fire with nothing to '
+                              'display',
+                     'refused': [cur]}, 409)
+                return
+            target = sorted(others, reverse=True)[0]
+            try:
+                from ..prepare import switch_post_source, product_parts
+                _s2, _start2, _post2 = product_parts(target)
+                res = switch_post_source(
+                    fire, _s2,
+                    l2_date=(_start2 if _s2 == 'l2' else ''),
+                    product=target)
+                if not (res or {}).get('ok'):
+                    self._send_json(
+                        {'error': f'could not switch off {cur} first: '
+                                  f'{(res or {}).get("error", "busy")}',
+                         'refused': [cur]}, 409)
+                    return
+                sys.stderr.write(
+                    '[sources] %s: switched to %s so %s could be '
+                    'deleted\n' % (fire_numbe, target, cur))
+            except Exception as exc:
+                self._send_json(
+                    {'error': f'could not switch off {cur} first: '
+                              f'{exc}', 'refused': [cur]}, 409)
+                return
 
         import glob as _g
         import shutil as _sh
@@ -937,6 +972,23 @@ class FireRoutes:
                 except OSError:
                     return None
 
+            # Which preview file answers for the view the operator is
+            # looking at. The client sends it; without it the answer
+            # defaults to the post-fire view, which is what it always
+            # measured before.
+            _q = parse_qs(urlparse(self.path).query)
+            _view = (_q.get('view') or ['post'])[0].strip()
+            _hint = (_q.get('hint') or [''])[0].strip()
+            if _view == 'hint' and re.fullmatch(r'[A-Za-z0-9_-]+',
+                                                _hint or ''):
+                _view_file = f'hint_{_hint}.png'
+            elif _view in ('post', 'pre', 'diff1'):
+                _view_file = f'{_view}.png'
+            elif _view in ('result', 'result_prebrush'):
+                _view_file = f'{_view}.png'
+            else:
+                _view_file = 'post.png'
+
             prods = self._built_products(fire_numbe, fire,
                                          keep_paths=True)
             store = store_dir()
@@ -949,6 +1001,13 @@ class FireRoutes:
                     getattr(fire, 'crop_bin', '') or '') or ''
             except Exception:
                 cur_key = ''
+
+            _view_label = {
+                'post.png': 'post-fire', 'pre.png': 'pre-fire',
+                'diff1.png': 'the difference image',
+            }.get(_view_file, 'this view')
+            if _view_file.startswith('hint_'):
+                _view_label = 'the hint mask'
 
             out = []
             l2_days = []
@@ -976,23 +1035,34 @@ class FireRoutes:
                 if ram_mb is None and ssd_mb is not None:
                     ram_mb = ssd_mb
 
-                # "Instant" means the preview this pane would request
-                # is already rendered: that is what makes a switch a
-                # file read rather than a render.
+                # "Instant" means the preview THIS PANE WOULD REQUEST
+                # is already rendered -- so the answer depends on the
+                # view the operator has selected, not always on the
+                # post-fire one. A product whose post-fire preview is
+                # cached can still need a render for "Hint perimeter",
+                # and reporting it as ready was why a blue box could
+                # sit beside a blank pane.
                 pdir = os.path.join(fire.cache_dir, f'previews_{key}')
-                have_prev = os.path.isfile(
-                    os.path.join(pdir, 'post.png'))
-                if key == cur_key:
-                    have_prev = have_prev or os.path.isfile(
-                        os.path.join(fire.cache_dir, 'previews',
-                                     'post.png'))
+                _want = _view_file or 'post.png'
+
+                def _has(name):
+                    if os.path.isfile(os.path.join(pdir, name)):
+                        return True
+                    if key == cur_key:
+                        return os.path.isfile(os.path.join(
+                            fire.cache_dir, 'previews', name))
+                    return False
+
+                have_prev = _has(_want)
                 ready = bool(path and os.path.isfile(path)
                              and have_prev)
                 # Say what is actually true of THIS product.
                 if ready:
                     why = ''
                 elif path and os.path.isfile(path):
-                    why = 'rendering previews'
+                    why = ('rendering previews' if _view_file
+                           == 'post.png'
+                           else f'rendering {_view_label}')
                 elif ssd_mb is not None:
                     why = 'in the durable store; restores on first use'
                 elif path:
@@ -2289,37 +2359,53 @@ class FireRoutes:
                 # so it is only ever valid for its own source.
                 per_mode = None
                 _live = os.path.join(fire.cache_dir, 'previews')
-                _dir = _stash_dir if _stash_dir else _live
-                c = os.path.join(_dir, f'hint_{mode}.png')
-                if os.path.isfile(c):
+                # NO cross-product fallback.
+                #
+                # A hint image is the mask composited onto THAT
+                # product's post-fire preview, so another product's
+                # hint is another product's imagery. Falling back to
+                # the live directory is what put L2 pixels behind a
+                # hint the operator had asked for on MRAP, with the
+                # selector still naming MRAP. When the requested
+                # product has no hint yet, it is rendered for that
+                # product (below) or the request is answered 409 and
+                # retried -- never substituted.
+                _dir = _stash_dir if _stash_dir else (
+                    _live if not _req_prod or _req_key == _cur_key
+                    else '')
+                c = os.path.join(_dir, f'hint_{mode}.png') if _dir else ''
+                if c and os.path.isfile(c):
                     per_mode = c
                 elif _stash_dir:
                     # The requested source has a stash but no hint for
                     # this mode. Build it for THAT source rather than
                     # borrowing another one's picture.
+                    # Render it for THIS product, in place.
+                    #
+                    # This used to switch the fire onto the product,
+                    # render into the live directory and switch back --
+                    # two server-side switches caused by a display
+                    # request. When the second one lost the fire lock
+                    # the fire stayed on the other product, and every
+                    # later render used its imagery. Nothing below
+                    # touches the loaded product.
                     try:
-                        from ..prepare import (switch_post_source,
-                                               render_hint_for_mode)
-                        _back = getattr(fire, 'post_source', 'l2') or 'l2'
-                        fire.prebuilding = True
-                        fire.user_post_source = _back
-                        if switch_post_source(fire, _src).get('ok'):
-                            render_hint_for_mode(fire, mode)
-                            switch_post_source(fire, _back)
-                        fire.prebuilding = False
-                        c = os.path.join(
-                            fire.cache_dir, f'previews_{_src}',
-                            f'hint_{mode}.png')
-                        if os.path.isfile(c):
-                            per_mode = c
-                            sys.stderr.write(
-                                f'[fire] rendered hint {mode} for '
-                                f'{_src.upper()} on demand\n')
+                        from ..prepare import (render_hint_for_product,
+                                               stack_path_for_product)
+                        _stk = stack_path_for_product(fire, _req_key)
+                        if _stk and render_hint_for_product(
+                                fire, mode, _stk, _stash_dir):
+                            c = os.path.join(_stash_dir,
+                                             f'hint_{mode}.png')
+                            if os.path.isfile(c):
+                                per_mode = c
+                                sys.stderr.write(
+                                    f'[fire] rendered hint {mode} for '
+                                    f'{_req_key} in place\n')
                     except Exception as exc:
-                        fire.prebuilding = False
                         sys.stderr.write(
                             f'[fire] could not render hint {mode} for '
-                            f'{_src}: {exc}\n')
+                            f'{_req_key}: {exc}\n')
                 if per_mode:
                     png = per_mode
                 elif not _src or _src == getattr(
@@ -2577,7 +2663,16 @@ class FireRoutes:
         #
         # A 409 is the honest answer -- the client already retries it
         # and says the layer is still being generated.
-        if _req_prod and view in ('post', 'pre', 'diff1'):
+        # Hint views are included now.
+        #
+        # They were excluded because they resolve by their own rules,
+        # and that exclusion is exactly why a hint could still be
+        # served from another product's directory. A hint image has
+        # that product's imagery composited into it, so the same test
+        # applies: it must come from the requested product's stash, or
+        # from the live directory only when the live directory holds
+        # the requested product.
+        if _req_prod and view in ('post', 'pre', 'diff1', 'hint'):
             _served_from = os.path.basename(os.path.dirname(serve_path))
             _ok = (_served_from == f'previews_{_req_key}')
             if not _ok and _served_from == 'previews':

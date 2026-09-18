@@ -1443,6 +1443,9 @@ function renderHintModeButtons() {
 }
 
 async function switchHintMode(mode) {
+    // A different hint mode is a different cached image, so the
+    // readiness boxes have to be asked again.
+    try { setTimeout(refreshSourcesPanel, 80); } catch (_) {}
     if (mode === currentHintMode) return;
     const group = document.getElementById('hint-mode-group');
     // Disable buttons while switching.
@@ -8139,6 +8142,8 @@ async function loadPaneImage(pane, viewKey) {
 // Dropdown change handler (controls active pane)
 // -----------------------------------------------------------------------
 function onViewDropdownChange() {
+    // The readiness boxes answer for the selected view.
+    try { setTimeout(refreshSourcesPanel, 0); } catch (_) {}
     const viewKey = document.getElementById('view-select').value;
     if (!viewKey) return;
     // In split view the first selector always drives the LEFT pane, so
@@ -9983,7 +9988,9 @@ function renderSourcesList(data) {
                      title="${e.key} — click to show this source">
             <input type="checkbox" data-src-key="${e.key}"
                    ${_srcSelected.has(e.key) ? 'checked' : ''}
-                   ${e.current ? 'disabled title="currently loaded"' : ''}>
+                   ${e.current
+                     ? 'title="currently loaded — deleting it switches '
+                       + 'the view to the next product first"' : ''}>
             <span class="src-name">${name}</span>
             <span class="src-cloud">${srcCloudCell(e)}</span>
             <span class="src-ready${e.ready ? '' : ' not-ready'}"
@@ -10090,8 +10097,14 @@ function initSourcesGrip() {
 
 async function refreshSourcesPanel() {
     try {
+        // Tell the server which view the LEFT pane is showing, so the
+        // readiness box answers for what a click would actually load
+        // rather than always for the post-fire image.
+        const qv = encodeURIComponent(leftView || 'post');
+        const qh = encodeURIComponent(currentHintMode || '');
         const r = await fetch(
-            `/api/fire/${encodeURIComponent(FIRE)}/sources`,
+            `/api/fire/${encodeURIComponent(FIRE)}/sources`
+            + `?view=${qv}&hint=${qh}`,
             {headers: {'X-Requested-With': 'fetch'}});
         if (!r.ok) return;
         const d = await r.json();

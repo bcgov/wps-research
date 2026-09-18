@@ -1598,6 +1598,62 @@ def prebuild_other_source(fire: FireInfo) -> None:
         fire.user_post_source = current
 
 
+def render_hint_for_product(fire: FireInfo, mode: str,
+                            stack_path: str, preview_dir: str) -> bool:
+    """Render one product's hint image WITHOUT switching the fire.
+
+    The old route rendered a hint by switching the fire onto the
+    product, rendering into the live previews directory, and switching
+    back. A display request thus mutated server state twice, and if the
+    second switch lost the fire lock -- which happens under any
+    concurrency -- the fire was left on the other product and every
+    later render used its imagery. That is how the picture behind a
+    hint became a different source while the selector still named the
+    one that had been chosen.
+
+    Everything needed is already per product: the mask builder takes
+    the stack to read, and the compositor takes the directory holding
+    that product's post.png. Nothing here touches fire.crop_bin.
+    """
+    if not stack_path or not os.path.isfile(stack_path):
+        return False
+    if not preview_dir or not os.path.isdir(preview_dir):
+        return False
+    out = os.path.join(preview_dir, f'hint_{mode}.png')
+
+    if mode == 'viirs':
+        # VIIRS detections are a property of the fire, not of a
+        # product, so the same mask serves every product.
+        mask = fire.viirs_bin
+        if not mask or not os.path.isfile(mask):
+            return False
+    else:
+        mask, err = build_derived_hint_for_fire(fire, mode,
+                                                stack_path=stack_path)
+        if mask and getattr(fire, 'restrict_hint_bcws', False):
+            mask = restrict_hint_to_bcws(fire, mask)
+        if not mask:
+            sys.stderr.write(
+                f'[prepare] hint {mode} for '
+                f'{os.path.basename(stack_path)}: {err}\n')
+            return False
+
+    try:
+        _overlay_mask_on_post(fire, mask, f'hint_{mode}',
+                              (0.0, 0.8, 0.2),
+                              preview_dir=preview_dir)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[prepare] hint overlay {mode} failed: {exc}\n')
+        return False
+    ok = os.path.isfile(out)
+    if ok:
+        sys.stderr.write(
+            '[prepare] %s: rendered hint %s for %s (no switch)\n'
+            % (fire.fire_numbe, mode, os.path.basename(preview_dir)))
+    return ok
+
+
 def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:
     """Render previews/hint_<mode>.png for the CURRENT post source.
 

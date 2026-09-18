@@ -526,7 +526,8 @@ def record_base_preview_geo(cache_dir: str, crop_bin: str) -> None:
 
 
 def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
-                          out_name: str, color: tuple):
+                          out_name: str, color: tuple,
+                          preview_dir: str = ''):
     """Overlay a binary raster on the post-fire preview.
 
     *color* is (r, g, b) floats 0-1 for the tint.
@@ -538,7 +539,16 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
     the correct geographic position rather than naively stretching.
     """
     try:
-        post_path = os.path.join(fire.cache_dir, 'previews', 'post.png')
+        # Composite onto a NAMED product's preview when asked.
+        #
+        # The default is the live previews directory, which is whatever
+        # product the fire is loaded on. A hint requested for one
+        # product was therefore drawn onto another product's imagery --
+        # and the only way round it was to switch the fire first, which
+        # is a display request mutating server state. Passing the
+        # directory removes both problems.
+        _pdir = preview_dir or os.path.join(fire.cache_dir, 'previews')
+        post_path = os.path.join(_pdir, 'post.png')
         if not os.path.isfile(post_path):
             sys.stderr.write(
                 f'[overlay] WARNING: cannot build {out_name} overlay — '
@@ -709,7 +719,7 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
                 fire.available_views.remove(out_name)
             return
 
-        out_path = os.path.join(fire.cache_dir, 'previews', f'{out_name}.png')
+        out_path = os.path.join(_pdir, f'{out_name}.png')
         # Atomic for the same reason as preview.py: overlays are
         # rewritten by prebuilds and re-renders while the page may be
         # fetching them.
