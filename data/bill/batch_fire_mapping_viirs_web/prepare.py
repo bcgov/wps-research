@@ -3245,6 +3245,82 @@ def _accept_fire_sync(fire_numbe: str) -> str:
             _accept_in_progress.discard(fire_numbe)
 
 
+def s2_acquired_on(fire, day: str):
+    """Did Sentinel-2 image ANY tile over this AOI on *day*?
+
+    True, False, or None when it cannot be determined. The caller
+    treats None as "carry on": skipping a build on ignorance would be
+    worse than building one product too many.
+
+    The nightly refresh builds today's L2 composite and today's MRAP
+    composite for every fire. On a day with no pass over the AOI, both
+    are rebuilt from exactly the imagery of the previous product and
+    differ from it only in their timestamp -- a duplicate layer, with
+    no cloud figure because there was no acquisition to report one
+    for. Asking first is cheap: one object listing for the day,
+    restricted to the tiles that intersect this AOI, and the answer is
+    already cached per tile-day from the cloud-cover work.
+    """
+    try:
+        from . import cloud_cover as _cc
+        from .l2_recent import tiles_intersecting_bbox
+    except Exception:
+        return None
+    if not re.fullmatch(r'\d{8}', day or ''):
+        return None
+
+    crs = ''
+    try:
+        ref = (state.rasters_by_year.get(fire.fire_year)
+               or state.raster_path)
+        if ref:
+            ds = gdal.Open(ref, gdal.GA_ReadOnly)
+            if ds is not None:
+                crs = ds.GetProjection()
+                ds = None
+    except Exception:
+        crs = ''
+    try:
+        tiles = sorted(set(
+            tiles_intersecting_bbox(fire.bbox_native, crs)))
+    except Exception as exc:
+        sys.stderr.write(
+            f'[refresh] {fire.fire_numbe}: tiles unknown ({exc}); '
+            f'building as usual\n')
+        return None
+    if not tiles:
+        return None
+
+    # The cache first: the cloud-cover work already records, per tile
+    # and day, either a percentage (a product existed) or an explicit
+    # empty. A day whose tiles are ALL recorded empty is a definite no.
+    try:
+        root = os.path.join(state.output_root, '.cloud_cover')
+        data = _cc._load(root)
+        seen = 0
+        for t in tiles:
+            v = data.get(_cc._key(_cc.canon_tile(t), day))
+            if not isinstance(v, dict):
+                continue
+            seen += 1
+            if isinstance(v.get('pct'), (int, float)):
+                return True             # something was imaged
+        if seen == len(tiles):
+            return False                # every tile recorded, all empty
+    except Exception:
+        pass
+
+    # Not cached yet: ask the mirror directly for this one day.
+    try:
+        products = _cc._products_for_day(day, tiles)
+        return bool(products)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[refresh] {fire.fire_numbe}: could not list {day} '
+            f'({exc}); building as usual\n')
+        return None
+
+
 def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
     """Build today's MRAP and L2 composites for every existing fire.
 
@@ -3309,10 +3385,49 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                     # whatever is next created with that name.
                     skipped += 1
                     continue
-                from .aoi_stack import ensure_aoi_stack, AoiStackError
+                from .aoi_stack import (ensure_aoi_stack, AoiStackError,
+                                        find_latest_mrap)
                 inst = getattr(state, 'shared_root', '') or ''
                 ref = (state.rasters_by_year.get(fire.fire_year)
                        or state.raster_path)
+
+                # Nothing new to composite? Then build nothing.
+                #
+                # Both of today's products would be made from exactly
+                # the imagery in yesterday's, differing only by a
+                # timestamp -- a duplicate layer that also carries no
+                # cloud figure, because there was no acquisition to
+                # report one for. If ANY intersecting tile was imaged,
+                # both are built as usual; if the answer cannot be
+                # determined, both are built as usual.
+                _day = ''
+                try:
+                    _day = (find_latest_mrap() or ('', ''))[0] or ''
+                except Exception:
+                    _day = ''
+                if _day:
+                    _got = s2_acquired_on(fire, _day)
+                    if _got is False:
+                        skipped += 1
+                        msg = (f'[refresh] {fn}: no Sentinel-2 '
+                               f'acquisition over this AOI on {_day}; '
+                               f'today\'s L2 and MRAP composites would '
+                               f'duplicate the previous ones, so '
+                               f'neither was built')
+                        sys.stderr.write(msg + '\n')
+                        # Also on the fire's own console, where an
+                        # operator looking for today's product will
+                        # see why there isn't one.
+                        try:
+                            fire.console_log.append(msg)
+                        except Exception:
+                            pass
+                        continue
+                    if _got is True:
+                        sys.stderr.write(
+                            f'[refresh] {fn}: Sentinel-2 imaged this '
+                            f'AOI on {_day}; building both products\n')
+
                 for src in ('mrap', 'l2'):
                     try:
                         info = ensure_aoi_stack(
