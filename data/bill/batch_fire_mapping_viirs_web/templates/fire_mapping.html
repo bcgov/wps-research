@@ -1256,6 +1256,9 @@ function stopSourceSwitchProgress() {
 }
 
 async function onPostSourceChange() {
+    // Hold the view BEFORE anything loads: a product change must not
+    // move the picture.
+    try { holdPaneView('left', 'a left-pane product change'); } catch (_) {}
     // Highlight FIRST, synchronously, so the panel never names a
     // different layer from the one being drawn; then refresh to pick
     // up sizes and readiness.
@@ -7773,9 +7776,66 @@ function _aspectChanged(fs, d) {
     return Math.abs(a1 - a0) / a0 > 0.02;
 }
 
+// The view a pane had before a PRODUCT switch, held verbatim.
+//
+// Changing which dated layer is displayed must never move the picture:
+// same ground, same scale, always. Every clever reconstruction we have
+// tried -- ratio compensation, ground anchoring -- depends on knowing
+// both grids, and each failed in some case where that knowledge was
+// missing or wrong. Holding the transform itself needs no knowledge at
+// all, and it is exactly right whenever the two products share a grid,
+// which the pinned AOI footprint now guarantees.
+const _paneViewHold = {left: null, right: null};
+
+function holdPaneView(pane, reason) {
+    const st = paneState[pane];
+    if (!st || !(st.scale > 0)) return;
+    _paneViewHold[pane] = {scale: st.scale, panX: st.panX,
+                           panY: st.panY, reason: reason || ''};
+}
+
+// Put it back. Returns true when the view was restored.
+function releasePaneView(pane, dims) {
+    const held = _paneViewHold[pane];
+    _paneViewHold[pane] = null;
+    if (!held) return false;
+    const fs = _paneFitState[pane];
+    // A different KIND of picture still gets a fresh fit.
+    if (dims && fs && _aspectChanged(fs, dims)) {
+        log(`[view] ${pane}: aspect changed `
+            + `${fs.fitW}x${fs.fitH} -> ${dims.w}x${dims.h}; `
+            + `not holding the previous view`, 'dim');
+        return false;
+    }
+    const st = paneState[pane];
+    st.scale = held.scale;
+    st.panX = held.panX;
+    st.panY = held.panY;
+    updateTransformForPane(pane);
+    log(`[view] ${pane}: held scale ${held.scale.toFixed(4)} `
+        + `pan ${held.panX.toFixed(1)},${held.panY.toFixed(1)} `
+        + `across ${held.reason}`, 'dim');
+    return true;
+}
+
 function applyPaneFit(pane, img, provisional) {
     const fs = _paneFitState[pane];
     const _d = paneImageDims(img);
+
+    // A held view wins over every other rule below.
+    if (!provisional && _paneViewHold[pane]) {
+        if (releasePaneView(pane, _d)) {
+            fs.fitted = true;
+            fs.fitW = _d.w;
+            fs.fitH = _d.h;
+            try {
+                if (splitActive && syncPanes && pane !== 'right') {
+                    syncOtherPane('left');
+                }
+            } catch (_) {}
+            return;
+        }
+    }
 
     // A provisional layout must not become the fit basis.
     //
@@ -7792,86 +7852,47 @@ function applyPaneFit(pane, img, provisional) {
     }
     const dimsChanged = fs.fitted
         && (_d.w !== fs.fitW || _d.h !== fs.fitH);
-    // In syncPanes the right pane mirrors left's transform — skip the
-    // fit so we don't clobber the inherited scale. The fit state is
-    // still recorded so a later un-sync doesn't trigger a spurious
-    // refit.
-    // When syncing, the right pane derives its viewport from the left
-    // rather than fitting independently -- but that derivation now
-    // needs the LEFT pane to recompute, since the ratio depends on
-    // this pane's freshly-loaded dimensions.
     const inheritFromLeft = syncPanes && splitActive && pane === 'right';
-    if (!inheritFromLeft && fs.fitted && dimsChanged && fs.fitW > 0
-            && _d.w > 0) {
-        // Dimensions changed, but the GROUND has not.
-        //
-        // Every product for a fire covers the same extent in the same
-        // CRS, so a different preview pixel size means the same
-        // hectares drawn at a different resolution -- not a different
-        // place. Refitting there threw away the operator's zoom and
-        // pan on every switch between dates.
-        //
-        // Screen position is pan + p * scale, and the same ground
-        // point moves from p to p * (newW / oldW). Dividing the scale
-        // by that ratio leaves pan untouched and the view identical.
-        const st = paneState[pane];
-        const r = _d.w / fs.fitW;
-        // Ground first: it is exact even when the two products sit on
-        // different grids. The width ratio below is the fallback for a
-        // product with no georeferencing.
-        if (restorePaneAnchor(pane)) {
-            updateTransformForPane(pane);
-            fs.fitted = true;
-            fs.fitW = _d.w;
-            fs.fitH = _d.h;
-            try {
-                if (splitActive && syncPanes && !inheritFromLeft) {
-                    syncOtherPane('left');
-                }
-            } catch (_) {}
-            return;
-        }
-        if (isFinite(r) && r > 0 && Math.abs(r - 1) > 1e-9) {
-            // Scale ONLY. The pan must not move.
-            //
-            // style.css sets `transform-origin: 0 0` on .image-area
-            // img, so screen position is simply
-            //     pan + p * scale
-            // with no element-size term. A ground fraction f sits at
-            // p = f*W, so dividing the scale by W'/W leaves f*W*scale
-            // unchanged and the pan already correct.
-            //
-            // An earlier version added (W - W')/2 to the pan, on the
-            // assumption that the origin was the CSS default of
-            // 50% 50%. It is not, and that term displaced the view by
-            // a few pixels on every switch between products whose
-            // previews differ slightly in size -- moving the imagery
-            // and its baked-in overlays together, which is exactly how
-            // it looked.
-            st.scale = st.scale / r;
-        }
-        updateTransformForPane(pane);
-    } else if (!inheritFromLeft
-               && (!fs.fitted
-                   || (dimsChanged && _aspectChanged(fs, _d)))) {
-        // Re-fit only for a genuinely different KIND of image.
-        //
-        // This used to re-fit on any dimension change, so stepping
-        // between products whose previews differ by a pixel or two --
-        // which is every product built before the grid settled -- threw
-        // away the zoom and pan and fitted to the window. A product
-        // change must never do that: the extent is the same ground, and
-        // the branches above already hold the view steady. A materially
-        // different aspect ratio (the comparison figure, say) is a
-        // different kind of picture and still gets a fit.
-        log(`[view] re-fitting ${pane}: aspect changed `
-            + `${fs.fitW}x${fs.fitH} -> ${_d.w}x${_d.h}`, 'dim');
-        zoomFitPane(pane);
-    } else if (inheritFromLeft) {
+
+    // CHANGING PRODUCT MUST NOT MOVE THE VIEW. Ever.
+    //
+    // Every product of a fire covers the same ground, so the scale and
+    // the pan that were on screen a moment ago are still exactly right
+    // for the next one. The previous versions all tried to be clever
+    // here -- re-fitting when the pixel count differed, compensating by
+    // a width ratio, restoring a captured ground anchor -- and each of
+    // them could move the picture: the ratio rescaled by a percent or
+    // two, the anchor acted on geo belonging to the product just
+    // replaced, and the re-fit threw the view away entirely. The
+    // transform is simply LEFT ALONE. Nothing is computed, so nothing
+    // can be computed wrongly.
+    //
+    // Two cases still need a fit, and only two:
+    //   * the pane has never been fitted (nothing to preserve);
+    //   * the image is a different KIND of picture -- a materially
+    //     different aspect ratio, such as the comparison figure --
+    //     where keeping the old scale would be meaningless.
+    const needFit = !fs.fitted
+        || (dimsChanged && _aspectChanged(fs, _d));
+
+    if (inheritFromLeft) {
         syncOtherPane('left');
+    } else if (needFit) {
+        log(`[view] ${pane}: fitting (${!fs.fitted ? 'first image'
+            : 'aspect changed ' + fs.fitW + 'x' + fs.fitH + ' -> '
+              + _d.w + 'x' + _d.h})`, 'dim');
+        zoomFitPane(pane);
     } else {
+        // The ONLY path a product change takes.
+        const st = paneState[pane];
+        log(`[view] ${pane}: holding scale ${st.scale.toFixed(4)} `
+            + `pan ${Math.round(st.panX)},${Math.round(st.panY)}`
+            + (dimsChanged ? ` (image ${fs.fitW}x${fs.fitH} -> `
+                             + `${_d.w}x${_d.h}, view untouched)` : ''),
+            'dim');
         updateTransformForPane(pane);
     }
+
     fs.fitted = true;
     fs.fitW = _d.w;
     fs.fitH = _d.h;
@@ -8318,6 +8339,7 @@ function onViewDropdownChange() {
 }
 
 async function onRightPostSourceChange() {
+    try { holdPaneView('right', 'a right-pane product change'); } catch (_) {}
     setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
 
     const sel = document.getElementById('post-source-select-right');

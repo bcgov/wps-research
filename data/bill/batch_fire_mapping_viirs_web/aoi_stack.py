@@ -37,6 +37,7 @@ afterwards would defeat the entire point of this change.
 
 import errno
 import hashlib
+import json
 import math
 import os
 import re
@@ -299,6 +300,97 @@ def _read_window_padded(band, xoff, yoff, xsize, ysize,
     return out
 
 
+def _aoi_grid_sidecar(out_bin: str, where: str = '') -> str:
+    """Path of the AOI's pinned-grid record, beside the stacks."""
+    m = re.match(r'^\d{8}_stack_(.+?_[0-9a-fA-F]{6,})',
+                 os.path.basename(out_bin or ''))
+    if not m:
+        return ''
+    d = where or os.path.dirname(out_bin)
+    return os.path.join(d, f'aoi_grid_{m.group(1)}.json')
+
+
+def load_pinned_grid(out_bin: str):
+    """The AOI's authoritative grid, or None.
+
+    A fire's footprint is decided ONCE, when its first stack is built
+    from the rectangle drawn on the province-wide mosaic, and every
+    product afterwards is cut to that exact grid. Re-deriving the
+    window from the bounding box on each build made the footprint a
+    computation rather than a fact: floating-point dust, a different
+    source raster, a recovered bbox -- any of them could shift it by a
+    column, and products of one fire then disagreed with each other.
+
+    Kept as a sidecar rather than a field on the fire so it is shared
+    by every process that builds a stack and survives a lost ramdisk.
+    """
+    for cand in (_aoi_grid_sidecar(out_bin),
+                 _aoi_grid_sidecar(out_bin, _durable_dir())):
+        if not cand or not os.path.isfile(cand):
+            continue
+        try:
+            with open(cand, 'r', encoding='utf-8') as fh:
+                g = json.load(fh)
+            w, h = int(g['width']), int(g['height'])
+            gt = tuple(float(v) for v in g['gt'])
+            if w > 0 and h > 0 and len(gt) == 6 and gt[1] and gt[5]:
+                return {'width': w, 'height': h, 'gt': gt,
+                        'proj': g.get('proj', ''), 'path': cand}
+        except Exception as exc:
+            sys.stderr.write(
+                f'[aoi_stack] unreadable AOI grid {cand}: {exc}\n')
+    return None
+
+
+def save_pinned_grid(out_bin: str, width: int, height: int, gt,
+                     proj: str = '') -> None:
+    """Record the AOI's grid, in both the ramdisk and the store."""
+    payload = {'width': int(width), 'height': int(height),
+               'gt': [float(v) for v in gt], 'proj': proj or '',
+               'written_at': time.time()}
+    for d in ('', _durable_dir()):
+        cand = _aoi_grid_sidecar(out_bin, d)
+        if not cand:
+            continue
+        try:
+            os.makedirs(os.path.dirname(cand), exist_ok=True)
+            tmp = f'{cand}.tmp{os.getpid()}'
+            with open(tmp, 'w', encoding='utf-8') as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, cand)
+        except OSError as exc:
+            sys.stderr.write(
+                f'[aoi_stack] could not record the AOI grid at '
+                f'{cand}: {exc}\n')
+    sys.stderr.write(
+        '[aoi_stack] AOI GRID PINNED %dx%d at (%.3f, %.3f) px %.9f -- '
+        'every product of this fire will be cut to exactly this\n'
+        % (width, height, gt[0], gt[3], gt[1]))
+
+
+def _durable_dir() -> str:
+    try:
+        from .durable import store_dir
+        return store_dir() or ''
+    except Exception:
+        return ''
+
+
+def grid_contains_bbox(grid, bbox_native, slack_px: float = 0.5) -> bool:
+    """Does a pinned grid still cover the AOI it was pinned for?"""
+    try:
+        gt = grid['gt']
+        w, h = grid['width'], grid['height']
+        xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
+        px, py = abs(gt[1]), abs(gt[5])
+        return (gt[0] <= xmin + slack_px * px
+                and gt[3] >= ymax - slack_px * py
+                and gt[0] + w * px >= xmax - slack_px * px
+                and gt[3] - h * py <= ymin + slack_px * py)
+    except Exception:
+        return False
+
+
 def _window_for_bbox(gt, raster_w, raster_h, xmin, ymin, xmax, ymax):
     """Map a native-CRS bbox to an integer pixel window.
 
@@ -478,7 +570,9 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                     divide_mode: bool = False,
                     progress_cb=None,
                     post_override: str = None,
-                    post_tag: str = '') -> dict:
+                    post_tag: str = '',
+                    aoi_grid: dict = None,
+                    identifier: str = '') -> dict:
     """Generate the 12-band AOI stack at *out_bin*.
 
     Band order matches the province-wide stack exactly:
@@ -563,9 +657,87 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
             gt, ds_pre.RasterXSize, ds_pre.RasterYSize,
             xmin, ymin, xmax, ymax)
+
+        # The AOI's footprint is a FACT, not a calculation.
+        #
+        # Once a fire's first stack has been cut from the rectangle
+        # drawn on the province-wide mosaic, that grid is what the fire
+        # IS. Every later product is cut to it exactly -- same columns,
+        # same rows, same geotransform -- instead of re-deriving a
+        # window that can differ by a column for reasons that have
+        # nothing to do with the fire. The window computed above is
+        # used only to ESTABLISH the grid the first time.
+        _pin = load_pinned_grid(out_bin)
+        if _pin and not grid_contains_bbox(
+                _pin, (xmin, ymin, xmax, ymax)):
+            sys.stderr.write(
+                '[aoi_stack] the pinned AOI grid %dx%d no longer covers '
+                'this bounding box; re-pinning from the current one\n'
+                % (_pin['width'], _pin['height']))
+            _pin = None
+        if _pin:
+            win_gt = tuple(_pin['gt'])
+            xsize, ysize = _pin['width'], _pin['height']
+            # Offsets into the PRE raster for that same ground.
+            xoff = int(round((win_gt[0] - gt[0]) / gt[1]))
+            yoff = int(round((win_gt[3] - gt[3]) / gt[5]))
+            sys.stderr.write(
+                '[aoi_stack] using the pinned AOI grid %dx%d at '
+                '(%.3f, %.3f) for %s\n'
+                % (xsize, ysize, win_gt[0], win_gt[3],
+                   os.path.basename(out_bin)))
+        else:
+            save_pinned_grid(out_bin, xsize, ysize, win_gt,
+                             ds_pre.GetProjection())
+
         # The grid this product will have. Identical for every product
         # of a fire now, so any difference in this line between two
         # builds of the same fire is a bug worth reporting.
+        # ENFORCE the fire's authoritative footprint.
+        #
+        # aoi_grid is written once, from the first build, and every
+        # later product must match it exactly. Without this the window
+        # is only as stable as the arithmetic that produced it, and
+        # that has already yielded 1440, 1442, 1445, 57 and 58 columns
+        # for AOIs nobody edited. Here the answer is compared with the
+        # recorded one and the recorded one wins.
+        _grid = None
+        if aoi_grid:
+            try:
+                _gw = int(aoi_grid.get('w') or 0)
+                _gh = int(aoi_grid.get('h') or 0)
+                _ggt = [float(v) for v in (aoi_grid.get('gt') or [])]
+            except (TypeError, ValueError):
+                _gw = _gh = 0
+                _ggt = []
+            if _gw > 0 and _gh > 0 and len(_ggt) == 6:
+                _same = (xsize == _gw and ysize == _gh
+                         and abs(win_gt[0] - _ggt[0]) < 1e-6
+                         and abs(win_gt[3] - _ggt[3]) < 1e-6
+                         and abs(win_gt[1] - _ggt[1]) < 1e-9)
+                if not _same:
+                    sys.stderr.write(
+                        '[aoi_stack] FOOTPRINT: computed %dx%d at '
+                        '(%.3f, %.3f) but this AOI is fixed at %dx%d at '
+                        '(%.3f, %.3f); using the fixed footprint so '
+                        'every product of this fire matches\n'
+                        % (xsize, ysize, win_gt[0], win_gt[3],
+                           _gw, _gh, _ggt[0], _ggt[3]))
+                    # Re-derive the pixel offsets for the RECORDED
+                    # origin, so the data still lands where it belongs.
+                    xoff += int(round((_ggt[0] - win_gt[0]) / win_gt[1]))
+                    yoff += int(round((_ggt[3] - win_gt[3]) / win_gt[5]))
+                    xsize, ysize = _gw, _gh
+                    win_gt = (_ggt[0], _ggt[1], _ggt[2],
+                              _ggt[3], _ggt[4], _ggt[5])
+                else:
+                    sys.stderr.write(
+                        '[aoi_stack] FOOTPRINT ok: %dx%d at (%.3f, '
+                        '%.3f) matches this AOI\n'
+                        % (xsize, ysize, win_gt[0], win_gt[3]))
+        _grid = {'w': int(xsize), 'h': int(ysize),
+                 'gt': [float(v) for v in win_gt]}
+
         # Where that same ground rectangle sits in the POST raster.
         # Whole pixels, because the pixel sizes are equal and both
         # grids are north-up in the same CRS.
@@ -734,6 +906,9 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         'post_bin': post_bin,
         'post_date': post_date,
         'pre_date': pre_date,
+        # The footprint this product came out on, so the
+        # caller can record it as the fire's authoritative grid.
+        'grid': _grid,
     }
 
 
@@ -1012,7 +1187,8 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                      ref_raster: str = None,
                      log_cb=None,
                      l2_start_date: str = '',
-                     mrap_date: str = '') -> dict:
+                     mrap_date: str = '',
+                     aoi_grid: dict = None) -> dict:
     """Return the AOI stack for *identifier*, building it if needed.
 
     This is the function that makes the ramdisk safe to lose. ``/ram``
