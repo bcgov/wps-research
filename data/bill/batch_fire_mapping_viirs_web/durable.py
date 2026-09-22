@@ -772,3 +772,108 @@ def recover_all(log=None) -> int:
         except Exception:
             pass
     return n
+
+
+# ---------------------------------------------------------------
+# Orphaned stack sets
+# ---------------------------------------------------------------
+def _identity_prefixes(state) -> dict:
+    """``{<safe>_<hash>: fire name}`` for every fire that exists.
+
+    Includes the empty-instance form as well as the real one, because
+    two call sites built stacks without an instance key for months and
+    those files belong to the fire even though nothing else knows it.
+    """
+    import re as _re
+    from .aoi_stack import aoi_identity_hash, sanitize_identifier
+    inst = getattr(state, 'shared_root', '') or ''
+    out = {}
+    for name in list(getattr(state, 'fires', {}) or {}):
+        safe = sanitize_identifier(name)
+        out[f'{safe}_{aoi_identity_hash(name, inst)}'] = name
+        out[f'{safe}_{aoi_identity_hash(name, "")}'] = name
+    return out
+
+
+def orphan_stack_sets(state) -> list:
+    """Stack sets on disk that belong to no fire that still exists.
+
+    Returns one entry per ``<safe>_<hash>`` prefix, with its files and
+    total size. Purely a report: nothing is removed here, and nothing
+    calls this on a timer. Deleting a fire has never removed its
+    imagery, so a long-lived server accumulates these -- 62 GB of them
+    on the machine where this was written, including clustering graphs
+    of several GB each.
+    """
+    import glob as _g
+    import re as _re
+    owned = _identity_prefixes(state)
+    roots = []
+    d = store_dir()
+    if d:
+        roots.append(d)
+    for f in (getattr(state, 'fires', {}) or {}).values():
+        r = os.path.dirname(getattr(f, 'crop_bin', '') or '')
+        if r and r not in roots:
+            roots.append(r)
+    if not roots:
+        return []
+    groups = {}
+    for root in roots:
+        for path in _g.glob(os.path.join(root, '*_stack_*')):
+            m = _re.match(r'^\d{8}_stack_(.+?_[0-9a-fA-F]{6,})',
+                          os.path.basename(path))
+            if not m:
+                continue
+            groups.setdefault(m.group(1), []).append(path)
+    out = []
+    for prefix, files in sorted(groups.items()):
+        if prefix in owned:
+            continue
+        size = 0
+        newest = 0.0
+        for p in files:
+            try:
+                size += os.path.getsize(p)
+                newest = max(newest, os.path.getmtime(p))
+            except OSError:
+                pass
+        out.append({'prefix': prefix, 'files': len(files),
+                    'bytes': size, 'newest': newest,
+                    'paths': sorted(files)})
+    return out
+
+
+def purge_orphan_stack_sets(state, prefixes) -> dict:
+    """Delete the named orphan sets. Explicit prefixes only.
+
+    Refuses anything that currently belongs to a fire, re-deriving
+    ownership at the moment of deletion rather than trusting the list
+    the caller was shown -- a fire may have been created in between,
+    and a stale list must never delete live imagery.
+    """
+    owned = _identity_prefixes(state)
+    orphans = {o['prefix']: o for o in orphan_stack_sets(state)}
+    removed, freed, refused = [], 0, []
+    for prefix in list(prefixes or []):
+        if prefix in owned:
+            refused.append(f'{prefix}: belongs to {owned[prefix]}')
+            continue
+        o = orphans.get(prefix)
+        if not o:
+            refused.append(f'{prefix}: not an orphan set on disk')
+            continue
+        for path in o['paths']:
+            try:
+                freed += os.path.getsize(path)
+            except OSError:
+                pass
+            try:
+                os.remove(path)
+                removed.append(path)
+            except OSError as exc:
+                sys.stderr.write(f'[orphans] {path}: {exc}\n')
+        sys.stderr.write(
+            '[orphans] purged %s: %d file(s)\n' % (prefix, len(o['paths'])))
+    return {'removed': len(removed), 'freed_mb': round(freed / 1048576, 1),
+            'refused': refused}

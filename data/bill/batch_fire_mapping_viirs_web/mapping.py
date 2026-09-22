@@ -527,7 +527,8 @@ def record_base_preview_geo(cache_dir: str, crop_bin: str) -> None:
 
 def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
                           out_name: str, color: tuple,
-                          preview_dir: str = ''):
+                          preview_dir: str = '',
+                          mask_only: bool = False):
     """Overlay a binary raster on the post-fire preview.
 
     *color* is (r, g, b) floats 0-1 for the tint.
@@ -692,8 +693,35 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
                     (ph / ah, pw / aw), order=0)
 
         mask = arr > 0
-        result = post[:, :, :3].copy()
         r, g, b = color
+
+        if mask_only:
+            # A transparent layer instead of a composite.
+            #
+            # The mask is the only thing that depends on the hint mode;
+            # the imagery underneath is the product's post-fire preview
+            # the browser already holds. Writing the mask alone means
+            # one small RGBA file per product and mode, and switching
+            # hint modes becomes an image swap in the page rather than
+            # a fresh composite per mode on the server.
+            #
+            # The alpha matches the 0.7 tint weight the composite uses,
+            # so the two routes look the same.
+            rgba = np.zeros((post.shape[0], post.shape[1], 4),
+                            dtype=np.float32)
+            rgba[mask, 0] = r
+            rgba[mask, 1] = g
+            rgba[mask, 2] = b
+            rgba[mask, 3] = 0.7
+            out_path = os.path.join(_pdir, f'{out_name}.png')
+            _tmp = out_path + '.tmp.png'
+            imsave(_tmp, np.clip(rgba, 0, 1))
+            os.replace(_tmp, out_path)
+            record_preview_geo(fire.cache_dir, fire.crop_bin,
+                               out_name, out_path)
+            return
+
+        result = post[:, :, :3].copy()
         result[mask, 0] = np.clip(result[mask, 0] * 0.3 + r * 0.7, 0, 1)
         result[mask, 1] = np.clip(result[mask, 1] * 0.3 + g * 0.7, 0, 1)
         result[mask, 2] = np.clip(result[mask, 2] * 0.3 + b * 0.7, 0, 1)

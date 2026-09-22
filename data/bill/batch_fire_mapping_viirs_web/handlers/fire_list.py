@@ -253,6 +253,45 @@ class FireListRoutes:
         except Exception as exc:
             sys.stderr.write(f'[bcws] size top-up failed: {exc}\n')
 
+    def handle_api_orphans(self):
+        """Stack sets on disk that belong to no fire that still exists.
+
+        A report, not a sweep: deleting a fire has never removed its
+        imagery, so these accumulate. Nothing is removed until the
+        purge endpoint is called with explicit prefixes.
+        """
+        try:
+            from ..durable import orphan_stack_sets
+            sets = orphan_stack_sets(state)
+            total = sum(s['bytes'] for s in sets)
+            self._send_json({
+                'orphans': [{'prefix': s['prefix'], 'files': s['files'],
+                             'mb': round(s['bytes'] / 1048576, 1),
+                             'newest': s['newest']} for s in sets],
+                'total_mb': round(total / 1048576, 1),
+            })
+        except Exception as exc:
+            sys.stderr.write(f'[orphans] listing failed: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
+    def handle_api_orphans_purge(self):
+        """Delete named orphan sets. Never called automatically."""
+        body = self._read_body()
+        if body is None:
+            return
+        prefixes = [p for p in (body.get('prefixes') or [])
+                    if isinstance(p, str) and re.fullmatch(
+                        r'[A-Za-z0-9_.-]+_[0-9a-fA-F]{6,}', p)]
+        if not prefixes:
+            self._send_json({'error': 'no prefixes named'}, 400)
+            return
+        try:
+            from ..durable import purge_orphan_stack_sets
+            self._send_json(purge_orphan_stack_sets(state, prefixes))
+        except Exception as exc:
+            sys.stderr.write(f'[orphans] purge failed: {exc}\n')
+            self._send_json({'error': str(exc)}, 500)
+
     def handle_api_fires(self):
         self._top_up_missing_sizes()
         _now = time.time()

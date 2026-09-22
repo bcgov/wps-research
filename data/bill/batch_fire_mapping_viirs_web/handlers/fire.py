@@ -979,9 +979,16 @@ class FireRoutes:
             _q = parse_qs(urlparse(self.path).query)
             _view = (_q.get('view') or ['post'])[0].strip()
             _hint = (_q.get('hint') or [''])[0].strip()
+            # A hint view is satisfied two ways now: the composited
+            # image, OR the post-fire image plus the mask layer the
+            # client draws over it. Measuring only the composite would
+            # report "not ready" for a product the pane can in fact
+            # draw at once.
+            _view_alt = ''
             if _view == 'hint' and re.fullmatch(r'[A-Za-z0-9_-]+',
                                                 _hint or ''):
                 _view_file = f'hint_{_hint}.png'
+                _view_alt = f'hintmask_{_hint}.png'
             elif _view in ('post', 'pre', 'diff1'):
                 _view_file = f'{_view}.png'
             elif _view in ('result', 'result_prebrush'):
@@ -1054,6 +1061,9 @@ class FireRoutes:
                     return False
 
                 have_prev = _has(_want)
+                if not have_prev and _view_alt:
+                    # The layered route: post-fire image AND the mask.
+                    have_prev = _has(_view_alt) and _has('post.png')
                 ready = bool(path and os.path.isfile(path)
                              and have_prev)
                 # Say what is actually true of THIS product.
@@ -2344,6 +2354,47 @@ class FireRoutes:
         # always returned previews/hint.png -- whichever mode happened
         # to have been rendered last -- which is why the two red-wins
         # masks kept looking identical.
+        if view == 'hintmask':
+            # The mask alone, for a client that composites it over the
+            # post-fire image it already has. Served only from the
+            # requested product's own stash -- like every other
+            # per-product artifact -- and rendered there on demand.
+            # A client that gets 404/409 falls back to the composited
+            # 'hint' view, so this is additive: nothing depends on it.
+            mode = (_q.get('hint') or [''])[0]
+            if not re.fullmatch(r'[A-Za-z0-9_-]+', mode or ''):
+                self._send_json({'error': 'bad hint mode'}, 400)
+                return
+            _mdir = _stash_dir or (
+                os.path.join(fire.cache_dir, 'previews')
+                if (not _req_prod or _req_key == _cur_key) else '')
+            if not _mdir:
+                self._send_json(
+                    {'error': 'not ready', 'product': _req_key}, 409)
+                return
+            _mp = os.path.join(_mdir, f'hintmask_{mode}.png')
+            if not os.path.isfile(_mp):
+                try:
+                    from ..prepare import (render_hint_mask_for_product,
+                                           stack_path_for_product)
+                    _stk = stack_path_for_product(fire, _req_key)
+                    if _stk:
+                        render_hint_mask_for_product(
+                            fire, mode, _stk, _mdir)
+                except Exception as exc:
+                    sys.stderr.write(
+                        f'[fire] hint mask {mode} for {_req_key}: '
+                        f'{exc}\n')
+            if not os.path.isfile(_mp):
+                self._send_json(
+                    {'error': 'not ready', 'product': _req_key,
+                     'detail': 'the hint mask is still being made'},
+                    409)
+                return
+            self._send_file(_mp, 'image/png', cache_seconds=86400,
+                            extra_headers={'X-Product': _req_key or ''})
+            return
+
         if view == 'hint':
             mode = (_q.get('hint') or [''])[0]
             if re.fullmatch(r'[A-Za-z0-9_-]+', mode or ''):
@@ -3278,7 +3329,10 @@ class FireRoutes:
                 fire.fire_numbe, fire.bbox_native,
                 post_source=want_src,
                 l2_start_date=(getattr(fire, 'l2_start_date', '')
-                               if want_src == 'l2' else ''))
+                               if want_src == 'l2' else ''),
+                # Without this the stack lands under a second identity
+                # hash and is orphaned from the fire -- see kgc.py.
+                instance_key=(getattr(state, 'shared_root', '') or ''))
             stack_path = info['path'] if isinstance(info, dict) else info
 
             # Every L2 composite already built for this AOI joins the
@@ -3703,9 +3757,21 @@ class FireRoutes:
             from ..l2_recent import date_polygons_path
             cb = getattr(fire, 'crop_bin', '') or ''
             base = os.path.basename(cb)
+            # Identity comes from the FRONT of the name; the tail can
+            # be anything.
+            #
+            # The old pattern demanded the whole name be a product
+            # stack, so when crop_bin pointed at a clustering scratch
+            # file -- '..._l2_nob8_nopre_nodiff.bin' -- the parse
+            # failed and the fire fell back to "base sources only".
+            # Both base sources then reported "not built yet" and the
+            # Sources panel and the selector came back EMPTY, for a
+            # fire with seven rendered preview sets on disk. The fire's
+            # identity is the name and hash at the start; whatever
+            # follows is a variant of it and must not cost us the list.
             m = re.match(
                 r'^(\d{8})_stack_(?P<safe>.+?)_(?P<h>[0-9a-fA-F]{6,})'
-                r'(_l2(_d\d{8})?)?\.bin$', base)
+                r'(?:_|\.)', base)
             if not m:
                 sys.stderr.write(
                     f'[products] {fire_numbe}: cannot parse stack name '
@@ -3716,6 +3782,14 @@ class FireRoutes:
                 seen = set()
                 for cand in sorted(_g.glob(os.path.join(
                         ram, f'*_stack_{safe}_{h}*.bin'))):
+                    # Clustering scratch is not a product: the band
+                    # subset and the KGC graph files share the prefix
+                    # but are inputs, not things to display.
+                    _bn = os.path.basename(cand)
+                    if ('_nob8' in _bn or '_nopre' in _bn
+                            or '_nodiff' in _bn or '.kgc' in _bn
+                            or '_selected' in _bn):
+                        continue
                     key = product_key_for_path(cand)
                     if not key or key in seen:
                         continue          # KGC scratch, or a duplicate

@@ -316,11 +316,18 @@
                 <span class="pane-subtitle" id="subtitle-left"></span>
                 <span class="loading" id="loading-msg">Preparing fire data...</span>
                 <img id="main-img" style="display:none" alt="Fire view">
+            <!-- Hint mask layer. Same box and same transform as
+                 the image above, so it lines up exactly; shown
+                 only for the hint view. -->
+            <img id="main-hintmask" style="display:none"
+                 alt="" aria-hidden="true">
                 <canvas id="main-overlay" class="fire-overlay"></canvas>
             </div>
             <div class="image-area" id="image-area-right" style="display:none" onclick="setActivePane('right')" data-pane="right">
                 <span class="pane-subtitle" id="subtitle-right"></span>
                 <img id="right-img" style="display:none" alt="Comparison view">
+            <img id="right-hintmask" style="display:none"
+                 alt="" aria-hidden="true">
                 <canvas id="right-overlay" class="fire-overlay"></canvas>
             </div>
         </div>
@@ -1858,6 +1865,28 @@ let dragPane = null;
 let dragStartX = 0, dragStartY = 0;
 let dragStartPanX = 0, dragStartPanY = 0;
 
+// The hint mask layer for a pane, if the page has one.
+function paneMaskEl(pane) {
+    return document.getElementById(
+        pane === 'right' ? 'right-hintmask' : 'main-hintmask');
+}
+
+// Put the mask layer on exactly the image's box and transform.
+//
+// One transform drives both, by copying rather than recomputing, so
+// the mask cannot drift from the imagery under zoom or pan.
+function syncPaneMask(pane) {
+    const { img } = getPaneElements(pane);
+    const m = paneMaskEl(pane);
+    if (!img || !m) return;
+    m.style.width = img.style.width;
+    m.style.height = img.style.height;
+    m.style.transform = img.style.transform;
+    m.style.left = img.style.left;
+    m.style.top = img.style.top;
+    m.style.visibility = img.style.visibility;
+}
+
 function getPaneElements(pane) {
     if (pane === 'right') {
         return { area: document.getElementById('image-area-right'),
@@ -2250,6 +2279,17 @@ function capturePaneFrame(pane) {
             c.height = img.naturalHeight;
             const ctx = c.getContext('2d');
             ctx.drawImage(img, 0, 0, c.width, c.height);
+            // The hint mask is a separate layer on screen, so it has
+            // to be drawn into the capture too -- otherwise a saved or
+            // downloaded frame of a hint view would show the imagery
+            // with the mask missing.
+            try {
+                const _m = paneMaskEl(pane);
+                if (_m && _m.style.display !== 'none' && _m.src
+                        && _m.naturalWidth) {
+                    ctx.drawImage(_m, 0, 0, c.width, c.height);
+                }
+            } catch (_) {}
             // The overlays live in their own screen-space canvas now, so
             // they are not in the bitmap. Draw them into the capture at
             // NATURAL resolution -- a GIF without the perimeter and the
@@ -3622,6 +3662,8 @@ function updateTransformForPane(pane) {
     // The overlay is drawn in screen space, so it must be repainted
     // whenever the pan or zoom changes.
     try { drawOverlayLayer(pane); } catch (_) {}
+    // The hint mask layer rides the image's transform.
+    try { syncPaneMask(pane); } catch (_) {}
 }
 
 // Mirror one pane's viewport onto the other, COMPENSATING for images
@@ -7580,8 +7622,41 @@ const _paneFitState = {
 // collapse to the last one rather than racing.
 const _paneGen = {left: 0, right: 0};
 
+// Draw hint views as post-image + transparent mask, rather than
+// asking the server to composite one image per hint mode.
+let _useHintMask = true;
+
+function hintMaskUrlFor(pane) {
+    const src = (pane === 'right') ? rightPostSource : currentPostSource;
+    const _pdate = (pane === 'right') ? rightL2Date : currentL2Date;
+    const _prod = paneProductKey(pane);
+    const mode = currentHintMode || 'redwins_post';
+    const dpart = (src === 'l2' ? `&l2=${_pdate || 'latest'}` : '')
+        + (_prod ? `&prod=${encodeURIComponent(_prod)}` : '');
+    return `/api/fire/${encodeURIComponent(FIRE)}/preview/hintmask`
+        + `?src=${src}${dpart}&hint=${encodeURIComponent(mode)}`
+        + `&t=${previewStamp(pane)}`;
+}
+
 function previewUrlFor(viewKey, pane) {
     const runActive = selectedRun !== null && RUN_VIEWS.has(viewKey);
+    // Hint views: fetch the POST image and lay the mask over it.
+    //
+    // The mask is the only part that depends on the hint mode, so the
+    // post-fire image the browser already holds is reused and only a
+    // small transparent PNG changes. If the mask cannot be had, the
+    // caller falls back to the composited hint image, which is
+    // unchanged -- so this is an optimisation, never a dependency.
+    if (viewKey === 'hint' && _useHintMask) {
+        const src = (pane === 'right') ? rightPostSource
+                                       : currentPostSource;
+        const _pdate = (pane === 'right') ? rightL2Date : currentL2Date;
+        const _prod = paneProductKey(pane);
+        const dpart = (src === 'l2' ? `&l2=${_pdate || 'latest'}` : '')
+            + (_prod ? `&prod=${encodeURIComponent(_prod)}` : '');
+        return `/api/fire/${encodeURIComponent(FIRE)}/preview/post`
+            + `?src=${src}${dpart}&t=${previewStamp(pane)}`;
+    }
     if (runActive && viewKey === 'result') {
         // A STABLE stamp, not Date.now().
         //
@@ -7908,6 +7983,7 @@ async function loadPaneImage(pane, viewKey) {
                 // The proxy is the first thing on screen, so it is
                 // what lifts the blanking.
                 img.style.visibility = '';
+                try { syncPaneMask(pane); } catch (_) {}
                 img.style.display = 'block';
                 // Lay out at FULL size, exactly as the new-fire page
                 // does: the browser upscales the low level into the
@@ -8122,6 +8198,39 @@ async function loadPaneImage(pane, viewKey) {
     img.src = finalUrl;
     // Back on screen: this is the layer that was asked for.
     img.style.visibility = '';
+
+    // The hint mask rides on top for hint views, and is taken down
+    // for every other view.
+    try {
+        const _m = paneMaskEl(pane);
+        if (_m) {
+            if (viewKey === 'hint' && _useHintMask) {
+                const _mu = hintMaskUrlFor(pane);
+                if (_m.dataset.url !== _mu) {
+                    _m.dataset.url = _mu;
+                    _m.onerror = () => {
+                        // No mask available: fall back to the
+                        // server-composited hint for the rest of the
+                        // session, which is the behaviour this
+                        // replaced and is known to work.
+                        _useHintMask = false;
+                        _m.style.display = 'none';
+                        log('[hint] mask layer unavailable; using the '
+                            + 'composited hint image', 'dim');
+                        loadPaneImage(pane, viewKey);
+                    };
+                    _m.onload = () => { syncPaneMask(pane); };
+                    _m.src = _mu;
+                }
+                _m.style.display = '';
+                syncPaneMask(pane);
+            } else {
+                _m.style.display = 'none';
+                _m.removeAttribute('src');
+                _m.dataset.url = '';
+            }
+        }
+    } catch (_) { /* the layer is an optimisation, never required */ }
     try {
         if (!img.complete || !img.naturalWidth) await img.decode();
     } catch (_) { /* superseded */ }

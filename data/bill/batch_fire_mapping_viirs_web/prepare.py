@@ -1133,6 +1133,23 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
                 out['errors'].append(f'{mode}: {err}')
             elif path:
                 out['hints'] += 1
+                # The mask layer too, while the derived hint is warm.
+                #
+                # It is the artifact the pane actually draws now, and
+                # making it here means selecting a hint mode is a
+                # cached image swap rather than a render. Cheap: the
+                # expensive part -- deriving the mask raster -- has
+                # just been done and is reused.
+                try:
+                    _pd = os.path.join(fire.cache_dir,
+                                       f'previews_{key}')
+                    if os.path.isdir(_pd):
+                        render_hint_mask_for_product(
+                            fire, mode, stack_path, _pd)
+                except Exception as _mexc:
+                    sys.stderr.write(
+                        f'[warm] {fire.fire_numbe}: hint mask {mode} '
+                        f'for {key}: {_mexc}\n')
         except Exception as exc:
             out['errors'].append(f'{mode}: {exc}')
             sys.stderr.write(
@@ -1652,6 +1669,48 @@ def render_hint_for_product(fire: FireInfo, mode: str,
             '[prepare] %s: rendered hint %s for %s (no switch)\n'
             % (fire.fire_numbe, mode, os.path.basename(preview_dir)))
     return ok
+
+
+def render_hint_mask_for_product(fire: FireInfo, mode: str,
+                                 stack_path: str,
+                                 preview_dir: str) -> bool:
+    """Write hintmask_<mode>.png: the mask alone, transparent elsewhere.
+
+    The composited hint (hint_<mode>.png) stays exactly as it was and
+    remains the fallback. This is the cheaper artifact: the browser
+    already holds the product's post-fire image, so sending only the
+    mask lets it draw the two as layers, and switching hint modes
+    becomes an image swap instead of a server-side composite per mode.
+    """
+    if not stack_path or not os.path.isfile(stack_path):
+        return False
+    if not preview_dir or not os.path.isdir(preview_dir):
+        return False
+    out = os.path.join(preview_dir, f'hintmask_{mode}.png')
+
+    if mode == 'viirs':
+        mask = fire.viirs_bin
+        if not mask or not os.path.isfile(mask):
+            return False
+    else:
+        mask, err = build_derived_hint_for_fire(fire, mode,
+                                                stack_path=stack_path)
+        if mask and getattr(fire, 'restrict_hint_bcws', False):
+            mask = restrict_hint_to_bcws(fire, mask)
+        if not mask:
+            sys.stderr.write(
+                f'[prepare] hint mask {mode} for '
+                f'{os.path.basename(stack_path)}: {err}\n')
+            return False
+    try:
+        _overlay_mask_on_post(fire, mask, f'hintmask_{mode}',
+                              (0.0, 0.8, 0.2),
+                              preview_dir=preview_dir, mask_only=True)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[prepare] hint mask {mode} failed: {exc}\n')
+        return False
+    return os.path.isfile(out)
 
 
 def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:

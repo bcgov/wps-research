@@ -214,6 +214,7 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/sources$'),
          'handle_api_sources'),
+        (re.compile(r'^/api/orphans$'), 'handle_api_orphans'),
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/products$'),
          'handle_api_products'),
@@ -292,6 +293,7 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/sources/delete$'),
          'handle_api_sources_delete'),
+        (re.compile(r'^/api/orphans/purge$'), 'handle_api_orphans_purge'),
         (re.compile(r'^/api/settings$'), 'handle_api_settings_post'),
         (re.compile(r'^/api/batch/map$'), 'handle_api_batch_map'),
         (re.compile(

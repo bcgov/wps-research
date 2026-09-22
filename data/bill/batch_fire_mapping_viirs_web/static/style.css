@@ -1524,3 +1524,12 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 }
 .sources-grip:hover { background: #cfe0f7; }
 .sources-panel.is-collapsed .sources-grip { display: none; }
+
+
+/* The hint mask layer sits exactly on the pane image: same absolute
+   box, same transform-origin, so the two move together under one
+   transform. Pointer events stay with the image below it. */
+.image-area img#main-hintmask,
+.image-area img#right-hintmask {
+    pointer-events: none;
+}

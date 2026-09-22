@@ -822,8 +822,18 @@ def resolve_stack_for_source(fire, want_src: str, log=None,
                     + f' -> {base}')
             return fire.crop_bin
     from .aoi_stack import ensure_aoi_stack
+    # instance_key MUST be passed.
+    #
+    # The identity hash is sha1(instance_key + NUL + name). Omitting it
+    # hashes an empty instance, so this call built a whole PARALLEL set
+    # of stacks under a second identity for the same fire -- invisible
+    # to the manifest, to the product list and to deletion. Three live
+    # fires had such twins on the ramdisk, one holding a 4 GB KNN graph
+    # built on an AOI the fire no longer had.
     info = ensure_aoi_stack(fire.fire_numbe, fire.bbox_native,
-                            post_source=src, l2_start_date=date)
+                            post_source=src, l2_start_date=date,
+                            instance_key=(getattr(state, 'shared_root',
+                                                  '') or ''))
     path = info['path'] if isinstance(info, dict) else info
     if log:
         log(f'  KGC source: {src.upper()}' + (f' {date}' if date else '')

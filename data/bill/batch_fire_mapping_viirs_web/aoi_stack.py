@@ -323,6 +323,27 @@ def _window_for_bbox(gt, raster_w, raster_h, xmin, ymin, xmax, ymax):
     cols = [(xmin - gt[0]) / px_w, (xmax - gt[0]) / px_w]
     rows = [(ymin - gt[3]) / px_h, (ymax - gt[3]) / px_h]
 
+    # Snap to whole pixels before rounding outward.
+    #
+    # A bbox that IS a whole number of pixels comes out of the division
+    # as, say, 50609.00000000019 -- nineteen zeros of agreement and
+    # then floating-point dust. ceil() sees a fraction and adds a
+    # column that contains nothing, so the same AOI yields 57 px on one
+    # run and 58 on the next. Every product built at the old width is
+    # then judged "on an OLD grid" and rebuilt -- on every restart,
+    # forever. Rounding first, and only then flooring and ceiling,
+    # makes an exact boundary behave like the exact boundary it is.
+    # 1e-6 px is 20 microns of ground: far below anything real, far
+    # above the dust.
+    _EPS = 1e-6
+
+    def _snap(v):
+        r = round(v)
+        return float(r) if abs(v - r) < _EPS else v
+
+    cols = [_snap(v) for v in cols]
+    rows = [_snap(v) for v in rows]
+
     x0 = int(np.floor(min(cols)))
     x1 = int(np.ceil(max(cols)))
     y0 = int(np.floor(min(rows)))
