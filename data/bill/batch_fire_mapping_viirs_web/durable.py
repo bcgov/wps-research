@@ -520,6 +520,40 @@ def restore_fire(fire, log=None) -> int:
         return 0
     ram = ram_dir_for(fire)
 
+    # Repair crop_bin FIRST.
+    #
+    # The grid test below needs a reference grid, and it takes that
+    # from crop_bin. When the ramdisk has been cleared, crop_bin names
+    # a file that no longer exists, so the test ran with no reference,
+    # declined every durable stack, and only THEN was crop_bin
+    # repaired -- one line later, too late to help. Every restart
+    # logged "NO REFERENCE GRID ... not adopting any durable stack"
+    # for every fire. Repairing first costs nothing and gives the test
+    # the grid it was always meant to have.
+    _cb = getattr(fire, 'crop_bin', '') or ''
+    if not _cb or not os.path.isfile(_cb):
+        _cands = [c for c in sorted(glob.glob(os.path.join(
+            ram, f'*_stack_{pfx}*.bin')), reverse=True)
+            if '.kgc' not in os.path.basename(c)
+            and '_nob8' not in os.path.basename(c)
+            and os.path.isfile(os.path.splitext(c)[0] + '.hdr')]
+        if _cands:
+            fire.crop_bin = _cands[0]
+            msg = (f'[durable] {fire.fire_numbe}: crop_bin named a '
+                   f'missing file ({os.path.basename(_cb) or "empty"}); '
+                   f'using {os.path.basename(_cands[0])} as the '
+                   f'reference grid BEFORE adopting durable stacks')
+            sys.stderr.write(msg + '\n')
+            if log:
+                log(msg)
+        else:
+            msg = (f'[durable] {fire.fire_numbe}: no stack on the '
+                   f'ramdisk to use as a reference grid; durable '
+                   f'adoption will be skipped this pass')
+            sys.stderr.write(msg + '\n')
+            if log:
+                log(msg)
+
     # Only stacks whose GRID matches this AOI.
     #
     # The identity hash covers the fire's name and the server instance,
@@ -529,6 +563,12 @@ def restore_fire(fire, log=None) -> int:
     # imagery. The grid settles it.
     keep = {os.path.splitext(os.path.basename(p))[0]
             for p in durable_products(fire)}
+    sys.stderr.write(
+        '[durable] %s: reference grid %s; %d durable product(s) accepted '
+        'for adoption\n'
+        % (fire.fire_numbe,
+           os.path.basename(getattr(fire, 'crop_bin', '') or '(none)'),
+           len(keep)))
 
     n = 0
     for src in sorted(glob.glob(os.path.join(dest, f'*_stack_{pfx}*'))):
@@ -552,7 +592,8 @@ def restore_fire(fire, log=None) -> int:
         except OSError as exc:
             sys.stderr.write(f'[durable] restore: {exc}\n')
 
-    # Point the fire at something real.
+    # Second chance: the restore above may have brought back the very
+    # file this fire needs, when the ramdisk had nothing beforehand.
     cb = getattr(fire, 'crop_bin', '') or ''
     if not cb or not os.path.isfile(cb):
         cands = [c for c in sorted(glob.glob(os.path.join(
@@ -568,6 +609,9 @@ def restore_fire(fire, log=None) -> int:
             if log:
                 log(msg)
 
+    sys.stderr.write(
+        '[durable] %s: adoption pass complete -- %d file(s) copied back '
+        'from the store\n' % (fire.fire_numbe, n))
     if n:
         msg = (f'[durable] {fire.fire_numbe}: restored {n} file(s) '
                f'from the durable store')

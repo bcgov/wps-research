@@ -1256,7 +1256,13 @@ function stopSourceSwitchProgress() {
 }
 
 async function onPostSourceChange() {
-    // Keep the Sources highlight on whatever the left pane shows.
+    // Highlight FIRST, synchronously, so the panel never names a
+    // different layer from the one being drawn; then refresh to pick
+    // up sizes and readiness.
+    try {
+        const _sel = document.getElementById('post-source-select');
+        if (_sel) markSourcesSelection(_sel.value);
+    } catch (_) {}
     try { setTimeout(refreshSourcesPanel, 0); } catch (_) {}
     // Same method as the right pane: repaint from the client, then
     // tell the server.
@@ -7029,24 +7035,45 @@ function paneGeoReport() {
 const _paneAnchor = {left: null, right: null};
 
 function capturePaneAnchor(pane) {
+    // A failed capture must CLEAR the anchor, not leave the old one.
+    //
+    // Capture needs the pane's geo, which is not always in hand at the
+    // moment a switch begins. Returning early left whatever had been
+    // captured for some earlier product, and the next restore moved
+    // the view to that stale ground -- a jump to a position the
+    // operator never chose, which is what "the zoom resets to some
+    // unknown default" looked like. No anchor is better than a wrong
+    // one: the caller then leaves the view exactly as it is.
     try {
         const A = paneMapTransform(pane);
-        if (!A) return;
+        if (!A) { _paneAnchor[pane] = null; return; }
         const cx = A.area.clientWidth / 2;
         const cy = A.area.clientHeight / 2;
         const [mx, my] = A.mapAt(cx, cy);
-        if (!isFinite(mx) || !isFinite(my)) return;
+        if (!isFinite(mx) || !isFinite(my)) {
+            _paneAnchor[pane] = null;
+            return;
+        }
         const spm = Math.abs(A.spmX);          // screen px per metre
-        if (!(spm > 0) || !isFinite(spm)) return;
-        _paneAnchor[pane] = {mx, my, spm};
-    } catch (_) { /* nothing to anchor to yet */ }
+        if (!(spm > 0) || !isFinite(spm)) {
+            _paneAnchor[pane] = null;
+            return;
+        }
+        _paneAnchor[pane] = {mx, my, spm, key: paneProductKey(pane)};
+    } catch (_) {
+        _paneAnchor[pane] = null;
+    }
 }
 
 // Put the captured ground point back under the pane's centre at the
 // same ground scale. Returns true when it was applied.
 function restorePaneAnchor(pane) {
     const a = _paneAnchor[pane];
-    if (!a) return false;
+    if (!a) {
+        log(`[view] ${pane}: no ground anchor captured; leaving the `
+            + `view untouched`, 'dim');
+        return false;
+    }
     try {
         const B = paneMapTransform(pane);
         if (!B) return false;
@@ -7059,6 +7086,9 @@ function restorePaneAnchor(pane) {
         st.scale = scale;
         st.panX = B.area.clientWidth / 2 - ix * B.kx * scale;
         st.panY = B.area.clientHeight / 2 - iy * B.ky * scale;
+        log(`[view] ${pane}: ground held at ${a.mx.toFixed(0)}, `
+            + `${a.my.toFixed(0)} (from ${a.key || '?'}); `
+            + `scale ${scale.toFixed(4)}`, 'dim');
         return true;
     } catch (_) {
         return false;
@@ -7732,6 +7762,17 @@ async function compositeOverlays(bitmap, cropW, cropH, sizeMul,
     });
 }
 
+// Is this a different KIND of picture, rather than the same ground at
+// a slightly different pixel count? 2% of aspect ratio separates a
+// one-pixel grid difference from a genuinely different figure.
+function _aspectChanged(fs, d) {
+    if (!(fs.fitW > 0 && fs.fitH > 0 && d.w > 0 && d.h > 0)) return true;
+    const a0 = fs.fitW / fs.fitH;
+    const a1 = d.w / d.h;
+    if (!(a0 > 0) || !(a1 > 0)) return true;
+    return Math.abs(a1 - a0) / a0 > 0.02;
+}
+
 function applyPaneFit(pane, img, provisional) {
     const fs = _paneFitState[pane];
     const _d = paneImageDims(img);
@@ -7810,7 +7851,21 @@ function applyPaneFit(pane, img, provisional) {
             st.scale = st.scale / r;
         }
         updateTransformForPane(pane);
-    } else if (!inheritFromLeft && (!fs.fitted || dimsChanged)) {
+    } else if (!inheritFromLeft
+               && (!fs.fitted
+                   || (dimsChanged && _aspectChanged(fs, _d)))) {
+        // Re-fit only for a genuinely different KIND of image.
+        //
+        // This used to re-fit on any dimension change, so stepping
+        // between products whose previews differ by a pixel or two --
+        // which is every product built before the grid settled -- threw
+        // away the zoom and pan and fitted to the window. A product
+        // change must never do that: the extent is the same ground, and
+        // the branches above already hold the view steady. A materially
+        // different aspect ratio (the comparison figure, say) is a
+        // different kind of picture and still gets a fit.
+        log(`[view] re-fitting ${pane}: aspect changed `
+            + `${fs.fitW}x${fs.fitH} -> ${_d.w}x${_d.h}`, 'dim');
         zoomFitPane(pane);
     } else if (inheritFromLeft) {
         syncOtherPane('left');
@@ -10130,6 +10185,7 @@ function renderSourcesList(data) {
             const sel = document.getElementById('post-source-select');
             if (!key || !sel) return;
             if (sel.value === key) return;      // already showing it
+            markSourcesSelection(key);
             setSourceSelectValue(sel, key);
             if (sel.value !== key) {
                 log(`[sources] ${key} is not in the selector yet`,
@@ -10140,6 +10196,30 @@ function renderSourcesList(data) {
         });
     });
     syncSourcesDeleteButton();
+}
+
+// Move the Sources highlight NOW, without waiting for the server.
+//
+// The highlight used to follow a refresh of the whole panel, which is
+// a fetch: the imagery changed first and the list caught up a moment
+// later, so for that moment the panel named a different layer from the
+// one on screen. The row is already in the DOM, so the class can move
+// synchronously and the refresh merely confirms it.
+function markSourcesSelection(key) {
+    try {
+        const box = document.getElementById('sources-list');
+        if (!box || !key) return;
+        let hit = false;
+        box.querySelectorAll('.src-row[data-row-key]').forEach((row) => {
+            const on = row.dataset.rowKey === key;
+            row.classList.toggle('is-shown', on);
+            if (on) hit = true;
+        });
+        if (!hit) {
+            log(`[sources] ${key} is not in the list yet; it will `
+                + `appear on the next refresh`, 'dim');
+        }
+    } catch (_) { /* the panel is informational */ }
 }
 
 function syncSourcesDeleteButton() {

@@ -37,6 +37,7 @@ afterwards would defeat the entire point of this change.
 
 import errno
 import hashlib
+import math
 import os
 import re
 import sys
@@ -909,6 +910,51 @@ def stack_is_valid(path: str, expect_w: int = 0, expect_h: int = 0) -> bool:
     return True
 
 
+def stack_grid_is_canonical(path: str, bbox_native):
+    """Is this stack on the grid the CURRENT bbox would produce?
+
+    True, False, or None when it cannot be told.
+
+    Coverage is not enough. A stack built before the pixel-snapping fix
+    is one column too wide, and a wider stack still covers the AOI, so
+    the reuse check kept it forever: the fire went on reporting the old
+    size and every product built on the correct grid was rejected as
+    "a different grid". The AOI is defined by the bounding box, so the
+    test is whether the file is on the grid that box implies -- same
+    origin pixel, same width, same height -- not merely whether it
+    contains it.
+    """
+    if not path or not os.path.isfile(path) or not bbox_native:
+        return None
+    try:
+        ds = gdal.Open(path, gdal.GA_ReadOnly)
+        if ds is None:
+            return None
+        gt = ds.GetGeoTransform()
+        w, h = ds.RasterXSize, ds.RasterYSize
+        ds = None
+        if not gt or gt[1] == 0 or gt[5] == 0:
+            return None
+        xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
+        px, py = abs(gt[1]), abs(gt[5])
+
+        def _snap(v, eps=1e-6):
+            r = round(v)
+            return float(r) if abs(v - r) < eps else v
+
+        # The origin must be the pixel that CONTAINS the bbox corner:
+        # zero or a fraction of a pixel to its west and north.
+        off_x = _snap((xmin - gt[0]) / px)
+        off_y = _snap((gt[3] - ymax) / py)
+        if not (-1e-6 <= off_x < 1.0) or not (-1e-6 <= off_y < 1.0):
+            return False
+        want_w = int(math.ceil(_snap((xmax - gt[0]) / px)))
+        want_h = int(math.ceil(_snap((gt[3] - ymin) / py)))
+        return bool(w == want_w and h == want_h)
+    except Exception:
+        return None
+
+
 def stack_covers_bbox(path: str, bbox_native, slack_px: float = 1.5):
     """Does the stack at *path* actually cover this bounding box?
 
@@ -1031,14 +1077,31 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     # back from .stacks and the build is skipped again. Forcing the
     # rebuild skips both the reuse and the restore, which is the only
     # way the requested date actually gets made.
-    if not force and stack_is_valid(out_bin) \
-            and stack_covers_bbox(out_bin, bbox_native) is False:
-        sys.stderr.write(
-            '[aoi_stack] %s covers a different extent than this AOI; '
-            'forcing a rebuild (its durable copy is stale too, so a '
-            'plain delete would just be restored)\n'
-            % os.path.basename(out_bin))
-        force = True
+    if not force and stack_is_valid(out_bin):
+        _cov = stack_covers_bbox(out_bin, bbox_native)
+        _canon = stack_grid_is_canonical(out_bin, bbox_native)
+        if _cov is False:
+            sys.stderr.write(
+                '[aoi_stack] REBUILD %s: covers a different extent than '
+                'this AOI (its durable copy is stale too, so a plain '
+                'delete would just be restored)\n'
+                % os.path.basename(out_bin))
+            force = True
+        elif _canon is False:
+            # Covers the AOI but is not ON the AOI's grid -- one column
+            # or row too many from the pre-snapping era. Left alone it
+            # would be reused forever, and every product built on the
+            # correct grid would be rejected against it.
+            sys.stderr.write(
+                '[aoi_stack] REBUILD %s: covers the AOI but is not on '
+                'the grid the bbox implies; rebuilding so every product '
+                'of this fire lands on one grid\n'
+                % os.path.basename(out_bin))
+            force = True
+        else:
+            sys.stderr.write(
+                '[aoi_stack] reuse %s (covers=%s canonical=%s)\n'
+                % (os.path.basename(out_bin), _cov, _canon))
         # Drop the sidecars as well. They describe the OLD grid, and
         # anything that reads them afterwards -- the product
         # enumeration, the overlay builder -- would judge the new stack

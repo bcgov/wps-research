@@ -5,6 +5,7 @@ attribute, set by :func:`init` at server boot. Cross-module dependencies
 (rebrush procs, notification push, ML metrics) are wired by ``init``.
 """
 
+import math
 import os
 import shutil
 import sys
@@ -599,10 +600,33 @@ def _load_fire_state():
 
         # Dimensions and accumulation dates, if the record lost them.
         #
-        # The stack itself is the authority on its own size, and the
-        # accumulation window is the VIIRS window this fire was built
-        # with -- both recoverable without re-preparing anything.
+        # The BOUNDING BOX defines the AOI; a stack is only evidence of
+        # it. Reading the size back from the stack first cemented a
+        # stale one: a file built before pixel-snapping is a column too
+        # wide, the fire then reported that width, and every correctly
+        # built product was rejected against it. The stack is used only
+        # when there is no bbox to derive from.
         try:
+            if not getattr(fire, 'crop_w', 0):
+                bn = getattr(fire, 'bbox_native', None)
+                if bn:
+                    _px = 19.987419804619901
+
+                    def _snapv(v, eps=1e-6):
+                        r = round(v)
+                        return float(r) if abs(v - r) < eps else v
+
+                    _w = int(math.ceil(_snapv(
+                        (float(bn[2]) - float(bn[0])) / _px)))
+                    _h = int(math.ceil(_snapv(
+                        (float(bn[3]) - float(bn[1])) / _px)))
+                    if _w > 0 and _h > 0:
+                        fire.crop_w, fire.crop_h = _w, _h
+                        sys.stderr.write(
+                            '[persistence] %s: AOI size %dx%d derived '
+                            'from bbox_native %s\n'
+                            % (fn, _w, _h, tuple(round(float(v), 1)
+                                                 for v in bn)))
             if not getattr(fire, 'crop_w', 0):
                 from .durable import _grid_of
                 g = _grid_of(getattr(fire, 'crop_bin', '') or '')
@@ -610,9 +634,12 @@ def _load_fire_state():
                     fire.crop_w, fire.crop_h = int(g[0]), int(g[1])
                     sys.stderr.write(
                         '[persistence] %s: AOI size %dx%d read back '
-                        'from its stack\n' % (fn, g[0], g[1]))
-        except Exception:
-            pass
+                        'from its stack (no bbox on record)\n'
+                        % (fn, g[0], g[1]))
+        except Exception as _sexc:
+            sys.stderr.write(
+                '[persistence] %s: could not determine the AOI size: '
+                '%s\n' % (fn, _sexc))
         try:
             if not getattr(fire, 'acc_start', ''):
                 if getattr(fire, 'viirs_start_date', ''):
@@ -620,6 +647,38 @@ def _load_fire_state():
                     fire.acc_end = getattr(fire, 'viirs_end_date', '')
         except Exception:
             pass
+
+        # State the grid situation plainly, every load.
+        #
+        # A fire whose stack is not on the grid its bbox implies will
+        # have every correctly built product rejected against it, and
+        # that used to be invisible until products went missing from
+        # the selector.
+        try:
+            from .aoi_stack import (stack_grid_is_canonical,
+                                    stack_covers_bbox)
+            _cb = getattr(fire, 'crop_bin', '') or ''
+            _bn = getattr(fire, 'bbox_native', None)
+            if _cb and _bn:
+                _canon = stack_grid_is_canonical(_cb, _bn)
+                _cov = stack_covers_bbox(_cb, _bn)
+                _g2 = None
+                try:
+                    from .durable import _grid_of
+                    _g2 = _grid_of(_cb)
+                except Exception:
+                    _g2 = None
+                sys.stderr.write(
+                    '[persistence] %s: reference stack %s is %s, '
+                    'covers_aoi=%s on_bbox_grid=%s%s\n'
+                    % (fn, os.path.basename(_cb),
+                       (f'{_g2[0]}x{_g2[1]}' if _g2 else 'unreadable'),
+                       _cov, _canon,
+                       ('  <-- it will be rebuilt on first use'
+                        if _canon is False else '')))
+        except Exception as _gexc:
+            sys.stderr.write(
+                '[persistence] %s: grid check failed: %s\n' % (fn, _gexc))
 
         # Fill any gap from the fire's own manifest.
         #
