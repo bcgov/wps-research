@@ -4551,9 +4551,12 @@ async function openMrapDatePicker(dlg, list, note, prog) {
                        ${d.date === cur ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="font-family:monospace">${d.date}</span>
-                <span style="color:${d.ready ? '#2a7' : '#888'};
+                <span style="color:${(d.ready
+                        || _haveProduct('mrap_p' + d.date))
+                        ? '#2a7' : '#888'};
                              font-size:11px">
-                    ${d.ready ? 'ready' : 'builds on apply'}</span>
+                    ${(d.ready || _haveProduct('mrap_p' + d.date))
+                      ? 'ready' : 'builds on apply'}</span>
                 <span style="color:#aaa;font-size:11px">
                     ${gb ? gb + ' GB' : ''}</span>
             </label>`;
@@ -4628,7 +4631,16 @@ async function openDatePicker() {
         list.innerHTML = _dateRows.map((d) => {
             const pretty = `${d.date.slice(0, 4)}-${d.date.slice(4, 6)}`
                 + `-${d.date.slice(6, 8)}`;
-            const built = d.built
+            // One truth for the tick and the label.
+            //
+            // The checkbox was disabled from the client's product list
+            // while the label came only from the server's flag, so the
+            // two could disagree -- and did: a date whose checkbox was
+            // greyed out as "Already built" still read "builds on
+            // apply". Either source saying the product exists is
+            // enough.
+            const _isBuilt = d.built || _haveProduct('l2_d' + d.date);
+            const built = _isBuilt
                 ? '<span style="color:#2d8a4e">ready</span>'
                 : '<span style="color:#888">builds on apply</span>';
             const newestTag = (d.date === j.newest)

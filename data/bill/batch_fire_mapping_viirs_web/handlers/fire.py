@@ -4499,11 +4499,21 @@ class FireRoutes:
                 # it ready claims a product the user never asked for and
                 # cannot actually use. Require all three parts.
                 def _complete(path):
+                    # Test the path handed in, not a name from some
+                    # other scope.
+                    #
+                    # The header check here named a loop variable
+                    # from another method, one that does not exist in
+                    # this scope at all -- so
+                    # every candidate raised NameError, no L2 date
+                    # could ever be complete, and the dialog told the
+                    # operator that dates already on disk would "build
+                    # on apply". A slip introduced when the header
+                    # check was generalised to both ENVI conventions.
                     from ..l2_recent import date_polygons_path
-                    stem = os.path.splitext(path)[0]
                     return (os.path.isfile(path)
                             and os.path.getsize(path) > 0
-                            and self._hdr_exists(cand)
+                            and self._hdr_exists(path)
                             and os.path.isfile(date_polygons_path(path)))
 
                 hits = [h for h in hits if _complete(h)]
