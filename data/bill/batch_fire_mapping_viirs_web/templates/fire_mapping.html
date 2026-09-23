@@ -1315,7 +1315,7 @@ async function onPostSourceChange() {
 
     const label = productLabel(_products.find((q) => q.key === key)
                                || parts);
-    layerBusyBegin(`Loading ${label}`);
+    layerBusyBegin(`Loading ${label}`, key);
 
     (async () => {
         try {
@@ -5540,7 +5540,9 @@ function startBuildWatch() {
                         + ` \u2014 ${j.done + 1} of ${j.total}`;
                     if (!_buildBarOn) {
                         _buildBarOn = true;
-                        layerBusyBegin(_lbl);
+                        layerBusyBegin(_lbl, String(j.current || '')
+                            .split(',').map((x) => x.trim())
+                            .filter(Boolean));
                     } else {
                         _layerLabel = _lbl;
                         layerStatusPaint();
@@ -7930,9 +7932,23 @@ let _layerLabel = '';
 let _layerStart = 0;
 let _layerTimer = null;
 
-function layerBusyBegin(label) {
+// Which product rows this activity concerns, so it can be reported
+// in the Sources list beside the layer it is about, rather than in a
+// bar that appears under the imagery.
+let _layerBusyKeys = [];
+
+function layerBusyBegin(label, keys) {
     _layerBusy++;
     _layerLabel = label || 'Loading';
+    if (keys) {
+        // Accumulate, do not replace. Two panes can be loading at
+        // once; replacing would leave the first pane's row showing a
+        // message that is no longer being updated until the last load
+        // finished and cleared everything.
+        for (const k of (Array.isArray(keys) ? keys : [keys])) {
+            if (k && !_layerBusyKeys.includes(k)) _layerBusyKeys.push(k);
+        }
+    }
     if (_layerBusy === 1) _layerStart = performance.now();
     layerStatusPaint();
     if (!_layerTimer) _layerTimer = setInterval(layerStatusPaint, 250);
@@ -7940,11 +7956,44 @@ function layerBusyBegin(label) {
 
 function layerBusyEnd() {
     _layerBusy = Math.max(0, _layerBusy - 1);
-    if (_layerBusy === 0 && _layerTimer) {
-        clearInterval(_layerTimer);
-        _layerTimer = null;
+    if (_layerBusy === 0) {
+        if (_layerTimer) {
+            clearInterval(_layerTimer);
+            _layerTimer = null;
+        }
+        // Only the LAST end clears the rows: nested loads share the
+        // counter, and clearing on the first would leave the remaining
+        // work unreported.
+        _layerBusyKeys = [];
     }
     layerStatusPaint();
+}
+
+// The transient message for one product row, or ''.
+//
+// Held as state rather than written into the DOM and left there: the
+// Sources list is re-rendered on every refresh, so a message written
+// directly into a cell would be wiped a moment later. The renderer
+// asks this function instead, and the painter below updates the cell
+// between renders for immediacy. One source of truth, two readers.
+function layerBusyNoteFor(key) {
+    if (_layerBusy <= 0 || !key) return '';
+    if (!_layerBusyKeys.includes(key)) return '';
+    const secs = (performance.now() - _layerStart) / 1000;
+    return `${_layerLabel}  ${secs.toFixed(1)}s`;
+}
+
+// Can the Sources list carry the message right now?
+function layerBusyRowsVisible() {
+    try {
+        if (_sourcesCollapsed) return false;
+        const box = document.getElementById('sources-list');
+        if (!box || !_layerBusyKeys.length) return false;
+        return _layerBusyKeys.some((k) => box.querySelector(
+            `.src-row[data-row-key="${k}"]`));
+    } catch (_) {
+        return false;
+    }
 }
 
 function layerStatusPaint() {
@@ -7961,6 +8010,19 @@ function layerStatusPaint() {
     if (!bar || !title) return;
 
     if (_layerBusy <= 0) {
+        // Clear any note left in the list, then put the bar away.
+        try {
+            const box = document.getElementById('sources-list');
+            if (box) {
+                box.querySelectorAll('.src-row .src-why')
+                   .forEach((c) => {
+                       if (c.dataset.busyNote === '1') {
+                           c.textContent = '';
+                           c.dataset.busyNote = '';
+                       }
+                   });
+            }
+        } catch (_) {}
         // Only put the bar away if WE opened it: a mapping run may be
         // using it, and stealing it back would hide real progress.
         if (bar.dataset.layerOwned === '1') {
@@ -7970,6 +8032,34 @@ function layerStatusPaint() {
         }
         return;
     }
+    // Report in the Sources list when it can carry the message.
+    //
+    // The bar under the imagery is the fallback, not the default: it
+    // appears and disappears under the picture, which is exactly where
+    // a transient message is most distracting. The list already has a
+    // column for per-layer status, and the message is about a layer.
+    if (layerBusyRowsVisible()) {
+        if (bar.dataset.layerOwned === '1') {
+            bar.classList.add('is-collapsed');
+            bar.dataset.layerOwned = '';
+            if (eta) eta.textContent = '';
+        }
+        try {
+            const box = document.getElementById('sources-list');
+            for (const k of _layerBusyKeys) {
+                const row = box && box.querySelector(
+                    `.src-row[data-row-key="${k}"]`);
+                if (!row) continue;
+                const cell = row.querySelector('.src-why');
+                if (cell) {
+                    cell.textContent = layerBusyNoteFor(k);
+                    cell.dataset.busyNote = '1';
+                }
+            }
+        } catch (_) { /* informational */ }
+        return;
+    }
+
     const secs = (performance.now() - _layerStart) / 1000;
     const mapping = (typeof isMapping !== 'undefined') && isMapping;
     if (mapping && bar.dataset.layerOwned !== '1') return;
@@ -8378,7 +8468,8 @@ async function onRightPostSourceChange() {
     // because both read the per-source preview stash.
     setSourceSelectorsEnabled(false);
     layerBusyBegin(src === 'l2' ? 'Loading L2 recent tile (right)'
-                                : 'Loading MRAP composite (right)');
+                                : 'Loading MRAP composite (right)',
+                   rightProductKey());
     try {
         await loadPaneImage('right', rightView || 'post');
         // Overlays for the RIGHT pane's product.
@@ -10181,6 +10272,10 @@ function renderSourcesList(data) {
         // reporting it twice said nothing extra.
         const size = (mb != null) ? Math.round(mb) + ' MB' : '\u2014';
         const isShown = e.key === shown;
+        // A load in progress for this layer outranks its cached
+        // status: it is what is happening right now.
+        let _busyNote = '';
+        try { _busyNote = layerBusyNoteFor(e.key); } catch (_) {}
         return `<div class="src-row${isShown ? ' is-shown' : ''}"
                      data-row-key="${e.key}"
                      title="${e.key} — click to show this source">
@@ -10195,7 +10290,8 @@ function renderSourcesList(data) {
                   title="${e.ready ? 'cached: switching to this is instant'
                                    : (e.status || 'not ready')}"></span>
             <span class="src-size">${size}</span>
-            <span class="src-why">${e.ready ? '' : (e.status || '')}</span>
+            <span class="src-why"${_busyNote ? ' data-busy-note="1"' : ''}
+                  >${_busyNote || (e.ready ? '' : (e.status || ''))}</span>
         </div>`;
     }).join('');
     box.querySelectorAll('input[data-src-key]').forEach((cb) => {
