@@ -1085,13 +1085,34 @@ class FireRoutes:
                     have_prev = _has(_view_alt) and _has('post.png')
                 ready = bool(path and os.path.isfile(path)
                              and have_prev)
-                # Say what is actually true of THIS product.
+                # Say what is actually true of THIS product, and put
+                # it in the warming queue if it is not ready.
+                #
+                # The panel polls while anything is outstanding, so
+                # this is also what keeps newly created products moving
+                # without a separate trigger: enqueueing is idempotent
+                # and costs nothing for a product already queued,
+                # already rendering, or already done.
                 if ready:
                     why = ''
                 elif path and os.path.isfile(path):
-                    why = ('rendering previews' if _view_file
-                           == 'post.png'
-                           else f'rendering {_view_label}')
+                    try:
+                        from ..prepare import (enqueue_preview_warm,
+                                               preview_queue_status)
+                        enqueue_preview_warm(fire, key, path)
+                        _qs = preview_queue_status()
+                        _ident = f'{fire_numbe}:{key}'
+                        if _ident in _qs.get('idents', []):
+                            why = ('rendering previews'
+                                   if _qs['queued'] == 0 else
+                                   f'queued for rendering '
+                                   f'({_qs["queued"]} ahead)')
+                        else:
+                            why = 'rendering previews'
+                    except Exception:
+                        why = 'rendering previews'
+                    if _view_file != 'post.png':
+                        why = f'rendering {_view_label}'
                 elif ssd_mb is not None:
                     why = 'in the durable store; restores on first use'
                 elif path:

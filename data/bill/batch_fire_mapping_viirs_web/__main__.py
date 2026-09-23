@@ -1095,6 +1095,14 @@ def main():
     try:
         from .prepare import refresh_products_for_all_fires
         refresh_products_for_all_fires()
+        # Catch up on preview rendering for everything already on
+        # disk. Anything built by an earlier run, or restored from the
+        # durable store, has a stack but no previews until someone
+        # selects it and waits -- this renders them in the background
+        # instead. Delayed a little so it does not compete with the
+        # product refresh for the same CPU at boot.
+        from .prepare import warm_outstanding_previews_all
+        warm_outstanding_previews_all(delay_s=45.0)
     except Exception as _exc:
         _log(f'[startup] product refresh not started: {_exc}')
 

@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import shutil
+import queue
 import re
 import sys
 import threading
@@ -835,6 +836,197 @@ def derived_hint_path(fire: FireInfo, mode: str) -> str:
                             f'{mode}_{pkey}_hint.bin')
     except Exception:
         return ''
+
+
+# ---------------------------------------------------------------
+# Preview warming queue
+# ---------------------------------------------------------------
+# Rendering a product's preview PNGs is what stands between "the stack
+# is on disk" and "switching to it is instant". It used to happen only
+# when a build finished in this process, so anything built by an
+# earlier run -- or restored from the durable store -- sat unrendered
+# until someone selected it and waited.
+#
+# The work is idempotent and its state lives on disk: a preview either
+# exists or it does not, and preview.py writes through a temporary file
+# and os.replace, so a process killed mid-render leaves either the old
+# file or nothing, never a half one. That makes a persistent journal
+# unnecessary -- and less reliable than the filesystem it would
+# describe. Resuming is simply sweeping again, which is what happens on
+# every startup.
+_PREVIEW_WORKERS = 3
+_preview_q: 'queue.Queue' = queue.Queue()
+_preview_inflight: set = set()      # idents queued or running
+_preview_lock = threading.Lock()
+_preview_workers_started = False
+_preview_stats = {'done': 0, 'failed': 0, 'skipped': 0}
+
+
+def preview_queue_status() -> dict:
+    """What the warming queue is doing, for the Sources panel."""
+    with _preview_lock:
+        return {'queued': _preview_q.qsize(),
+                'in_flight': len(_preview_inflight),
+                'idents': sorted(_preview_inflight)[:40],
+                'done': _preview_stats['done'],
+                'failed': _preview_stats['failed'],
+                'skipped': _preview_stats['skipped']}
+
+
+def previews_complete(fire: FireInfo, key: str) -> bool:
+    """Has this product's post-fire preview been rendered?"""
+    try:
+        return os.path.isfile(os.path.join(
+            fire.cache_dir, f'previews_{key}', 'post.png'))
+    except Exception:
+        return False
+
+
+def _preview_worker() -> None:
+    while True:
+        item = None
+        try:
+            item = _preview_q.get()
+        except Exception:
+            continue
+        ident = ''
+        try:
+            fire, key, stack_path, ident = item
+            # Check again at the moment of doing it: the product may
+            # have been warmed by the interactive path, or deleted,
+            # while this item waited its turn.
+            if previews_complete(fire, key):
+                with _preview_lock:
+                    _preview_stats['skipped'] += 1
+                continue
+            if not stack_path or not os.path.isfile(stack_path):
+                sys.stderr.write(
+                    f'[warmq] {ident}: stack is gone; nothing to '
+                    f'render\n')
+                with _preview_lock:
+                    _preview_stats['skipped'] += 1
+                continue
+            t0 = time.time()
+            warm_product_artifacts(fire, stack_path)
+            ok = previews_complete(fire, key)
+            with _preview_lock:
+                _preview_stats['done' if ok else 'failed'] += 1
+            sys.stderr.write(
+                '[warmq] %s: %s in %.1fs (%d still queued)\n'
+                % (ident, 'rendered' if ok else 'produced no preview',
+                   time.time() - t0, _preview_q.qsize()))
+        except Exception as exc:
+            with _preview_lock:
+                _preview_stats['failed'] += 1
+            sys.stderr.write(f'[warmq] {ident or "?"}: failed: {exc}\n')
+        finally:
+            if ident:
+                with _preview_lock:
+                    _preview_inflight.discard(ident)
+            try:
+                _preview_q.task_done()
+            except Exception:
+                pass
+
+
+def _ensure_preview_workers() -> None:
+    """Start the pool once, lazily."""
+    global _preview_workers_started
+    with _preview_lock:
+        if _preview_workers_started:
+            return
+        _preview_workers_started = True
+        for i in range(_PREVIEW_WORKERS):
+            threading.Thread(target=_preview_worker, daemon=True,
+                             name=f'warmq-{i + 1}').start()
+    sys.stderr.write(
+        f'[warmq] {_PREVIEW_WORKERS} preview worker(s) started\n')
+
+
+def enqueue_preview_warm(fire: FireInfo, key: str,
+                         stack_path: str) -> bool:
+    """Queue one product for warming. True if it was added.
+
+    Idempotent and cheap to call repeatedly: a product already warmed,
+    already queued, or already being rendered is not queued again.
+    """
+    if not fire or not key or not stack_path:
+        return False
+    ident = f'{fire.fire_numbe}:{key}'
+    if previews_complete(fire, key):
+        return False
+    with _preview_lock:
+        if ident in _preview_inflight:
+            return False
+        _preview_inflight.add(ident)
+    _ensure_preview_workers()
+    _preview_q.put((fire, key, stack_path, ident))
+    return True
+
+
+def _fire_stack_prefix(fire: FireInfo) -> str:
+    """``<safe>_<hash>`` for this fire, from the stack it is loaded on."""
+    base = os.path.basename(getattr(fire, 'crop_bin', '') or '')
+    m = re.match(r'^\d{8}_stack_(.+?_[0-9a-fA-F]{6,})(?:_|\.)', base)
+    return m.group(1) if m else ''
+
+
+def warm_outstanding_previews(fire: FireInfo) -> int:
+    """Queue every product of this fire whose previews are missing."""
+    pfx = _fire_stack_prefix(fire)
+    if not pfx:
+        return 0
+    ram = os.path.dirname(getattr(fire, 'crop_bin', '') or '')
+    if not ram or not os.path.isdir(ram):
+        return 0
+    added = 0
+    for cand in sorted(glob.glob(
+            os.path.join(ram, f'*_stack_{pfx}*.bin'))):
+        bn = os.path.basename(cand)
+        # Clustering scratch and post-fire buffers are inputs, not
+        # products: they have no previews and never will.
+        if ('_nob8' in bn or '.kgc' in bn or '.post.' in bn
+                or '_selected' in bn or bn.endswith('.part')):
+            continue
+        try:
+            key = product_key_for_path(cand)
+        except Exception:
+            key = ''
+        if not key:
+            continue
+        if enqueue_preview_warm(fire, key, cand):
+            added += 1
+    if added:
+        sys.stderr.write(
+            f'[warmq] {fire.fire_numbe}: queued {added} product(s) '
+            f'for preview rendering\n')
+    return added
+
+
+def warm_outstanding_previews_all(delay_s: float = 0.0) -> None:
+    """Sweep every fire, in the background. Safe to call repeatedly."""
+    def _run():
+        if delay_s > 0:
+            time.sleep(delay_s)
+        total = 0
+        try:
+            names = list(state.fires.keys())
+        except Exception:
+            names = []
+        for fn in names:
+            fire = state.fires.get(fn)
+            if fire is None:
+                continue
+            try:
+                total += warm_outstanding_previews(fire)
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[warmq] {fn}: sweep failed: {exc}\n')
+        sys.stderr.write(
+            f'[warmq] startup sweep queued {total} product(s) across '
+            f'{len(names)} fire(s)\n')
+
+    threading.Thread(target=_run, daemon=True, name='warmq-sweep').start()
 
 
 _hint_jobs: dict = {}
