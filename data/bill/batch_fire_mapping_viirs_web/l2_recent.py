@@ -621,10 +621,29 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     finally:
         ref = None
 
-    from .aoi_stack import _window_for_bbox
+    from .aoi_stack import (_window_for_bbox, load_pinned_grid,
+                            grid_contains_bbox)
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
         gt, rW, rH, xmin, ymin, xmax, ymax)
+
+    # The AOI's pinned grid governs here too.
+    #
+    # This module builds the L2 composite that becomes a stack's
+    # post-fire imagery, and it was deriving its own window from the
+    # bounding box against its own reference raster. That is a second,
+    # independent answer to a question the fire has already answered
+    # once -- and when the two answers differed by a column, the
+    # product built from this buffer differed from every other product
+    # of the same fire. One grid, one source of truth.
+    _pin = load_pinned_grid(out_bin)
+    if _pin and grid_contains_bbox(_pin, (xmin, ymin, xmax, ymax)):
+        win_gt = tuple(_pin['gt'])
+        xsize, ysize = _pin['width'], _pin['height']
+        xoff = int(round((win_gt[0] - gt[0]) / gt[1]))
+        yoff = int(round((win_gt[3] - gt[3]) / gt[5]))
+        _log(f'using the pinned AOI grid {xsize}x{ysize} at '
+             f'({win_gt[0]:.3f}, {win_gt[3]:.3f})')
     total_px = xsize * ysize
 
     _p('finding intersecting Sentinel-2 tiles', 0.02)

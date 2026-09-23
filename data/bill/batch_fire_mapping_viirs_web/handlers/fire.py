@@ -891,8 +891,27 @@ class FireRoutes:
                         os.path.splitext(os.path.basename(path))[0]))
             for stem in stems:
                 for sfx in ('.bin', '.hdr', '.bin.hdr',
-                            '_dates.json', '_overlays.json'):
+                            '_dates.json', '_overlays.json',
+                            # The post-fire buffer this product was
+                            # composited from, and its header.
+                            '.bin.post.bin', '.bin.post.hdr',
+                            '.bin.post.bin.hdr', '.post.bin',
+                            '.post.hdr'):
                     _rm(stem + sfx)
+                # Everything else derived from this stack: the band
+                # subset the clustering reads, its KGC graph files, and
+                # any partial copy left by an interrupted restore.
+                #
+                # Left behind, these are ghosts: the band subset keeps
+                # the product's name on the ramdisk, the graph files are
+                # gigabytes each, and a '.part' copy can be completed by
+                # a later restore and bring the product back.
+                for junk in _g.glob(stem + '_nob8*') \
+                        + _g.glob(stem + '*.kgc*') \
+                        + _g.glob(stem + '*.part') \
+                        + _g.glob(stem + '*.tmp*') \
+                        + _g.glob(stem + '_selected*'):
+                    _rm(junk)
             # Previews, hints and the coverage sidecar for this product.
             _rm(os.path.join(fire.cache_dir, f'previews_{key}'))
             for h in _g.glob(os.path.join(fire.cache_dir, '_redwins',
@@ -3790,6 +3809,26 @@ class FireRoutes:
                             or '_nodiff' in _bn or '.kgc' in _bn
                             or '_selected' in _bn):
                         continue
+                    # Nor is a stack that is not on this AOI's grid.
+                    #
+                    # Offering one puts a layer of a different size in
+                    # the selector beside its siblings -- a column
+                    # narrower, misaligned with every overlay, and
+                    # shifting the view when stepped onto. It stays out
+                    # until it has been rebuilt to the fire's pinned
+                    # footprint, which happens on first use.
+                    try:
+                        from ..aoi_stack import stack_grid_is_canonical
+                        if stack_grid_is_canonical(
+                                cand, fire.bbox_native) is False:
+                            sys.stderr.write(
+                                '[products] %s: withholding %s -- not on '
+                                'this AOI\'s grid; it will be rebuilt '
+                                'when next requested\n'
+                                % (fire_numbe, _bn))
+                            continue
+                    except Exception:
+                        pass
                     key = product_key_for_path(cand)
                     if not key or key in seen:
                         continue          # KGC scratch, or a duplicate

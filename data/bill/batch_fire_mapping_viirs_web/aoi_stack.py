@@ -1110,6 +1110,24 @@ def stack_grid_is_canonical(path: str, bbox_native):
         ds = None
         if not gt or gt[1] == 0 or gt[5] == 0:
             return None
+
+        # The PINNED grid is the authority when there is one.
+        #
+        # Deriving the answer from the bounding box here while builds
+        # were cut to the pinned grid meant two authorities: a stack
+        # from before the pin measured 57 columns and the bbox said 57,
+        # so it passed as canonical and was offered -- next to products
+        # built to the pinned 58. One layer then sat a column narrower
+        # than all the others. The fire's footprint is the pin; every
+        # file is judged against it.
+        _pin = load_pinned_grid(path)
+        if _pin:
+            pgt = _pin['gt']
+            same_origin = (abs(pgt[0] - gt[0]) < abs(gt[1]) * 1e-6
+                           and abs(pgt[3] - gt[3]) < abs(gt[5]) * 1e-6)
+            return bool(w == _pin['width'] and h == _pin['height']
+                        and same_origin)
+
         xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
         px, py = abs(gt[1]), abs(gt[5])
 

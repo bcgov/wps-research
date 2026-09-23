@@ -1233,9 +1233,15 @@ def main():
                  f'marking ready without rebuilding: '
                  + ', '.join(f.fire_numbe for f in ready_already))
             try:
+                # Imported here rather than at module scope: this name
+                # was used without ever being imported in this file, so
+                # the save silently failed with NameError every time a
+                # fire was marked ready without rebuilding.
+                from .persistence import _save_fire_state
                 _save_fire_state()
-            except Exception:
-                pass
+            except Exception as _sexc:
+                sys.stderr.write(
+                    f'[startup] could not save fire state: {_sexc}\n')
 
         if stuck:
             _log(f'      {len(stuck)} fire(s) were still preparing when '

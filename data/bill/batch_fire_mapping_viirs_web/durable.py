@@ -653,6 +653,41 @@ def recover_identity(fire, log=None) -> bool:
     """
     changed = []
 
+    # The PINNED GRID is this AOI's authority, when one exists.
+    #
+    # A stack's overlays sidecar describes the STACK, and a stack is a
+    # column wider than the AOI whenever it was built before pixel
+    # snapping. Recovering the bounding box from it therefore widened
+    # the AOI by a pixel, which re-pinned the grid a pixel wider, which
+    # widened the next recovery -- a loop that walked the footprint out
+    # one column at a time, which is exactly what happened here
+    # (xmax 1165709.86 -> 1165729.8, one pixel). The pinned grid
+    # records the AOI itself, so when it is present the bbox is read
+    # straight off it and no stack sidecar is consulted.
+    if not getattr(fire, 'bbox_native', None):
+        try:
+            from .aoi_stack import load_pinned_grid
+            _cb0 = getattr(fire, 'crop_bin', '') or ''
+            _pin0 = load_pinned_grid(_cb0) if _cb0 else None
+            if _pin0:
+                _gt = _pin0['gt']
+                _w, _h = _pin0['width'], _pin0['height']
+                fire.bbox_native = (_gt[0], _gt[3] + _h * _gt[5],
+                                    _gt[0] + _w * _gt[1], _gt[3])
+                fire.bbox_wgs84 = None
+                changed.append('bbox_native')
+                msg = (f'[recover] {fire.fire_numbe}: bbox taken from '
+                       f'the pinned AOI grid {_w}x{_h} at '
+                       f'({_gt[0]:.3f}, {_gt[3]:.3f}) -- the authority '
+                       f'for this fire, not a stack sidecar')
+                sys.stderr.write(msg + '\n')
+                if log:
+                    log(msg)
+        except Exception as _pexc:
+            sys.stderr.write(
+                f'[recover] {fire.fire_numbe}: pinned grid unreadable '
+                f'({_pexc}); falling back to sidecars\n')
+
     if not getattr(fire, 'bbox_native', None):
         candidates = []
         cb = getattr(fire, 'crop_bin', '') or ''
