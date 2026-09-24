@@ -798,7 +798,10 @@ def _viirs_worker(fire: FireInfo) -> None:
         try:
             fire.crop_bin = crop_bin        # so the enumeration sees it
             from .prepare import ensure_default_products
-            _res = ensure_default_products(fire)
+            _res = ensure_default_products(
+                fire, ref_raster=ref_raster,
+                instance_key=getattr(state, 'shared_root', '') or '',
+                log=lambda m: fire.console_log.append(m))
             fire.console_log.append(
                 f'[defaults] MRAP reference {_res["mrap"] or "unknown"}, '
                 f'L2 reference {_res["l2"] or "unknown"}; '
@@ -1033,6 +1036,33 @@ def _viirs_worker(fire: FireInfo) -> None:
             # this ran.
             _stash_previews(fire, getattr(fire, 'post_source', 'l2'),
                             path=crop_bin)
+
+            # Did both defaults actually land?
+            #
+            # The build above reports its own outcome, but a product
+            # can still be absent for reasons that produced no
+            # exception -- so check the disk and say so plainly on the
+            # fire's console, where it is visible without reading the
+            # server log.
+            try:
+                from .prepare import (existing_product_keys,
+                                      mrap_reference_date)
+                _keys = existing_product_keys(fire)
+                if not any(k.startswith('mrap_p') for k in _keys):
+                    fire.console_log.append(
+                        f'[defaults] WARNING: this fire has no MRAP '
+                        f'composite. Products present: '
+                        f'{sorted(_keys) or "none"}. Newest mosaic '
+                        f'date: {mrap_reference_date() or "none found"}')
+                if not any(k.startswith('l2_') for k in _keys):
+                    fire.console_log.append(
+                        f'[defaults] WARNING: this fire has no L2 '
+                        f'recent product. Products present: '
+                        f'{sorted(_keys) or "none"}')
+            except Exception as _vexc:
+                fire.console_log.append(
+                    f'[defaults] could not verify the default '
+                    f'products: {type(_vexc).__name__}: {_vexc}')
 
             # Build the vector overlays now rather than on first open.
             # This reads the tile shapefile, reprojects every

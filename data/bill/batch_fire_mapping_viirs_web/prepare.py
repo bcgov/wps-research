@@ -3779,7 +3779,9 @@ def existing_product_keys(fire: FireInfo) -> set:
     return keys
 
 
-def ensure_default_products(fire: FireInfo, log=None) -> dict:
+def ensure_default_products(fire: FireInfo, log=None,
+                            ref_raster: str = '',
+                            instance_key: str = '') -> dict:
     """Give this fire the newest product of BOTH kinds, each dated by
     its own reference date. Builds only what is missing.
 
@@ -3812,12 +3814,26 @@ def ensure_default_products(fire: FireInfo, log=None) -> dict:
             except Exception:
                 pass
 
-    from .aoi_stack import ensure_aoi_stack, AoiStackError
-    inst = getattr(state, 'shared_root', '') or ''
-    ref = (state.rasters_by_year.get(fire.fire_year)
-           or state.raster_path)
-    have = existing_product_keys(fire)
     fn = getattr(fire, 'fire_numbe', '?')
+    from .aoi_stack import ensure_aoi_stack, AoiStackError
+    # Take the caller's reference raster and instance key when it has
+    # them. The worker already resolved both to run its own build, and
+    # resolving them a second time from module state is a second chance
+    # to get a different answer -- or to raise, before a single product
+    # has been considered.
+    try:
+        inst = instance_key or (getattr(state, 'shared_root', '') or '')
+        ref = ref_raster or (state.rasters_by_year.get(fire.fire_year)
+                             or state.raster_path)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[refresh] {fn}: could not resolve the reference raster '
+            f'({type(exc).__name__}: {exc}); using the caller\'s\n')
+        inst, ref = instance_key, ref_raster
+    have = existing_product_keys(fire)
+    sys.stderr.write(
+        f'[refresh] {fn}: products already present: '
+        f'{sorted(have) or "none"}\n')
 
     out['mrap'] = mrap_reference_date()
     out['l2'] = l2_reference_date(fire)
