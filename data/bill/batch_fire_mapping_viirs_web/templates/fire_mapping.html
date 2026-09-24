@@ -4717,6 +4717,9 @@ async function applyMrapDateSelection() {
     // Remember the request, so the end of the batch can be checked
     // against it instead of assumed successful.
     _buildRequested = keys.slice();
+    // Show the requested layers in the Sources list straight away,
+    // rather than reporting progress in a bar under the imagery.
+    for (const k of toBuild) notePendingProduct(k, 'queued to build');
     _dateApplying = true;
     setApplyEnabled(false);
     try {
@@ -4839,6 +4842,7 @@ async function applyDateSelection() {
     // Remember the request, so the end of the batch can be checked
     // against it instead of assumed successful.
     _buildRequested = keys.slice();
+    for (const k of toBuild) notePendingProduct(k, 'queued to build');
     _dateApplying = true;
     setApplyEnabled(false);
     try {
@@ -5488,6 +5492,12 @@ function reportBatchOutcome() {
                             String(e).slice(ix + 1).trim());
     }
     if (missing.length) {
+        // Keep the reason beside the layer, where it was asked for.
+        for (const k of missing) {
+            notePendingFailed(k, why.get(k)
+                || 'did not build (no reason reported)');
+        }
+        try { refreshSourcesPanel(); } catch (_) {}
         log(`[build] ${got} of ${want.length} requested product(s) `
             + `are present; MISSING: ${missing.join(', ')}. `
             + missing.map((k) => `\n    ${k}: ${why.get(k)
@@ -5538,11 +5548,17 @@ function startBuildWatch() {
                 try {
                     const _lbl = `Building ${j.current || 'products'}`
                         + ` \u2014 ${j.done + 1} of ${j.total}`;
+                    // Progress belongs beside the layer it concerns.
+                    const _keys = String(j.current || '')
+                        .split(',').map((x) => x.trim())
+                        .filter(Boolean);
+                    for (const k of _keys) {
+                        notePendingProduct(k,
+                            `building (${j.done + 1} of ${j.total})`);
+                    }
                     if (!_buildBarOn) {
                         _buildBarOn = true;
-                        layerBusyBegin(_lbl, String(j.current || '')
-                            .split(',').map((x) => x.trim())
-                            .filter(Boolean));
+                        layerBusyBegin(_lbl, _keys);
                     } else {
                         _layerLabel = _lbl;
                         layerStatusPaint();
@@ -10232,7 +10248,39 @@ function srcCloudCell(e) {
 function renderSourcesList(data) {
     const box = document.getElementById('sources-list');
     if (!box) return;
-    const rows = (data && data.sources) || [];
+    let rows = (data && data.sources) || [];
+
+    // Merge in products that have been requested but do not exist yet.
+    //
+    // They are shown in the same list, in the same order, so a date
+    // queued from the Date select menu appears immediately with its
+    // status beside it instead of in a bar under the imagery. A
+    // pending entry disappears only when the server reports the real
+    // product -- see reapPendingProducts.
+    try {
+        const live = new Set(rows.map((r) => r.key));
+        reapPendingProducts(live);
+        for (const [k, p] of _pendingProducts) {
+            if (live.has(k)) continue;
+            const parts = parseProductKey(k);
+            rows = rows.concat([{
+                key: k,
+                label: productLabel(parts),
+                source: parts.source || '',
+                date: parts.date || parts.post || '',
+                ram_mb: null, ssd_mb: null,
+                ready: false,
+                status: p.status,
+                pending: true,
+                failed: !!p.failed,
+                cloud: null,
+                current: false,
+            }]);
+        }
+        // Same order the server uses: newest date first.
+        rows.sort((a, b) => String(b.date || '')
+                            .localeCompare(String(a.date || '')));
+    } catch (_) { /* the panel is informational */ }
 
     // Feed the shared cloud cache, so this panel and the Date select
     // menu draw from one set of figures rather than two.
@@ -10276,11 +10324,16 @@ function renderSourcesList(data) {
         // status: it is what is happening right now.
         let _busyNote = '';
         try { _busyNote = layerBusyNoteFor(e.key); } catch (_) {}
-        return `<div class="src-row${isShown ? ' is-shown' : ''}"
+        return `<div class="src-row${isShown ? ' is-shown' : ''}${
+                       e.pending ? ' is-pending' : ''}${
+                       e.failed ? ' is-failed' : ''}"
                      data-row-key="${e.key}"
+                     data-pending="${e.pending ? '1' : ''}"
                      title="${e.key} — click to show this source">
             <input type="checkbox" data-src-key="${e.key}"
                    ${_srcSelected.has(e.key) ? 'checked' : ''}
+                   ${e.pending
+                     ? 'disabled title="not built yet"' : ''}
                    ${e.current
                      ? 'title="currently loaded — deleting it switches '
                        + 'the view to the next product first"' : ''}>
@@ -10311,6 +10364,13 @@ function renderSourcesList(data) {
     // diverge in what they save, warm or redraw.
     box.querySelectorAll('.src-row[data-row-key]').forEach((row) => {
         row.addEventListener('click', () => {
+            // A product that does not exist yet cannot be displayed.
+            if (row.dataset.pending === '1') {
+                log(`[sources] ${row.dataset.rowKey} is still being `
+                    + `built; it will be selectable when it appears`,
+                    'dim');
+                return;
+            }
             const key = row.dataset.rowKey;
             const sel = document.getElementById('post-source-select');
             if (!key || !sel) return;
@@ -10335,6 +10395,59 @@ function renderSourcesList(data) {
 // later, so for that moment the panel named a different layer from the
 // one on screen. The row is already in the DOM, so the class can move
 // synchronously and the refresh merely confirms it.
+// Products that have been ASKED for but do not exist yet.
+//
+// A date queued from the Date select menu has no stack, no previews
+// and no row, so until now the only place its progress could be
+// reported was the bar under the imagery. Holding the request here
+// lets the Sources list show the layer the moment it is requested,
+// with its status beside it, and the row becomes the real one as soon
+// as the server reports the product. Keyed by product key, so a
+// repeated request updates rather than duplicates.
+const _pendingProducts = new Map();
+
+// The last payload the server sent, so the list can be redrawn without
+// waiting for another round trip. Declared here, above every function
+// that reads it, so the order is obvious rather than merely safe.
+let _lastSourcesData = null;
+
+function notePendingProduct(key, status) {
+    if (!key) return;
+    const prev = _pendingProducts.get(key) || {};
+    _pendingProducts.set(key, {
+        status: status || prev.status || 'queued to build',
+        since: prev.since || Date.now(),
+        failed: false,
+    });
+    // Draw it NOW, from the payload already in hand.
+    //
+    // Waiting for the server round trip would leave a window in which
+    // the row does not exist, and the loading indicator would fall
+    // back to the bar under the imagery for exactly that window --
+    // the flash this change is meant to remove.
+    try { renderSourcesList(_lastSourcesData || {sources: []}); } catch (_) {}
+    try { refreshSourcesPanel(); } catch (_) {}
+}
+
+function notePendingFailed(key, reason) {
+    if (!key) return;
+    const prev = _pendingProducts.get(key) || {};
+    _pendingProducts.set(key, {
+        status: reason || 'did not build',
+        since: prev.since || Date.now(),
+        failed: true,
+    });
+}
+
+// A pending entry goes when the product is real -- never on a timer.
+// A failure stays visible until the product actually appears, because
+// a message that removes itself is a message the operator can miss.
+function reapPendingProducts(liveKeys) {
+    for (const k of [..._pendingProducts.keys()]) {
+        if (liveKeys.has(k)) _pendingProducts.delete(k);
+    }
+}
+
 function markSourcesSelection(key) {
     try {
         const box = document.getElementById('sources-list');
@@ -10427,12 +10540,16 @@ async function refreshSourcesPanel() {
             {headers: {'X-Requested-With': 'fetch'}});
         if (!r.ok) return;
         const d = await r.json();
+        _lastSourcesData = d;
         renderSourcesList(d);
         // Keep polling while anything is still caching or any cloud
         // figure is outstanding: this panel exists to show that the
         // background work is happening.
         const busy = (d.sources || []).some((e) => !e.ready)
-            || d.cloud_pending;
+            || d.cloud_pending
+            // Keep polling while anything is still being built, or the
+            // placeholder row would never be replaced by the real one.
+            || _pendingProducts.size > 0;
         clearTimeout(_srcTimer);
         if (busy) _srcTimer = setTimeout(refreshSourcesPanel, 4000);
     } catch (_) { /* panel is informational */ }

@@ -1533,3 +1533,12 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .image-area img#right-hintmask {
     pointer-events: none;
 }
+
+
+/* A product that has been requested but does not exist yet. Shown in
+   the list so its progress is reported beside the layer it concerns
+   rather than in a bar under the imagery. */
+.src-row.is-pending > * { opacity: 0.72; }
+.src-row.is-pending .src-name { font-style: italic; }
+.src-row.is-pending .src-why { color: #2f6fd0; }
+.src-row.is-pending.is-failed .src-why { color: #c33; }
