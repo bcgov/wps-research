@@ -228,6 +228,203 @@ def existing_hdr(bin_path: str) -> str:
     return ''
 
 
+_ENVI_GEO_KEYS = ('map info', 'projection info',
+                  'coordinate system string')
+
+
+def _envi_records(text: str) -> dict:
+    """The ``key = {...}`` records of an ENVI header, by lower-case key."""
+    out = {}
+    for key in _ENVI_GEO_KEYS + ('band names', 'default bands'):
+        m = re.search(r'^(' + key.replace(' ', r'\s+') + r')\s*=\s*\{.*?\}',
+                      text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+        if m:
+            out[key] = m.group(0).strip()
+    return out
+
+
+def normalize_envi_header(bin_path: str) -> str:
+    """Leave exactly ONE complete header, at <stem>.hdr. Returns it.
+
+    The convention in this system is <stem>.hdr -- X.bin is described
+    by X.hdr, never by X.bin.hdr. The C++ tools write the appended
+    form, so both can end up on disk, and then:
+
+      * GDAL reads the appended one. Observed, not theorised: a stack
+        whose X.hdr carried full map info was reported by gdal.Open at
+        origin (0, 0), because a 136-byte X.bin.hdr written by the tool
+        sat beside it with no map info at all. The product was then
+        rejected from its own AOI as "grid ... at (0.0, 0.0)".
+      * The normalisers that were supposed to clean this up read
+        "if not os.path.isfile(<stem>.hdr)" first, so they did nothing
+        precisely when both files existed -- the only case that matters.
+
+    Merging rather than deleting: the appended header is the tool's
+    statement about the file it just wrote (dimensions, band count),
+    while the stem header may carry geolocation and band names the tool
+    does not know. Taking dimensions from the newer file and the
+    geolocation records from whichever header has them keeps both.
+    """
+    if not bin_path:
+        return ''
+    stem = os.path.splitext(bin_path)[0] + '.hdr'
+    appended = bin_path + '.hdr'
+    have_stem = os.path.isfile(stem)
+    have_app = os.path.isfile(appended)
+
+    if not have_app:
+        return stem if have_stem else ''
+
+    def _read(p):
+        try:
+            with open(p, 'r', errors='replace') as fh:
+                return fh.read()
+        except OSError:
+            return ''
+
+    app_txt = _read(appended)
+    if not have_stem:
+        # Nothing to merge: adopt the tool's header under the right name.
+        try:
+            os.replace(appended, stem)
+        except OSError as exc:
+            sys.stderr.write(f'[aoi_stack] could not rename {appended}: '
+                             f'{exc}\n')
+            return appended
+        return stem
+
+    stem_txt = _read(stem)
+    # Whichever was written last describes the current raster geometry.
+    try:
+        newer_txt, older_txt = ((app_txt, stem_txt)
+                                if os.path.getmtime(appended)
+                                >= os.path.getmtime(stem)
+                                else (stem_txt, app_txt))
+    except OSError:
+        newer_txt, older_txt = app_txt, stem_txt
+
+    have = _envi_records(newer_txt)
+    add = [rec for key, rec in _envi_records(older_txt).items()
+           if key not in have]
+    merged = newer_txt.rstrip('\n')
+    if add:
+        merged += '\n' + '\n'.join(add)
+    merged += '\n'
+
+    try:
+        tmp = stem + '.tmp%d' % os.getpid()
+        with open(tmp, 'w') as fh:
+            fh.write(merged)
+        os.replace(tmp, stem)
+        os.remove(appended)
+        if add:
+            sys.stderr.write(
+                '[aoi_stack] merged %d record(s) into %s and removed the '
+                'duplicate %s\n'
+                % (len(add), os.path.basename(stem),
+                   os.path.basename(appended)))
+        else:
+            sys.stderr.write(
+                '[aoi_stack] removed the duplicate header %s\n'
+                % os.path.basename(appended))
+    except OSError as exc:
+        sys.stderr.write(f'[aoi_stack] could not normalise headers for '
+                         f'{bin_path}: {exc}\n')
+    return stem
+
+
+def envi_grid_signature(bin_path: str):
+    """(samples, lines, map info, projection info, CRS) from the HEADER.
+
+    Read from the ENVI header rather than through GDAL because the
+    header IS the definition at the image level, and because reading it
+    directly cannot be fooled by a second header file.
+    """
+    hdr = existing_hdr(bin_path)
+    if not hdr:
+        return None
+    try:
+        with open(hdr, 'r', errors='replace') as fh:
+            txt = fh.read()
+    except OSError:
+        return None
+
+    def _scalar(key):
+        m = re.search(r'^\s*' + key + r'\s*=\s*(\S+)', txt,
+                      re.IGNORECASE | re.MULTILINE)
+        return m.group(1).strip() if m else ''
+
+    def _record(key):
+        m = re.search(r'^(' + key.replace(' ', r'\s+') + r')\s*=\s*\{(.*?)\}',
+                      txt, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+        return ' '.join(m.group(2).split()) if m else ''
+
+    return {
+        'samples': _scalar('samples'),
+        'lines': _scalar('lines'),
+        'map info': _record('map info'),
+        'projection info': _record('projection info'),
+        'coordinate system string': _record('coordinate system string'),
+        'hdr': hdr,
+    }
+
+
+def check_grid_conformance(paths, label: str = '', log=None) -> dict:
+    """Do all of *paths* share one grid? Reports; changes nothing.
+
+    The AOI's grid -- rows, columns, map info, projection info and
+    coordinate system string -- is the definition of the fire at the
+    image level, and ENVI is where that definition lives. Every input
+    and every derived output for one fire must carry the same five
+    values. This does not force them: forcing would hide the fault. It
+    names the file that deviates, which is what lets the cause be found.
+    """
+    sigs = {}
+    for p in paths:
+        sig = envi_grid_signature(p)
+        if sig:
+            sigs[p] = sig
+    result = {'checked': len(sigs), 'conforming': True, 'deviations': []}
+    if len(sigs) < 2:
+        return result
+
+    keys = ('samples', 'lines', 'map info', 'projection info',
+            'coordinate system string')
+    # The most common signature is taken as the AOI's; anything else
+    # is the deviation, whichever way round the counts fall.
+    from collections import Counter
+    counts = Counter(tuple(s[k] for k in keys) for s in sigs.values())
+    ref = counts.most_common(1)[0][0]
+    for p, s in sorted(sigs.items()):
+        got = tuple(s[k] for k in keys)
+        if got == ref:
+            continue
+        differing = [k for k, a, b in zip(keys, got, ref) if a != b]
+        result['conforming'] = False
+        result['deviations'].append({'path': p, 'fields': differing,
+                                     'got': dict(zip(keys, got))})
+        msg = ('[grid] %s: %s DEVIATES from this AOI in %s '
+               '(%sx%s vs %sx%s)'
+               % (label or 'fire', os.path.basename(p),
+                  ', '.join(differing), got[0], got[1], ref[0], ref[1]))
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+    if result['conforming']:
+        msg = ('[grid] %s: %d product(s) all on one grid %sx%s'
+               % (label or 'fire', len(sigs), ref[0], ref[1]))
+        sys.stderr.write(msg + '\n')
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+    return result
+
+
 def _parse_band_names(hdr_path: str):
     """Read the ``band names = {...}`` block out of an ENVI header.
 
@@ -889,6 +1086,8 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
     # whose header is missing.
     os.replace(tmp_hdr, _hdr_for(out_bin))
     os.replace(tmp_bin, out_bin)
+    # One header per raster, at <stem>.hdr, complete.
+    normalize_envi_header(out_bin)
     for junk in (tmp_bin + '.aux.xml',):
         try:
             os.remove(junk)

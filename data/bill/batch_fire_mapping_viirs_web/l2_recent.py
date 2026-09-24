@@ -936,6 +936,13 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     os.replace(tmp, out_bin)
     if os.path.isfile(hdr_tmp):
         os.replace(hdr_tmp, hdr_out)
+    # Leave exactly one header behind, at <stem>.hdr. GDAL writes the
+    # header for the temporary name, and the rename above can land
+    # beside a header left by an earlier build under the appended
+    # convention; two headers for one raster means GDAL may read the
+    # one without map info.
+    from .aoi_stack import normalize_envi_header
+    normalize_envi_header(out_bin)
 
     newest = max(d for _, d in used)
 

@@ -1093,6 +1093,33 @@ def main():
     # already in the source menu when an analyst opens the fire --
     # and because products are dated, yesterday's stays selectable.
     try:
+        # Is every product of every fire still on that fire's grid?
+        #
+        # Rows, columns, map info, projection info and coordinate
+        # system string are the definition of the AOI at the image
+        # level. This reports a deviation and changes nothing: forcing
+        # the values would conceal whatever produced the odd one out.
+        try:
+            from .aoi_stack import check_grid_conformance
+            import glob as _glob
+            for _fn, _fire in list(app_state.fires.items()):
+                _cb = getattr(_fire, 'crop_bin', '') or ''
+                _dir = os.path.dirname(_cb)
+                if not _dir or not os.path.isdir(_dir):
+                    continue
+                _pfx = os.path.basename(_cb)
+                _m = re.match(r'^\d{8}_stack_(.+?_[0-9a-fA-F]{6,})(?:_|\.)',
+                              _pfx)
+                if not _m:
+                    continue
+                _paths = [q for q in sorted(_glob.glob(os.path.join(
+                              _dir, f'*_stack_{_m.group(1)}*.bin')))
+                          if not any(t in os.path.basename(q) for t in
+                                     ('_nob8', '.kgc', '.post.', '_selected'))]
+                check_grid_conformance(_paths, label=_fn, log=_log)
+        except Exception as _gexc:
+            _log(f'[startup] grid conformance check skipped: {_gexc}')
+
         from .prepare import refresh_products_for_all_fires
         refresh_products_for_all_fires()
         # Catch up on preview rendering for everything already on

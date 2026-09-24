@@ -270,9 +270,15 @@ def scale_raster(src_path: str, out_path: str, params: dict,
                 b.SetDescription(names[i])
             b = None
         o = None
-        hdr = os.path.splitext(out_path)[0] + '.hdr'
-        if not os.path.isfile(hdr) and os.path.isfile(out_path + '.hdr'):
-            os.replace(out_path + '.hdr', hdr)
+        # One header per raster, at <stem>.hdr.
+        #
+        # This used to be "rename the appended header only if the stem one
+        # is missing", which did nothing in the single case that matters:
+        # when BOTH exist, GDAL reads the appended one, and the tool's
+        # appended header carries no map info -- so the raster reported
+        # origin (0, 0) and was rejected from its own AOI.
+        from .aoi_stack import normalize_envi_header
+        normalize_envi_header(out_path)
         return out_path
     except Exception as exc:
         sys.stderr.write(

@@ -654,9 +654,15 @@ def ensure_float32(path: str, work_dir: str, tag: str,
             ob = None
         o = None
         ds = None
-        hdr = os.path.splitext(out)[0] + '.hdr'
-        if not os.path.isfile(hdr) and os.path.isfile(out + '.hdr'):
-            os.replace(out + '.hdr', hdr)
+        # One header per raster, at <stem>.hdr.
+        #
+        # This used to be "rename the appended header only if the stem one
+        # is missing", which did nothing in the single case that matters:
+        # when BOTH exist, GDAL reads the appended one, and the tool's
+        # appended header carries no map info -- so the raster reported
+        # origin (0, 0) and was rejected from its own AOI.
+        from .aoi_stack import normalize_envi_header
+        normalize_envi_header(out)
         msg = (f'  {tag} was ENVI data type {dt}, not 4 (float32); '
                f'converted -> {os.path.basename(out)}')
         sys.stderr.write(msg + '\n')
@@ -741,9 +747,15 @@ def _extract_class_band(selected_bin: str, ref_raster: str,
 
     # Normalise the header name to <name>.hdr, matching every other
     # ENVI product the app writes.
-    hdr = os.path.splitext(out_bin)[0] + '.hdr'
-    if not os.path.isfile(hdr) and os.path.isfile(out_bin + '.hdr'):
-        os.replace(out_bin + '.hdr', hdr)
+    # One header per raster, at <stem>.hdr.
+    #
+    # This used to be "rename the appended header only if the stem one
+    # is missing", which did nothing in the single case that matters:
+    # when BOTH exist, GDAL reads the appended one, and the tool's
+    # appended header carries no map info -- so the raster reported
+    # origin (0, 0) and was rejected from its own AOI.
+    from .aoi_stack import normalize_envi_header
+    normalize_envi_header(out_bin)
     for junk in (out_bin + '.aux.xml',):
         try:
             os.remove(junk)

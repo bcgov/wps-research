@@ -968,7 +968,12 @@ def _viirs_worker(fire: FireInfo) -> None:
             # Render every hint mode for this source BEFORE stashing so
             # the stash is complete and hint toggles are cache hits.
             pregenerate_all_hints(fire)
-            _stash_previews(fire, getattr(fire, 'post_source', 'l2'))
+            # Stash against the stack THIS worker rendered, captured
+            # when the worker started -- not against crop_bin, which
+            # the operator may have moved on to another product while
+            # this ran.
+            _stash_previews(fire, getattr(fire, 'post_source', 'l2'),
+                            path=crop_bin)
             # Build the vector overlays now rather than on first open.
             # This reads the tile shapefile, reprojects every
             # intersecting footprint and rasterizes the per-tile masks

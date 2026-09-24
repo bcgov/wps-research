@@ -810,9 +810,15 @@ def restrict_hint_to_bcws(fire: FireInfo, hint_path: str,
         ods = None
         hds = None
         pds = None
-        hdr = os.path.splitext(out)[0] + '.hdr'
-        if not os.path.isfile(hdr) and os.path.isfile(out + '.hdr'):
-            os.replace(out + '.hdr', hdr)
+        # One header per raster, at <stem>.hdr.
+        #
+        # This used to be "rename the appended header only if the stem one
+        # is missing", which did nothing in the single case that matters:
+        # when BOTH exist, GDAL reads the appended one, and the tool's
+        # appended header carries no map info -- so the raster reported
+        # origin (0, 0) and was rejected from its own AOI.
+        from .aoi_stack import normalize_envi_header
+        normalize_envi_header(out)
         emit(f'[hint] restricted to BCWS perimeter: {before:,} -> '
              f'{after:,} px')
         return out
@@ -1094,7 +1100,8 @@ def _defer_pregenerate_hints(fire: FireInfo) -> None:
                      name=f'hints-{fire.fire_numbe}').start()
 
 
-def build_derived_hint_for_fire(fire: FireInfo, mode: str):
+def build_derived_hint_for_fire(fire: FireInfo, mode: str,
+                                stack_path: str = ''):
     """Build whichever derived hint *mode* names.
 
     Single entry point so the call sites -- switch, prepare, re-prepare,
@@ -1104,7 +1111,14 @@ def build_derived_hint_for_fire(fire: FireInfo, mode: str):
     """
     if mode == 'bcws_perimeter':
         return build_bcws_hint_for_fire(fire)
-    return build_redwins_hint_for_fire(fire, mode)
+    # stack_path names the product to read when it is not the one the
+    # fire currently points at -- rendering a hint for a layer in the
+    # Sources list without switching to it. build_redwins_hint_for_fire
+    # has always taken it; this entry point dropped it, so those calls
+    # died with TypeError and the hint silently fell back to the plain
+    # post-fire image. That is why hint.png equals post.png in several
+    # preview directories.
+    return build_redwins_hint_for_fire(fire, mode, stack_path)
 
 
 def build_bcws_hint_for_fire(fire: FireInfo):
@@ -1679,6 +1693,32 @@ def _stash_previews(fire: FireInfo, source: str,
     if not os.path.isdir(src):
         return
     dst = _preview_stash_dir(fire, source, l2_date, path=path)
+
+    # The stamp decides where these images may be filed, not the
+    # caller.
+    #
+    # This copy is DESTRUCTIVE -- it removes the destination first --
+    # so filing it under the wrong key does not merely add a wrong
+    # copy, it destroys the right one. That is what happened: a
+    # background render finished holding one product's images while
+    # the fire had already been switched to another, the destination
+    # was resolved from crop_bin, and a September product ended up
+    # showing August imagery with no error reported anywhere.
+    #
+    # previews/.product records which product actually rendered the
+    # images now sitting in that directory. If it disagrees with where
+    # they are about to be filed, the copy is refused. Refusing costs
+    # one re-render; proceeding silently corrupts a product.
+    stamped = previews_product(src)
+    want = os.path.basename(dst)
+    want = want[len('previews_'):] if want.startswith('previews_') else ''
+    if stamped and want and stamped != want:
+        sys.stderr.write(
+            f'[prepare] {getattr(fire, "fire_numbe", "?")}: REFUSING to '
+            f'stash previews rendered from {stamped} under {want} -- '
+            f'the live previews belong to a different product\n')
+        return
+
     try:
         if os.path.isdir(dst):
             shutil.rmtree(dst, ignore_errors=True)
@@ -2507,7 +2547,10 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         # Snapshot now that previews/ holds this source's images AND
         # all of its hint overlays, so a later switch back restores
         # everything.
-        _stash_previews(fire, source)
+        # Name the product explicitly rather than letting the stash
+        # resolve it from crop_bin. The value is the same at this
+        # point, but stating it makes the intent checkable.
+        _stash_previews(fire, source, path=info.get('path'))
 
     # Return the fire to READY. The switch rebuilds the same artifacts
     # preparation produces, so a fire that was mid-prepare (or errored
