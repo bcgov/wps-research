@@ -4546,17 +4546,14 @@ async function openMrapDatePicker(dlg, list, note, prog) {
             return `<label style="display:flex;gap:8px;align-items:center;
                         padding:3px 0;cursor:pointer">
                 <input type="checkbox" name="mrap-date" value="${d.date}"
-                       ${_haveProduct('mrap_p' + d.date)
+                       ${d.ready
                          ? 'disabled title="Already built"' : ''}
                        ${d.date === cur ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="font-family:monospace">${d.date}</span>
-                <span style="color:${(d.ready
-                        || _haveProduct('mrap_p' + d.date))
-                        ? '#2a7' : '#888'};
+                <span style="color:${d.ready ? '#2a7' : '#888'};
                              font-size:11px">
-                    ${(d.ready || _haveProduct('mrap_p' + d.date))
-                      ? 'ready' : 'builds on apply'}</span>
+                    ${d.ready ? 'ready' : 'builds on apply'}</span>
                 <span style="color:#aaa;font-size:11px">
                     ${gb ? gb + ' GB' : ''}</span>
             </label>`;
@@ -4631,15 +4628,16 @@ async function openDatePicker() {
         list.innerHTML = _dateRows.map((d) => {
             const pretty = `${d.date.slice(0, 4)}-${d.date.slice(4, 6)}`
                 + `-${d.date.slice(6, 8)}`;
-            // One truth for the tick and the label.
+            // One truth for the tick and the label: the SERVER's.
             //
-            // The checkbox was disabled from the client's product list
-            // while the label came only from the server's flag, so the
-            // two could disagree -- and did: a date whose checkbox was
-            // greyed out as "Already built" still read "builds on
-            // apply". Either source saying the product exists is
-            // enough.
-            const _isBuilt = d.built || _haveProduct('l2_d' + d.date);
+            // d.built is recomputed from disk every time this dialog
+            // opens -- the stack, its header and its date sidecar all
+            // present. The client's product list is a cache, and after
+            // deleting a product it still claimed the product existed,
+            // so a date that had just been deleted was offered as
+            // "ready". Whichever answer is fresher should win, and
+            // that is always the server's.
+            const _isBuilt = !!d.built;
             const built = _isBuilt
                 ? '<span style="color:#2d8a4e">ready</span>'
                 : '<span style="color:#888">builds on apply</span>';
@@ -4661,7 +4659,7 @@ async function openDatePicker() {
                             font-size:12px;cursor:pointer">
                 <input type="checkbox" name="l2-date" class="date-pick"
                        value="${d.date}"
-                       ${_haveProduct('l2_d' + d.date)
+                       ${_isBuilt
                          ? 'disabled title="Already built"' : ''}
                        ${d.date === sel ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>

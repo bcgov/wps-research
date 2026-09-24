@@ -2871,6 +2871,14 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         set_prep_stage(fire, stage_for_stack_detail(detail),
                        detail=str(detail or ''), frac=frac)
 
+    # An explicit request wins; otherwise the newest acquisition over
+    # this AOI, which is what "L2 recent" means.
+    _creation_l2_date = getattr(fire, 'l2_start_date', '') or ''
+    if (not _creation_l2_date
+            and (getattr(fire, 'post_source', 'l2') or 'l2') == 'l2'):
+        _creation_l2_date = l2_reference_date(
+            fire, bbox=(crop_xmin, crop_ymin, crop_xmax, crop_ymax))
+
     try:
         stack_info = ensure_aoi_stack(
             fire_numbe,
@@ -2879,9 +2887,16 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             instance_key=getattr(state, 'shared_root', '') or '',
             post_source=getattr(fire, 'post_source', 'l2') or 'l2',
             ref_raster=ref_raster,
-            # Per-date L2 composites: empty means 'most recent',
-            # which is the historical behaviour.
-            l2_start_date=getattr(fire, 'l2_start_date', ''))
+            # Date the L2 product by the DATA it contains.
+            #
+            # An empty start date produced <prefix>_l2.bin, whose key
+            # is taken from the mosaic date in the filename -- so a
+            # composite built from the 21 September acquisition was
+            # listed as 23 September, the date of the mosaic that
+            # happened to be newest. Naming the acquisition makes the
+            # file <prefix>_l2_d<acq>.bin and the listed date the one
+            # the imagery actually came from.
+            l2_start_date=_creation_l2_date)
     except AoiStackError as exc:
         _set_fire_status(fire, FireStatus.ERROR,
                          f'AOI stack build failed: {exc}')
@@ -3120,35 +3135,37 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     # is exactly the churn that made a freshly prepared fire announce
     # that it was being prepared all over again.
     def _build_other():
-        other = ('mrap' if (getattr(fire, 'post_source', 'l2') or 'l2')
-                 == 'l2' else 'l2')
+        # Named for what it used to do -- build "the other source".
+        # It now ensures BOTH default products, because which one is
+        # missing depends on the two reference dates, not on which
+        # source the fire happens to be pointing at.
         try:
             if fire_numbe not in state.fires:
                 return                      # deleted while preparing
-            from .aoi_stack import ensure_aoi_stack, AoiStackError
-            info = ensure_aoi_stack(
-                fire_numbe, fire.bbox_native,
-                instance_key=getattr(state, 'shared_root', '') or '',
-                post_source=other, ref_raster=ref_raster,
-                l2_start_date='')
-            _p2 = (info or {}).get('path', '')
+            # Both default products, each dated by its own reference
+            # date -- the same routine the start-up refresh uses, so a
+            # fire created today and a fire refreshed tomorrow end up
+            # with the same rule applied.
+            #
+            # This built only "the other source" with no date, which
+            # is why a new fire could end up with an L2 product and no
+            # MRAP composite for the newest mosaic.
+            _res = ensure_default_products(fire)
             sys.stderr.write(
-                f'[prepare] {fire_numbe}: second default product '
-                f'({other}) ready: {os.path.basename(_p2)}\n')
-            try:
-                warm_product_artifacts(fire, _p2)
-            except Exception as wexc:
-                sys.stderr.write(
-                    f'[prepare] {fire_numbe}: warm failed: {wexc}\n')
+                f'[prepare] {fire_numbe}: default products -- '
+                f'built {_res["built"] or "none"}, '
+                f'already present {_res["skipped"] or "none"} '
+                f'(MRAP ref {_res["mrap"] or "?"}, '
+                f'L2 ref {_res["l2"] or "?"})\n')
             from .durable import mirror_in_background
             mirror_in_background()
         except AoiStackError as exc:
             sys.stderr.write(
-                f'[prepare] {fire_numbe}: {other} not available: '
-                f'{exc}\n')
+                f'[prepare] {fire_numbe}: default products not '
+                f'available: {exc}\n')
         except Exception as exc:
             sys.stderr.write(
-                f'[prepare] {fire_numbe}: {other} build failed: '
+                f'[prepare] {fire_numbe}: default products failed: '
                 f'{type(exc).__name__}: {exc}\n')
 
     threading.Thread(target=_build_other, daemon=True,
@@ -3671,6 +3688,168 @@ def s2_acquired_on(fire, day: str):
         return None
 
 
+# ---------------------------------------------------------------
+# Reference dates
+# ---------------------------------------------------------------
+# A product's date is the date of the DATA it was built from, and the
+# two kinds of product get their dates from two independent places:
+#
+#   MRAP composite : the date of the newest <date>_mrap.bin in
+#                    /data/mrap_bc -- a province-wide mosaic produced
+#                    by a cron job outside this application.
+#   L2 recent      : the newest Sentinel-2 acquisition for which a zip
+#                    exists on a tile intersecting THIS AOI.
+#
+# They routinely differ: the mosaic turns over nightly whether or not
+# Sentinel-2 passed over a particular fire. The refresh used to ask
+# only "was this AOI imaged on the mosaic's date?" and skip BOTH
+# products when the answer was no -- so a genuinely new province-wide
+# mosaic was never clipped for the fire, and when a build did happen
+# the L2 product was labelled with the mosaic's date rather than the
+# acquisition it actually contains.
+
+def mrap_reference_date() -> str:
+    """Date of the newest province-wide mosaic, or '' if unknown."""
+    try:
+        from .aoi_stack import find_latest_mrap
+        return (find_latest_mrap() or ('', ''))[0] or ''
+    except Exception as exc:
+        sys.stderr.write(f'[refdate] no MRAP mosaic available: {exc}\n')
+        return ''
+
+
+def l2_reference_date(fire: FireInfo, bbox=None) -> str:
+    """Newest Sentinel-2 acquisition available over this AOI, or ''.
+
+    '' means "could not be determined" -- not "none exists" -- so the
+    caller leaves the L2 product alone rather than building one with a
+    date it cannot justify.
+
+    *bbox* overrides the fire's own: during creation the crop box is
+    known before it has been stored on the fire.
+    """
+    try:
+        from .l2_recent import available_acq_dates
+        ref = (state.rasters_by_year.get(fire.fire_year)
+               or state.raster_path)
+        box = bbox if bbox is not None else fire.bbox_native
+        dates = available_acq_dates(box, ref_raster=ref)
+        return (dates[0]['date'] if dates else '')
+    except Exception as exc:
+        sys.stderr.write(
+            f'[refdate] {getattr(fire, "fire_numbe", "?")}: Sentinel-2 '
+            f'dates unavailable ({exc})\n')
+        return ''
+
+
+def existing_product_keys(fire: FireInfo) -> set:
+    """Product keys already on disk for this fire."""
+    keys = set()
+    try:
+        cb = getattr(fire, 'crop_bin', '') or ''
+        d = os.path.dirname(cb)
+        m = re.match(r'^\d{8}_stack_(.+?_[0-9a-fA-F]{6,})(?:_|\.)',
+                     os.path.basename(cb))
+        if not d or not m or not os.path.isdir(d):
+            return keys
+        for cand in glob.glob(os.path.join(
+                d, f'*_stack_{m.group(1)}*.bin')):
+            bn = os.path.basename(cand)
+            if any(t in bn for t in ('_nob8', '.kgc', '.post.',
+                                     '_selected')):
+                continue
+            k = product_key_for_path(cand)
+            if k:
+                keys.add(k)
+    except Exception as exc:
+        sys.stderr.write(
+            f'[refdate] {getattr(fire, "fire_numbe", "?")}: could not '
+            f'enumerate products ({exc})\n')
+    return keys
+
+
+def ensure_default_products(fire: FireInfo, log=None) -> dict:
+    """Give this fire the newest product of BOTH kinds, each dated by
+    its own reference date. Builds only what is missing.
+
+    Used by fire creation and by the start-up refresh, so the two can
+    never disagree about what "the newest products" means. Every case
+    is handled the same way, by asking each kind separately:
+
+      new mosaic, no new acquisition -> MRAP built, L2 left alone
+      new acquisition, no new mosaic -> L2 built, MRAP left alone
+      both new                       -> both built
+      neither new                    -> nothing built
+
+    A product whose key already exists is never rebuilt, which is what
+    keeps a quiet week from accumulating identical layers under
+    different dates.
+    """
+    out = {'mrap': '', 'l2': '', 'built': [], 'skipped': []}
+    if not fire or not getattr(fire, 'bbox_native', None):
+        return out
+
+    def _say(msg):
+        sys.stderr.write(msg + '\n')
+        try:
+            fire.console_log.append(msg)
+        except Exception:
+            pass
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    from .aoi_stack import ensure_aoi_stack, AoiStackError
+    inst = getattr(state, 'shared_root', '') or ''
+    ref = (state.rasters_by_year.get(fire.fire_year)
+           or state.raster_path)
+    have = existing_product_keys(fire)
+    fn = getattr(fire, 'fire_numbe', '?')
+
+    out['mrap'] = mrap_reference_date()
+    out['l2'] = l2_reference_date(fire)
+
+    wanted = []
+    if out['mrap']:
+        wanted.append(('mrap', f'mrap_p{out["mrap"]}',
+                       {'mrap_date': out['mrap']}))
+    if out['l2']:
+        wanted.append(('l2', f'l2_d{out["l2"]}',
+                       {'l2_start_date': out['l2']}))
+
+    for src, key, kw in wanted:
+        if key in have:
+            out['skipped'].append(key)
+            _say(f'[refresh] {fn}: {key} is already present; not '
+                 f'rebuilding it')
+            continue
+        try:
+            info = ensure_aoi_stack(
+                fire.fire_numbe, fire.bbox_native,
+                instance_key=inst, post_source=src,
+                ref_raster=ref, **kw)
+            path = (info or {}).get('path', '')
+            out['built'].append(key)
+            _say(f'[refresh] {fn}: built {key} from '
+                 f'{os.path.basename(path)}')
+            try:
+                warm_product_artifacts(fire, path)
+            except Exception as wexc:
+                sys.stderr.write(f'[refresh] {fn}: warm failed: {wexc}\n')
+        except AoiStackError as exc:
+            _say(f'[refresh] {fn}: {key} could not be built: {exc}')
+        except Exception as exc:
+            _say(f'[refresh] {fn}: {key} could not be built: '
+                 f'{type(exc).__name__}: {exc}')
+
+    if not wanted:
+        _say(f'[refresh] {fn}: neither reference date could be '
+             f'determined; nothing built')
+    return out
+
+
 def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
     """Build today's MRAP and L2 composites for every existing fire.
 
@@ -3735,76 +3914,19 @@ def refresh_products_for_all_fires(delay_s: float = 20.0) -> None:
                     # whatever is next created with that name.
                     skipped += 1
                     continue
-                from .aoi_stack import (ensure_aoi_stack, AoiStackError,
-                                        find_latest_mrap)
-                inst = getattr(state, 'shared_root', '') or ''
-                ref = (state.rasters_by_year.get(fire.fire_year)
-                       or state.raster_path)
-
-                # Nothing new to composite? Then build nothing.
+                # One routine decides what "the newest products" are,
+                # shared with fire creation so the two cannot drift.
                 #
-                # Both of today's products would be made from exactly
-                # the imagery in yesterday's, differing only by a
-                # timestamp -- a duplicate layer that also carries no
-                # cloud figure, because there was no acquisition to
-                # report one for. If ANY intersecting tile was imaged,
-                # both are built as usual; if the answer cannot be
-                # determined, both are built as usual.
-                _day = ''
-                try:
-                    _day = (find_latest_mrap() or ('', ''))[0] or ''
-                except Exception:
-                    _day = ''
-                if _day:
-                    _got = s2_acquired_on(fire, _day)
-                    if _got is False:
-                        skipped += 1
-                        msg = (f'[refresh] {fn}: no Sentinel-2 '
-                               f'acquisition over this AOI on {_day}; '
-                               f'today\'s L2 and MRAP composites would '
-                               f'duplicate the previous ones, so '
-                               f'neither was built')
-                        sys.stderr.write(msg + '\n')
-                        # Also on the fire's own console, where an
-                        # operator looking for today's product will
-                        # see why there isn't one.
-                        try:
-                            fire.console_log.append(msg)
-                        except Exception:
-                            pass
-                        continue
-                    if _got is True:
-                        sys.stderr.write(
-                            f'[refresh] {fn}: Sentinel-2 imaged this '
-                            f'AOI on {_day}; building both products\n')
-
-                for src in ('mrap', 'l2'):
-                    try:
-                        info = ensure_aoi_stack(
-                            fire.fire_numbe, fire.bbox_native,
-                            instance_key=inst, post_source=src,
-                            ref_raster=ref, l2_start_date='')
-                        path = (info or {}).get('path', '')
-                        if (info or {}).get('rebuilt'):
-                            sys.stderr.write(
-                                f'[startup] {fn}: built '
-                                f'{os.path.basename(path)}\n')
-                        # Previews and hints too, so the first switch
-                        # after a restart is a file read rather than a
-                        # render.
-                        try:
-                            warm_product_artifacts(fire, path)
-                        except Exception as wexc:
-                            sys.stderr.write(
-                                f'[startup] {fn}: warm failed: '
-                                f'{wexc}\n')
-                    except AoiStackError as exc:
-                        sys.stderr.write(
-                            f'[startup] {fn}: {src}: {exc}\n')
-                    except Exception as exc:
-                        sys.stderr.write(
-                            f'[startup] {fn}: {src}: '
-                            f'{type(exc).__name__}: {exc}\n')
+                # This replaces a single gate that asked "was this AOI
+                # imaged on the MRAP mosaic's date?" and skipped BOTH
+                # products when the answer was no. A new province-wide
+                # mosaic was then never clipped for the fire, which is
+                # exactly the 20260923 MRAP composite that never
+                # appeared.
+                _res = ensure_default_products(fire)
+                if not _res['built']:
+                    skipped += 1
+                    continue
                 built += 1
             except Exception as exc:
                 failed += 1

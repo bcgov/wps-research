@@ -4545,12 +4545,19 @@ class FireRoutes:
                 hits = []
                 for c in cands:
                     hits.extend(_g.glob(c))
-                # The newest date's default product has no date suffix,
-                # so its glob also matches the dated ones; drop those.
+                # "ready" must describe the product APPLY WOULD REUSE.
+                #
+                # Apply sets l2_start_date and switches, and that path
+                # targets the DATED stack, _l2_d<date>.bin. The default
+                # _l2.bin holds the newest acquisition too, so counting
+                # it here marked the newest date ready when only the
+                # default existed -- and kept saying "ready" after the
+                # operator deleted that date's product from Sources,
+                # while Apply would in fact rebuild it. Judge the dated
+                # file and nothing else; this also drops the default
+                # that the newest date's wider glob picks up.
                 if d['date'] == newest:
                     hits = [h for h in hits
-                            if not re.search(r'_l2_d\d{8}\.bin$', h)] \
-                        or [h for h in hits
                             if h.endswith(f"_l2_d{d['date']}.bin")]
                 # "ready" must mean COMPLETE, not merely present.
                 #
