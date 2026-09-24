@@ -573,6 +573,32 @@ def _durable_dir() -> str:
         return ''
 
 
+def grid_is_for_bbox(grid, width: int, height: int, gt,
+                     tol_px: float = 0.01) -> bool:
+    """Is *grid* the grid this bounding box implies?
+
+    Compares against the window already derived from the bounding box,
+    rather than re-deriving it here, so there is exactly one derivation
+    and this cannot disagree with it.
+
+    Equality, not containment: a pin that merely covers the rectangle
+    can belong to a different rectangle entirely -- which is what a
+    deleted-and-recreated fire inherits.
+    """
+    try:
+        px, py = abs(gt[1]), abs(gt[5])
+        if not px or not py:
+            return False
+        return (int(grid['width']) == int(width)
+                and int(grid['height']) == int(height)
+                and abs(float(grid['gt'][0]) - float(gt[0])) <= tol_px * px
+                and abs(float(grid['gt'][3]) - float(gt[3])) <= tol_px * py
+                and abs(abs(float(grid['gt'][1])) - px) <= 1e-9
+                and abs(abs(float(grid['gt'][5])) - py) <= 1e-9)
+    except Exception:
+        return False
+
+
 def grid_contains_bbox(grid, bbox_native, slack_px: float = 0.5) -> bool:
     """Does a pinned grid still cover the AOI it was pinned for?"""
     try:
@@ -865,12 +891,30 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         # nothing to do with the fire. The window computed above is
         # used only to ESTABLISH the grid the first time.
         _pin = load_pinned_grid(out_bin)
-        if _pin and not grid_contains_bbox(
-                _pin, (xmin, ymin, xmax, ymax)):
+        if _pin and not grid_is_for_bbox(_pin, xsize, ysize, win_gt):
+            # The pin belongs to a DIFFERENT rectangle.
+            #
+            # "Does it cover the bbox?" was the wrong question. A pin
+            # from a deleted fire covers a smaller rectangle drawn in
+            # the same place, so a fire deleted and recreated inherited
+            # the dead fire's footprint: every product was built on it
+            # and then rejected by the products scan for not matching
+            # the fire's own bounding box -- which is why a newly
+            # created fire showed no MRAP composite even though one had
+            # just been built.
+            #
+            # The drawn rectangle is the authority. The pin protects
+            # against a SOURCE raster shifting the window, not against
+            # the operator drawing a new AOI. Because the window above
+            # is pixel-snapped, re-deriving it from an unchanged
+            # bounding box gives the same answer every time, so this
+            # still cannot drift.
             sys.stderr.write(
-                '[aoi_stack] the pinned AOI grid %dx%d no longer covers '
-                'this bounding box; re-pinning from the current one\n'
-                % (_pin['width'], _pin['height']))
+                '[aoi_stack] the pinned AOI grid %dx%d at (%.3f, %.3f) '
+                'is not the grid this bounding box implies (%dx%d at '
+                '(%.3f, %.3f)); re-pinning from the rectangle\n'
+                % (_pin['width'], _pin['height'], _pin['gt'][0],
+                   _pin['gt'][3], xsize, ysize, win_gt[0], win_gt[3]))
             _pin = None
         if _pin:
             win_gt = tuple(_pin['gt'])

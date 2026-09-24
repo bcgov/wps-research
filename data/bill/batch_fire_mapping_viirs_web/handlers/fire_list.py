@@ -544,17 +544,31 @@ class FireListRoutes:
             for _root in _roots:
                 if not _root or not os.path.isdir(_root):
                     continue
-                for f in glob.glob(os.path.join(
-                        _root, f'*_stack_{_safe0}_{_h0}*')):
-                    try:
-                        if os.path.isdir(f):
-                            shutil.rmtree(f, ignore_errors=True)
-                        else:
-                            os.remove(f)
-                        _gone += 1
-                    except OSError as exc:
-                        sys.stderr.write(
-                            f'[remove] {os.path.basename(f)}: {exc}\n')
+                # The stacks AND the fire's pinned footprint.
+                #
+                # aoi_grid_<safe>_<hash>.json does not match
+                # '*_stack_...', so it used to outlive the fire. Since
+                # the identity hash is derived from the fire NUMBER,
+                # recreating a fire with the same number inherited the
+                # deleted one's footprint: every product was then built
+                # on a dead fire's grid and rejected by the products
+                # scan for not matching the new rectangle -- which is
+                # why a freshly created fire could show no MRAP
+                # composite even though one had just been built.
+                _pats = [f'*_stack_{_safe0}_{_h0}*',
+                         f'aoi_grid_{_safe0}_{_h0}.json']
+                for _pat in _pats:
+                    for f in glob.glob(os.path.join(_root, _pat)):
+                        try:
+                            if os.path.isdir(f):
+                                shutil.rmtree(f, ignore_errors=True)
+                            else:
+                                os.remove(f)
+                            _gone += 1
+                        except OSError as exc:
+                            sys.stderr.write(
+                                f'[remove] {os.path.basename(f)}: '
+                                f'{exc}\n')
             # Clustering work directories are NOT matched by name.
             #
             # 'kgc_K51490_*' also matches 'kgc_K51490_ash_...', and so

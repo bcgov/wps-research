@@ -622,7 +622,7 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         ref = None
 
     from .aoi_stack import (_window_for_bbox, load_pinned_grid,
-                            grid_contains_bbox)
+                            grid_is_for_bbox)
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
         gt, rW, rH, xmin, ymin, xmax, ymax)
@@ -636,8 +636,12 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     # once -- and when the two answers differed by a column, the
     # product built from this buffer differed from every other product
     # of the same fire. One grid, one source of truth.
+    # The same equality test the stack builder uses: a pin that merely
+    # COVERS this rectangle may belong to a different one -- a deleted
+    # fire's, for instance -- and cutting the post-fire buffer to it
+    # would put this product on a grid the fire does not own.
     _pin = load_pinned_grid(out_bin)
-    if _pin and grid_contains_bbox(_pin, (xmin, ymin, xmax, ymax)):
+    if _pin and grid_is_for_bbox(_pin, xsize, ysize, win_gt):
         win_gt = tuple(_pin['gt'])
         xsize, ysize = _pin['width'], _pin['height']
         xoff = int(round((win_gt[0] - gt[0]) / gt[1]))
