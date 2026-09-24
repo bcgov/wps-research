@@ -744,6 +744,19 @@ def _viirs_worker(fire: FireInfo) -> None:
                           detail=f'AOI stack: {detail}',
                           fraction=0.05 + 0.20 * float(frac))
 
+        # An explicit request wins; otherwise the newest Sentinel-2
+        # acquisition over this AOI, which is what "L2 recent" means.
+        _initial_l2_date = getattr(fire, 'l2_start_date', '') or ''
+        if (not _initial_l2_date
+                and (getattr(fire, 'post_source', 'l2') or 'l2') == 'l2'):
+            try:
+                from .prepare import l2_reference_date
+                _initial_l2_date = l2_reference_date(fire)
+            except Exception as _rexc:
+                sys.stderr.write(
+                    f'[viirs_worker] {fire.fire_numbe}: L2 reference '
+                    f'date unavailable ({_rexc}); building the default\n')
+
         try:
             stack_info = ensure_aoi_stack(
                 fire.fire_numbe, fire.bbox_native,
@@ -752,9 +765,16 @@ def _viirs_worker(fire: FireInfo) -> None:
                 post_source=getattr(fire, 'post_source', 'l2') or 'l2',
                 ref_raster=ref_raster,
                 log_cb=lambda m: fire.console_log.append(m.rstrip()),
-            # Per-date L2 composites: empty means 'most recent',
-            # which is the historical behaviour.
-            l2_start_date=getattr(fire, 'l2_start_date', ''))
+            # Date the L2 product by the DATA it contains.
+            #
+            # An empty start date produces <prefix>_l2.bin, whose key
+            # is taken from the MOSAIC date in the filename -- so a
+            # composite built from the 21 September acquisition was
+            # listed as 23 September, the date of the province-wide
+            # mosaic that happened to be newest. Naming the acquisition
+            # makes the file <prefix>_l2_d<acq>.bin, and the date shown
+            # in Sources is then the date of the imagery in it.
+            l2_start_date=_initial_l2_date)
         except AoiStackError as exc:
             raise WorkerError(f'AOI stack build failed: {exc}')
         crop_bin = stack_info['path']
@@ -974,6 +994,39 @@ def _viirs_worker(fire: FireInfo) -> None:
             # this ran.
             _stash_previews(fire, getattr(fire, 'post_source', 'l2'),
                             path=crop_bin)
+
+            # A new fire gets BOTH default products, each dated by its
+            # own reference date.
+            #
+            # Initial prepare builds one source -- whichever the fire
+            # points at -- and nothing here ever built the other, so a
+            # newly created fire had an L2 product and no MRAP
+            # composite at all. ensure_default_products asks the two
+            # reference dates separately and builds only what is
+            # missing, which is the same rule the start-up refresh
+            # applies.
+            def _defaults():
+                try:
+                    if fire.fire_numbe not in state.fires:
+                        return          # deleted while preparing
+                    from .prepare import ensure_default_products
+                    res = ensure_default_products(fire)
+                    sys.stderr.write(
+                        f'[viirs_worker] {fire.fire_numbe}: default '
+                        f'products -- built {res["built"] or "none"}, '
+                        f'already present {res["skipped"] or "none"} '
+                        f'(MRAP ref {res["mrap"] or "?"}, '
+                        f'L2 ref {res["l2"] or "?"})\n')
+                    from .durable import mirror_in_background
+                    mirror_in_background()
+                except Exception as dexc:
+                    sys.stderr.write(
+                        f'[viirs_worker] {fire.fire_numbe}: default '
+                        f'products failed: {type(dexc).__name__}: '
+                        f'{dexc}\n')
+
+            threading.Thread(target=_defaults, daemon=True,
+                             name=f'defaults-{fire.fire_numbe}').start()
             # Build the vector overlays now rather than on first open.
             # This reads the tile shapefile, reprojects every
             # intersecting footprint and rasterizes the per-tile masks
