@@ -2045,6 +2045,18 @@ class FireRoutes:
             self._send_json({'error': str(exc), 'passes': []})
 
     def handle_api_preview(self, fire_numbe, view):
+        # Bound HERE, before any use.
+        #
+        # This name was imported only inside two branches far below,
+        # which made Python treat it as a local for the WHOLE function:
+        # the use ~150 lines earlier then raised UnboundLocalError,
+        # every direct preview render failed with "cannot access local
+        # variable 'stack_path_for_product'", and each one fell back to
+        # a full fire switch. Those switches render into the shared
+        # previews/ directory, so a switch racing the warm queue wrote
+        # two products' images into one place -- which is how a product
+        # ended up displayed at the wrong footprint.
+        from ..prepare import stack_path_for_product
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
             self._send_json({'error': 'Fire not found'}, 404)
@@ -2415,8 +2427,7 @@ class FireRoutes:
             _mp = os.path.join(_mdir, f'hintmask_{mode}.png')
             if not os.path.isfile(_mp):
                 try:
-                    from ..prepare import (render_hint_mask_for_product,
-                                           stack_path_for_product)
+                    from ..prepare import render_hint_mask_for_product
                     _stk = stack_path_for_product(fire, _req_key)
                     if _stk:
                         render_hint_mask_for_product(
@@ -2481,8 +2492,7 @@ class FireRoutes:
                     # later render used its imagery. Nothing below
                     # touches the loaded product.
                     try:
-                        from ..prepare import (render_hint_for_product,
-                                               stack_path_for_product)
+                        from ..prepare import render_hint_for_product
                         _stk = stack_path_for_product(fire, _req_key)
                         if _stk and render_hint_for_product(
                                 fire, mode, _stk, _stash_dir):

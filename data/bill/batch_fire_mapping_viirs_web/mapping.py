@@ -8,6 +8,7 @@ shared ``state`` (only ``state.raster_gt`` for pixel area) is wired by
 
 import json
 import os
+import threading
 import re
 import sys
 import traceback
@@ -539,6 +540,11 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
     with different padding), uses GDAL geotransforms to place it at
     the correct geographic position rather than naively stretching.
     """
+    # Bound here: it was imported only in the outer except
+    # clause below, which made it a local for the whole
+    # function -- so the geo-alignment handler raised
+    # UnboundLocalError instead of reporting its error.
+    import traceback
     try:
         # Composite onto a NAMED product's preview when asked.
         #
@@ -714,7 +720,8 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
             rgba[mask, 2] = b
             rgba[mask, 3] = 0.7
             out_path = os.path.join(_pdir, f'{out_name}.png')
-            _tmp = out_path + '.tmp.png'
+            _tmp = out_path + '.tmp%d_%d.png' % (os.getpid(),
+                                                 threading.get_ident())
             imsave(_tmp, np.clip(rgba, 0, 1))
             os.replace(_tmp, out_path)
             record_preview_geo(fire.cache_dir, fire.crop_bin,
@@ -751,7 +758,8 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
         # Atomic for the same reason as preview.py: overlays are
         # rewritten by prebuilds and re-renders while the page may be
         # fetching them.
-        _tmp = out_path + '.tmp.png'
+        _tmp = out_path + '.tmp%d_%d.png' % (os.getpid(),
+                                                 threading.get_ident())
         imsave(_tmp, np.clip(result, 0, 1))
         os.replace(_tmp, out_path)
         # The PNG is in the CURRENT crop's space; record that so split
@@ -770,7 +778,6 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
                 and not out_name.startswith('hint_')):
             fire.available_views.append(out_name)
     except Exception as exc:
-        import traceback
         sys.stderr.write(
             f'[overlay] WARNING: Failed to generate {out_name} '
             f'overlay: {exc}\n{traceback.format_exc()}')
