@@ -778,6 +778,45 @@ def _viirs_worker(fire: FireInfo) -> None:
         except AoiStackError as exc:
             raise WorkerError(f'AOI stack build failed: {exc}')
         crop_bin = stack_info['path']
+
+        # The second default product, built HERE and synchronously.
+        #
+        # A new fire must end up with both an MRAP composite and an L2
+        # recent product. Doing this in a background thread near the
+        # end of the worker left too many ways to miss it, and missing
+        # it is exactly what happened: fires were created with an L2
+        # product and no MRAP composite of any date. The clip from the
+        # province-wide mosaic is a windowed read, so the cost of doing
+        # it inline is small compared with the L2 composite that has
+        # just finished.
+        #
+        # Reference dates are independent: the MRAP composite is dated
+        # by the newest <date>_mrap.bin in /data/mrap_bc, the L2 recent
+        # product by the newest Sentinel-2 acquisition over this AOI.
+        # Whichever of the two the primary build above already made is
+        # skipped rather than rebuilt.
+        try:
+            fire.crop_bin = crop_bin        # so the enumeration sees it
+            from .prepare import ensure_default_products
+            _res = ensure_default_products(fire)
+            fire.console_log.append(
+                f'[defaults] MRAP reference {_res["mrap"] or "unknown"}, '
+                f'L2 reference {_res["l2"] or "unknown"}; '
+                f'built {", ".join(_res["built"]) or "nothing"}'
+                + (f'; already present {", ".join(_res["skipped"])}'
+                   if _res['skipped'] else ''))
+            sys.stderr.write(
+                f'[viirs_worker] {fire.fire_numbe}: default products -- '
+                f'MRAP ref {_res["mrap"] or "?"}, L2 ref '
+                f'{_res["l2"] or "?"}, built {_res["built"] or "none"}, '
+                f'present {_res["skipped"] or "none"}\n')
+        except Exception as _dexc:
+            msg = (f'[defaults] second default product failed: '
+                   f'{type(_dexc).__name__}: {_dexc}')
+            fire.console_log.append(msg)
+            sys.stderr.write(
+                f'[viirs_worker] {fire.fire_numbe}: {msg}\n')
+
         if fire.cancel_event.is_set():
             raise WorkerCancelled()
 
@@ -995,38 +1034,6 @@ def _viirs_worker(fire: FireInfo) -> None:
             _stash_previews(fire, getattr(fire, 'post_source', 'l2'),
                             path=crop_bin)
 
-            # A new fire gets BOTH default products, each dated by its
-            # own reference date.
-            #
-            # Initial prepare builds one source -- whichever the fire
-            # points at -- and nothing here ever built the other, so a
-            # newly created fire had an L2 product and no MRAP
-            # composite at all. ensure_default_products asks the two
-            # reference dates separately and builds only what is
-            # missing, which is the same rule the start-up refresh
-            # applies.
-            def _defaults():
-                try:
-                    if fire.fire_numbe not in state.fires:
-                        return          # deleted while preparing
-                    from .prepare import ensure_default_products
-                    res = ensure_default_products(fire)
-                    sys.stderr.write(
-                        f'[viirs_worker] {fire.fire_numbe}: default '
-                        f'products -- built {res["built"] or "none"}, '
-                        f'already present {res["skipped"] or "none"} '
-                        f'(MRAP ref {res["mrap"] or "?"}, '
-                        f'L2 ref {res["l2"] or "?"})\n')
-                    from .durable import mirror_in_background
-                    mirror_in_background()
-                except Exception as dexc:
-                    sys.stderr.write(
-                        f'[viirs_worker] {fire.fire_numbe}: default '
-                        f'products failed: {type(dexc).__name__}: '
-                        f'{dexc}\n')
-
-            threading.Thread(target=_defaults, daemon=True,
-                             name=f'defaults-{fire.fire_numbe}').start()
             # Build the vector overlays now rather than on first open.
             # This reads the tile shapefile, reprojects every
             # intersecting footprint and rasterizes the per-tile masks

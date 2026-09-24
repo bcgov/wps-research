@@ -3711,10 +3711,21 @@ def s2_acquired_on(fire, day: str):
 def mrap_reference_date() -> str:
     """Date of the newest province-wide mosaic, or '' if unknown."""
     try:
-        from .aoi_stack import find_latest_mrap
-        return (find_latest_mrap() or ('', ''))[0] or ''
+        from .aoi_stack import find_latest_mrap, MRAP_DIR
+        d = (find_latest_mrap() or ('', ''))[0] or ''
+        if not d:
+            sys.stderr.write(
+                f'[refdate] find_latest_mrap returned no date from '
+                f'{MRAP_DIR}\n')
+        return d
     except Exception as exc:
-        sys.stderr.write(f'[refdate] no MRAP mosaic available: {exc}\n')
+        try:
+            from .aoi_stack import MRAP_DIR as _md
+        except Exception:
+            _md = '?'
+        sys.stderr.write(
+            f'[refdate] no MRAP mosaic available in {_md}: '
+            f'{type(exc).__name__}: {exc}\n')
         return ''
 
 
@@ -3815,9 +3826,20 @@ def ensure_default_products(fire: FireInfo, log=None) -> dict:
     if out['mrap']:
         wanted.append(('mrap', f'mrap_p{out["mrap"]}',
                        {'mrap_date': out['mrap']}))
+    else:
+        # Say so. A reference date that cannot be determined silently
+        # drops its whole product kind, and that is indistinguishable
+        # from "it built fine" unless it is reported.
+        _say(f'[refresh] {fn}: no MRAP reference date -- no readable '
+             f'<date>_mrap.bin was found, so no MRAP composite can be '
+             f'built')
     if out['l2']:
         wanted.append(('l2', f'l2_d{out["l2"]}',
                        {'l2_start_date': out['l2']}))
+    else:
+        _say(f'[refresh] {fn}: no L2 reference date -- no Sentinel-2 '
+             f'zip was found on a tile intersecting this AOI, so no '
+             f'L2 recent product can be built')
 
     for src, key, kw in wanted:
         if key in have:
