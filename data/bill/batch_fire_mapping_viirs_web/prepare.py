@@ -890,7 +890,10 @@ _product_state_lock = threading.Lock()
 # progress; a conclusion that persists until something changes the
 # product (withheld, retired) gets a long one.
 PRODUCT_STATE_TTL = {
-    'building': 30.0,
+    'building': 1800.0,
+    'queued': 600.0,
+    'rendering': 900.0,
+    'build_failed': 900.0,
     'restoring': 60.0,
     'repointing': 20.0,
     'busy': 20.0,
@@ -910,23 +913,73 @@ def _product_state_ident(fire_numbe: str, key: str) -> str:
     return '%s:%s' % (fire_numbe or '', key or '')
 
 
+# States that mean "work is in progress on this product right now". The
+# Sources panel keeps polling while any row is in one of them, and stops
+# once every row is settled -- rather than polling forever because some
+# product simply has not been built.
+ACTIVE_PRODUCT_STATES = frozenset((
+    'queued', 'building', 'restoring', 'repointing', 'busy',
+    'rendering', 'rerendering'))
+
+
 def note_product_state(fire_numbe: str, key: str, state: str,
-                       detail: str = '') -> None:
-    """Record what is happening to ONE product, for its own row."""
+                       detail: str = '', frac: float = None,
+                       stage: str = None) -> None:
+    """Record what is happening to ONE product, for its own row.
+
+    With a *stage* (one of PREP_STAGES) and a fraction through it, the
+    note carries the same progress model the fire list uses for a fire
+    being prepared: stage label and number, weighted overall fraction,
+    a smoothed ETA, the time the work started and the time anything
+    last changed -- so a row can say "~1m 20s left (45%)" and, when
+    nothing moves, "no change for 5m", exactly as the fire list does.
+    """
     if not fire_numbe or not key or not state:
         return
     try:
         now = time.time()
         ttl = PRODUCT_STATE_TTL.get(state, _PRODUCT_STATE_DEFAULT_TTL)
+        ident = _product_state_ident(fire_numbe, key)
         with _product_state_lock:
-            _product_state[_product_state_ident(fire_numbe, key)] = {
-                'state': state, 'detail': detail or '',
-                'at': now, 'ttl': ttl}
+            prev = _product_state.get(ident) or {}
+            continuing = (state in ACTIVE_PRODUCT_STATES
+                          and prev.get('state') in ACTIVE_PRODUCT_STATES
+                          and now - prev.get('at', 0) <= prev.get('ttl', 0))
+            started = (prev.get('started_at') if continuing else None) or now
+            n = {'state': state, 'detail': detail or '', 'at': now,
+                 'ttl': ttl, 'started_at': started}
+            if stage in _PREP_INDEX:
+                idx = _PREP_INDEX[stage]
+                f = max(0.0, min(1.0, float(frac or 0.0)))
+                done = sum(w for _k, _l, w in PREP_STAGES[:idx])
+                overall = max(0.0, min(0.999, done + PREP_STAGES[idx][2] * f))
+                elapsed = max(0.0, now - float(started))
+                eta = None
+                if overall >= 0.04 and elapsed >= 5.0:
+                    raw = max(0.0, elapsed * (1.0 - overall) / overall)
+                    pe = prev.get('eta_s') if continuing else None
+                    if isinstance(pe, (int, float)) and pe >= 0:
+                        alpha = min(0.9, 0.2 + 0.7 * overall)
+                        eta = (1.0 - alpha) * pe + alpha * raw
+                    else:
+                        eta = raw
+                n.update({'stage': stage,
+                          'stage_label': prep_stage_label(stage),
+                          'stage_idx': idx + 1,
+                          'total_stages': len(PREP_STAGES),
+                          'fraction': overall, 'stage_fraction': f,
+                          'eta_s': eta})
+            changed = (not continuing
+                       or prev.get('detail') != n['detail']
+                       or prev.get('stage') != n.get('stage')
+                       or round(float(prev.get('fraction') or 0), 3)
+                       != round(float(n.get('fraction') or 0), 3))
+            n['last_change_at'] = (now if changed
+                                   else prev.get('last_change_at', now))
+            _product_state[ident] = n
             if len(_product_state) > _PRODUCT_STATE_MAX:
-                # Drop what has already expired first; only if that is
-                # not enough does age decide.
-                dead = [i for i, n in _product_state.items()
-                        if now - n['at'] > n['ttl']]
+                dead = [i for i, x in _product_state.items()
+                        if now - x['at'] > x['ttl']]
                 for i in dead:
                     _product_state.pop(i, None)
                 while len(_product_state) > _PRODUCT_STATE_MAX:
@@ -1018,17 +1071,107 @@ PRODUCT_STATE_TEXT = {
     'withheld': 'withheld: not on this AOI grid; rebuilds on use',
     'retired': 'retired: built on an older grid; rebuilding',
     'grid_deviates': 'grid differs from this AOI',
+    'queued': 'queued',
+    'rendering': 'rendering',
+    'build_failed': 'build failed',
 }
 
+# The fire list's stage names (templates/fire_list.html,
+# LIST_STAGE_LABELS), so a product row and the fire list describe the
+# same work in the same words.
+PROGRESS_STAGE_LABELS = {
+    'downloading_viirs': 'VIIRS',
+    'accumulating': 'VIIRS accumulate',
+    'cropping': 'Build AOI stack',
+    'locating': 'Locating imagery',
+    'extracting': 'Reading Sentinel-2 data',
+    'compositing': 'Building the AOI composite',
+    'previews': 'Rendering preview imagery',
+    'hint': 'Computing the hint layer',
+}
 
-def product_state_text(note) -> str:
-    """The Sources-column wording for one note."""
+_STALL_S = 180.0              # the fire list's "no change for" threshold
+
+
+def fmt_dur(sec) -> str:
+    """Same rendering as the fire list's fmtDur()."""
+    try:
+        sec = float(sec)
+    except (TypeError, ValueError):
+        return '--'
+    if sec != sec or sec < 0:
+        return '--'
+    if sec < 60:
+        return f'{int(round(sec))}s'
+    if sec < 3600:
+        m = int(sec // 60)
+        r = int(round(sec - m * 60))
+        return f'{m}m {r}s' if r else f'{m}m'
+    h = int(sec // 3600)
+    m = int(round((sec - h * 3600) / 60))
+    return f'{h}h {m}m' if m else f'{h}h'
+
+
+def progress_line(prog, now: float = None) -> str:
+    """One progress snapshot as text, in the fire list's format.
+
+    "<stage> (i/n) — <detail> · ~<eta> left (NN%)", or "<elapsed>
+    elapsed" when there is no estimate yet, then "no change for <t>"
+    once nothing has moved for three minutes. Works for a fire's
+    snapshot (fire.progress) and a product note alike.
+    """
+    if not prog:
+        return ''
+    now = now or time.time()
+    stage = prog.get('stage') or ''
+    label = (prog.get('stage_label')
+             or PROGRESS_STAGE_LABELS.get(stage, stage) or '')
+    idx = prog.get('stage_idx') or 0
+    tot = prog.get('total_stages') or 0
+    head = label + (f' ({idx}/{tot})' if (label and tot) else '')
+    tail = []
+    det = (prog.get('detail') or '').strip()
+    if det:
+        tail.append(det)
+    eta = prog.get('eta_s')
+    frac = prog.get('fraction')
+    started = prog.get('started_at')
+    if isinstance(eta, (int, float)) and eta >= 0:
+        tail.append(f'~{fmt_dur(eta)} left'
+                    + (f' ({int(round(float(frac) * 100))}%)'
+                       if isinstance(frac, (int, float)) else ''))
+    elif isinstance(started, (int, float)) and started > 0:
+        tail.append(f'{fmt_dur(now - started)} elapsed')
+    lca = prog.get('last_change_at')
+    if isinstance(lca, (int, float)) and now - lca > _STALL_S:
+        tail.append(f'no change for {fmt_dur(now - lca)}')
+    body = ' · '.join(tail)
+    if head and body:
+        return f'{head} — {body}'
+    return head or body
+
+
+def product_state_text(note, now: float = None) -> str:
+    """The Sources-column wording for one note.
+
+    A note with a stage is progress, and reads like the fire list's
+    progress line. Any other note is its state's wording plus detail,
+    with the same "no change for" flag while the work is active.
+    """
     if not note:
         return ''
+    now = now or time.time()
+    if note.get('stage'):
+        return progress_line(note, now)
     base = PRODUCT_STATE_TEXT.get(note.get('state'),
                                   note.get('state') or '')
     d = (note.get('detail') or '').strip()
-    return f'{base} \u2014 {d}' if (base and d) else (base or d)
+    text = f'{base} \u2014 {d}' if (base and d) else (base or d)
+    lca = note.get('last_change_at')
+    if (note.get('state') in ACTIVE_PRODUCT_STATES
+            and isinstance(lca, (int, float)) and now - lca > _STALL_S):
+        text += f' \u00b7 no change for {fmt_dur(now - lca)}'
+    return text
 
 
 def preview_queue_status() -> dict:
@@ -1042,11 +1185,37 @@ def preview_queue_status() -> dict:
                 'skipped': _preview_stats['skipped']}
 
 
-def previews_complete(fire: FireInfo, key: str) -> bool:
-    """Has this product's post-fire preview been rendered?"""
+def preview_dir_grid_ok(fire: FireInfo, pdir: str,
+                        view: str = 'post') -> bool:
+    """Was this preview directory rendered on the fire's grid?
+
+    False only when BOTH are known and they differ: the directory
+    records its grid (geo.json, written by every render) and the fire
+    has a pinned grid. Unrecorded or unpinned cannot be judged, and is
+    treated as fine rather than thrown away.
+    """
     try:
-        return os.path.isfile(os.path.join(
-            fire.cache_dir, f'previews_{key}', 'post.png'))
+        from .preview_fs import read_geo, geo_entry_matches
+        entry = read_geo(pdir).get(view)
+        if not entry:
+            return True
+        from .aoi_stack import load_pinned_grid_for
+        pin = load_pinned_grid_for(
+            fire.fire_numbe, getattr(state, 'shared_root', '') or '')
+        if not pin:
+            return True
+        return geo_entry_matches(entry, pin['width'], pin['height'],
+                                 pin['gt'], tol_px=0.01)
+    except Exception:
+        return True
+
+
+def previews_complete(fire: FireInfo, key: str) -> bool:
+    """Has this product's post-fire preview been rendered, on its grid?"""
+    try:
+        d = os.path.join(fire.cache_dir, f'previews_{key}')
+        return (os.path.isfile(os.path.join(d, 'post.png'))
+                and preview_dir_grid_ok(fire, d))
     except Exception:
         return False
 
@@ -1493,6 +1662,19 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
         outdir = os.path.join(fire.cache_dir, f'previews_{key}')
         have = os.path.isdir(outdir) and any(
             f.endswith('.png') for f in os.listdir(outdir))
+        if have and not preview_dir_grid_ok(fire, outdir):
+            # Rendered on a grid this fire no longer has: never shown,
+            # so re-rendered from this product's stack.
+            sys.stderr.write(
+                f'[warm] {fire.fire_numbe}: previews_{key} is not on '
+                f'the fire\'s grid; re-rendering\n')
+            from .preview_fs import rmtree as _pf_rmtree
+            _pf_rmtree(outdir)
+            have = False
+        if not have:
+            note_product_state(fire.fire_numbe, key, 'rendering',
+                               'post-fire, pre-fire and difference',
+                               frac=0.0, stage='previews')
         if have:
             out['skipped'] += 1
         else:
@@ -1517,7 +1699,11 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
     # Only the red-wins modes: the BCWS perimeter hint is derived from
     # the incident polygon rather than the imagery, and the VIIRS hint
     # does not vary by product.
-    for mode in ('redwins_post', 'redwins_diff'):
+    for _mi, mode in enumerate(('redwins_post', 'redwins_diff')):
+        note_product_state(fire.fire_numbe, key, 'rendering',
+                           ('red-wins, post-fire' if mode == 'redwins_post'
+                            else 'red-wins, difference'),
+                           frac=_mi / 2.0, stage='hint')
         try:
             path, err = build_redwins_hint_for_fire(
                 fire, mode, stack_path=stack_path)
@@ -1895,22 +2081,28 @@ def _stash_previews(fire: FireInfo, source: str,
     # images now sitting in that directory. If it disagrees with where
     # they are about to be filed, the copy is refused. Refusing costs
     # one re-render; proceeding silently corrupts a product.
-    stamped = previews_product(src)
-    want = os.path.basename(dst)
-    want = want[len('previews_'):] if want.startswith('previews_') else ''
-    if stamped and want and stamped != want:
-        sys.stderr.write(
-            f'[prepare] {getattr(fire, "fire_numbe", "?")}: REFUSING to '
-            f'stash previews rendered from {stamped} under {want} -- '
-            f'the live previews belong to a different product\n')
-        return
-
-    try:
-        if os.path.isdir(dst):
-            shutil.rmtree(dst, ignore_errors=True)
-        shutil.copytree(src, dst)
-    except OSError as exc:
-        sys.stderr.write(f'[prepare] preview stash failed: {exc}\n')
+    #
+    # The check and the copy happen under ONE hold of the fire's preview
+    # lock: checked outside it, previews/ could change product between
+    # the check and the copy (see preview_fs).
+    from .preview_fs import lock_for, replace_tree
+    with lock_for(src):
+        if not os.path.isdir(src):
+            return
+        stamped = previews_product(src)
+        want = os.path.basename(dst)
+        want = (want[len('previews_'):] if want.startswith('previews_')
+                else '')
+        if stamped and want and stamped != want:
+            sys.stderr.write(
+                f'[prepare] {getattr(fire, "fire_numbe", "?")}: REFUSING '
+                f'to stash previews rendered from {stamped} under {want} '
+                f'-- the live previews belong to a different product\n')
+            return
+        try:
+            replace_tree(src, dst)
+        except OSError as exc:
+            sys.stderr.write(f'[prepare] preview stash failed: {exc}\n')
 
 
 def _restore_previews(fire: FireInfo, source: str,
@@ -1963,15 +2155,17 @@ def _restore_previews(fire: FireInfo, source: str,
                         f'[prepare] previews_{source} stash is on a '
                         f'different grid (or predates geo recording); '
                         f'deleting it and re-rendering\n')
-                    shutil.rmtree(src, ignore_errors=True)
+                    from .preview_fs import rmtree as _pf_rmtree
+                    _pf_rmtree(src)
                     return False
         except Exception as exc:
             sys.stderr.write(f'[prepare] stash grid check skipped: '
                              f'{exc}\n')
         dst = os.path.join(fire.cache_dir, 'previews')
-        if os.path.isdir(dst):
-            shutil.rmtree(dst, ignore_errors=True)
-        shutil.copytree(src, dst)
+        # Replaced under the fire's preview lock; a render still
+        # claiming previews/ loses its claim (see preview_fs).
+        from .preview_fs import replace_tree
+        replace_tree(src, dst)
         return True
     except OSError as exc:
         sys.stderr.write(f'[prepare] preview restore failed: {exc}\n')
@@ -2579,7 +2773,8 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
             # file copy, not a re-render.
             live = os.path.join(fire.cache_dir, 'previews')
             if os.path.isdir(live):
-                shutil.rmtree(live, ignore_errors=True)
+                from .preview_fs import rmtree as _pf_rmtree
+                _pf_rmtree(live)
                 sys.stderr.write(
                     f'[prepare] cleared live previews: moving from '
                     f'{_prev_key} to {_new_key}\n')
@@ -3049,7 +3244,8 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
     fire.cache_dir = cache_dir
     previews_dir = os.path.join(cache_dir, 'previews')
     if old_pad != 0 and old_pad != pad and os.path.isdir(previews_dir):
-        shutil.rmtree(previews_dir, ignore_errors=True)
+        from .preview_fs import rmtree as _pf_rmtree
+        _pf_rmtree(previews_dir)
 
     # Build the AOI stack for the (possibly padded) bounds. The stack
     # is regenerated rather than cropped because there is no longer a
@@ -4286,6 +4482,10 @@ def stage_for_stack_detail(detail: str) -> str:
     if ('tile' in d and ('find' in d or 'intersect' in d)) \
             or 'searching' in d or 'locating' in d:
         return 'locating'
+    # 'ready' contains 'read': "AOI stack ready" used to jump a finished
+    # build back to the Sentinel-2 reading stage.
+    if 'ready' in d:
+        return 'compositing'
     if ('zip' in d or 'extract' in d or 'read' in d
             or 'jp2' in d or 'band' in d or 'download' in d):
         return 'extracting'

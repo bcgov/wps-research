@@ -125,7 +125,8 @@ def detect_band_groups(band_names: list[str]) -> dict[str, list[int]]:
 
 def generate_preview_png(raster_path: str, band_indices: list[int],
                          output_path: str,
-                         max_dim: int = MAX_PREVIEW_DIM) -> bool:
+                         max_dim: int = MAX_PREVIEW_DIM,
+                         token=None) -> bool:
     """Generate a web-ready preview PNG from specific bands.
 
     Applies 2nd-98th percentile stretch per channel.
@@ -190,10 +191,16 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     # first rename wins and the second fails with FileNotFound,
     # which is why previews for a freshly created fire silently
     # failed and the layers only appeared after re-entering it.
-    _tmp = (f'{output_path}.{os.getpid()}.'
-            f'{threading.get_ident()}.tmp.png')
+    # Rendered OUTSIDE the target directory, committed under the fire's
+    # preview lock: another thread may clear or replace this directory
+    # while the render runs (see preview_fs). A commit refused because
+    # the directory moved on is not an error -- the render is simply no
+    # longer wanted -- so it returns False without the twins.
+    from .preview_fs import scratch_path, commit
+    _tmp = scratch_path(output_path, '.tmp.png')
     imsave(_tmp, rgb_uint8)
-    os.replace(_tmp, output_path)
+    if not commit(_tmp, output_path, token=token, who='render'):
+        return False
 
     # Continuous-tone imagery also gets a JPEG twin.
     #
@@ -213,7 +220,7 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     base = os.path.splitext(os.path.basename(output_path))[0]
     if base in JPEG_VIEWS:
         try:
-            _write_jpeg_twin(rgb_uint8, output_path)
+            _write_jpeg_twin(rgb_uint8, output_path, token=token)
         except Exception as exc:
             sys.stderr.write(
                 f'[preview] JPEG twin for {base} failed ({exc}); '
@@ -228,7 +235,7 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     # decimation of an array already in memory) and written for every
     # view, masks included, since the wait applies to all of them.
     try:
-        _write_low_proxy(rgb_uint8, output_path)
+        _write_low_proxy(rgb_uint8, output_path, token=token)
     except Exception as exc:
         sys.stderr.write(
             f'[preview] low proxy for {base} failed ({exc}); '
@@ -239,7 +246,7 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
 LOW_PROXY_DIM = 400
 
 
-def _write_low_proxy(rgb_uint8, png_path: str) -> str:
+def _write_low_proxy(rgb_uint8, png_path: str, token=None) -> str:
     """Write ``<view>.low.jpg`` — a small proxy of the same scene."""
     h, w = rgb_uint8.shape[0], rgb_uint8.shape[1]
     step = max(1, int(round(max(h, w) / float(LOW_PROXY_DIM))))
@@ -250,15 +257,15 @@ def _write_low_proxy(rgb_uint8, png_path: str) -> str:
     for b in range(3):
         mem.GetRasterBand(b + 1).WriteArray(small[:, :, b])
     out_path = os.path.splitext(png_path)[0] + '.low.jpg'
-    tmp = (f'{out_path}.{os.getpid()}.'
-           f'{threading.get_ident()}.tmp.jpg')
+    from .preview_fs import scratch_path, commit
+    tmp = scratch_path(out_path, '.tmp.jpg')
     drv = gdal.GetDriverByName('JPEG')
     if drv is None:
         raise RuntimeError('GDAL has no JPEG driver')
     ds = drv.CreateCopy(tmp, mem, options=['QUALITY=70'])
     ds = None
     mem = None
-    os.replace(tmp, out_path)
+    commit(tmp, out_path, token=token, who='low proxy')
     for junk in (out_path + '.aux.xml', tmp + '.aux.xml'):
         try:
             os.remove(junk)
@@ -272,7 +279,7 @@ JPEG_VIEWS = ('pre', 'post', 'diff1', 'diff2', 'diff3')
 JPEG_QUALITY = 85
 
 
-def _write_jpeg_twin(rgb_uint8, png_path: str) -> str:
+def _write_jpeg_twin(rgb_uint8, png_path: str, token=None) -> str:
     """Write a JPEG alongside *png_path*, atomically.
 
     Uses GDAL rather than matplotlib/Pillow: GDAL is a hard dependency
@@ -285,7 +292,8 @@ def _write_jpeg_twin(rgb_uint8, png_path: str) -> str:
     for b in range(3):
         mem.GetRasterBand(b + 1).WriteArray(rgb_uint8[:, :, b])
     jpg = os.path.splitext(png_path)[0] + '.jpg'
-    tmp = f'{jpg}.{os.getpid()}.{threading.get_ident()}.tmp.jpg'
+    from .preview_fs import scratch_path, commit
+    tmp = scratch_path(jpg, '.tmp.jpg')
     drv = gdal.GetDriverByName('JPEG')
     if drv is None:
         raise RuntimeError('GDAL has no JPEG driver')
@@ -293,7 +301,8 @@ def _write_jpeg_twin(rgb_uint8, png_path: str) -> str:
                          options=[f'QUALITY={JPEG_QUALITY}'])
     out = None
     mem = None
-    os.replace(tmp, jpg)
+    if not commit(tmp, jpg, token=token, who='jpeg twin'):
+        return jpg
     # Remove GDAL's sidecar; it serves no purpose for a web preview.
     for junk in (jpg + '.aux.xml', tmp + '.aux.xml'):
         try:
@@ -338,7 +347,82 @@ def generate_all_previews(crop_path: str, cache_dir: str,
     # caller passed the stash directory as cache_dir, landed in
     # <stash>/previews and was never found.
     preview_dir = preview_dir or os.path.join(cache_dir, 'previews')
+
+    # Which product these pixels are, and where they may go.
+    #
+    # previews/ shows ONE product at a time. A render for a product that
+    # is not the one on screen -- the creation worker finishing after a
+    # switch, for instance -- used to overwrite it anyway, putting one
+    # product's imagery under another's name. It now claims the live
+    # directory only when that directory is unmarked or already this
+    # product's, and otherwise renders into this product's own stash.
+    from .preview_fs import (begin_live_render, end_live_render,
+                             is_live_dir)
+    try:
+        from .prepare import product_key_for_path as _pkfp
+        _key = _pkfp(crop_path) or ''
+    except Exception:
+        _key = ''
+    _token = None
+    if is_live_dir(preview_dir):
+        _token = begin_live_render(preview_dir, _key)
+        if _token is None:
+            _stash = os.path.join(os.path.dirname(preview_dir),
+                                  f'previews_{_key}')
+            sys.stderr.write(
+                f'[preview] {fire_numbe}: previews/ is showing another '
+                f'product; rendering {_key} into '
+                f'{os.path.basename(_stash)} instead\n')
+            preview_dir = _stash
     os.makedirs(preview_dir, exist_ok=True)
+    try:
+        return _generate_all_previews_into(
+            crop_path, fire_numbe, groups, preview_dir, _token)
+    finally:
+        if _token is not None:
+            end_live_render(preview_dir, _token, _key, ok=True)
+
+
+def _record_render_geo(preview_dir: str, crop_path: str,
+                       views: list) -> None:
+    """Record the grid of each rendered view beside the PNGs.
+
+    Every preview directory now describes its own grid, so one rendered
+    on a different grid can be recognised and never shown -- and a stash
+    is not mistaken for stale merely because nothing recorded its grid,
+    which is what had the serve path deleting stashes the warming queue
+    was still writing into.
+    """
+    if not views:
+        return
+    try:
+        ds = gdal.Open(crop_path, gdal.GA_ReadOnly)
+        if ds is None:
+            return
+        gt = [float(v) for v in ds.GetGeoTransform()]
+        rw, rh = ds.RasterXSize, ds.RasterYSize
+        ds = None
+        entries = {}
+        for v in views:
+            pw = ph = 0
+            try:
+                from matplotlib.image import imread
+                a = imread(os.path.join(preview_dir, f'{v}.png'))
+                ph, pw = a.shape[0], a.shape[1]
+            except Exception:
+                pass
+            entries[v] = {'gt': gt, 'rw': rw, 'rh': rh,
+                          'w': pw or rw, 'h': ph or rh}
+        from .preview_fs import merge_json
+        merge_json(os.path.join(preview_dir, 'geo.json'), entries)
+    except Exception as exc:
+        sys.stderr.write(f'[preview] geo record for '
+                         f'{os.path.basename(preview_dir)} failed: {exc}\n')
+
+
+def _generate_all_previews_into(crop_path, fire_numbe, groups,
+                                preview_dir, token) -> list:
+    """The render itself, into a directory already chosen and claimed."""
 
     jobs = []
     for key in ('post', 'pre', *DIFF_KEYS):
@@ -361,24 +445,27 @@ def generate_all_previews(crop_path: str, cache_dir: str,
 
     available: list[str] = []
     if workers == 1:
-        for key, indices, output in jobs:
-            if generate_preview_png(crop_path, indices, output):
-                available.append(key)
+        for vkey, indices, output in jobs:
+            if generate_preview_png(crop_path, indices, output,
+                                    token=token):
+                available.append(vkey)
+        _record_render_geo(preview_dir, crop_path, available)
         return available
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(generate_preview_png, crop_path,
-                            indices, output): key
-                for key, indices, output in jobs}
-        for fut, key in futs.items():
+                            indices, output, token=token): vkey
+                for vkey, indices, output in jobs}
+        for fut, vkey in futs.items():
             try:
                 if fut.result():
-                    available.append(key)
+                    available.append(vkey)
             except Exception as exc:
                 sys.stderr.write(
-                    f'[preview] {fire_numbe}: {key} failed: {exc}\n')
+                    f'[preview] {fire_numbe}: {vkey} failed: {exc}\n')
     # Stable order regardless of completion order.
     order = ['post', 'pre', *DIFF_KEYS]
     available.sort(key=lambda k: order.index(k) if k in order else 99)
+    _record_render_geo(preview_dir, crop_path, available)
     return available

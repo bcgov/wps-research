@@ -624,6 +624,120 @@ def grid_contains_bbox(grid, bbox_native, slack_px: float = 0.5) -> bool:
         return False
 
 
+def grid_is_hull_of_bbox(grid: dict, bbox_native,
+                         slack_px: float = 0.01) -> bool:
+    """Is *grid* this rectangle's footprint, cut on whatever lattice?
+
+    Snapping a rectangle outward to a pixel lattice gives a grid that
+    covers it and overhangs by less than one pixel on every side -- for
+    ANY lattice. Judging a pin this way, rather than by equality with a
+    window re-derived from today's source raster, means the pin survives
+    the source raster being regenerated on a shifted lattice and the
+    recorded bbox being rewritten to the grid's own edges (recovery, the
+    BCWS audit), while a pin left by a DIFFERENT rectangle -- bigger,
+    smaller or shifted -- still fails.
+    """
+    try:
+        gt = [float(v) for v in grid['gt']]
+        w, h = int(grid['width']), int(grid['height'])
+        px, py = abs(gt[1]), abs(gt[5])
+        if w <= 0 or h <= 0 or px <= 0 or py <= 0:
+            return False
+        gx0, gy1 = gt[0], gt[3]
+        gx1, gy0 = gx0 + w * px, gy1 - h * py
+        xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
+        sx, sy = slack_px * px, slack_px * py
+        covers = (gx0 <= xmin + sx and gx1 >= xmax - sx
+                  and gy0 <= ymin + sy and gy1 >= ymax - sy)
+        tight = ((xmin - gx0) < px + sx and (gx1 - xmax) < px + sx
+                 and (ymin - gy0) < py + sy and (gy1 - ymax) < py + sy)
+        return covers and tight
+    except Exception:
+        return False
+
+
+def _pin_stub(identifier: str, instance_key: str = '',
+              ram_dir: str = None) -> str:
+    """A stack-shaped path whose pin sidecar is this AOI's pin."""
+    return aoi_stack_path(identifier, '00000000',
+                          ram_dir=ram_dir or RAM_DIR,
+                          instance_key=instance_key or '')
+
+
+def load_pinned_grid_for(identifier: str, instance_key: str = '',
+                         ram_dir: str = None):
+    """This AOI's pinned grid, found from its identity rather than a stack."""
+    return load_pinned_grid(_pin_stub(identifier, instance_key, ram_dir))
+
+
+def derive_aoi_grid(bbox_native, pre_bin: str = None) -> dict:
+    """The grid a rectangle cuts from the province-wide pre-imagery layer."""
+    from osgeo import gdal
+    pre = pre_bin or PRE_BIN
+    ds = gdal.Open(pre, gdal.GA_ReadOnly)
+    if ds is None:
+        raise AoiStackError(f'cannot open the pre-imagery layer {pre}')
+    try:
+        gt = ds.GetGeoTransform()
+        rw, rh = ds.RasterXSize, ds.RasterYSize
+        proj = ds.GetProjection()
+    finally:
+        ds = None
+    xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
+    _xo, _yo, xs, ys, wgt = _window_for_bbox(gt, rw, rh,
+                                             xmin, ymin, xmax, ymax)
+    return {'width': int(xs), 'height': int(ys),
+            'gt': tuple(float(v) for v in wgt), 'proj': proj}
+
+
+def pin_aoi_grid(identifier: str, bbox_native, instance_key: str = '',
+                 ram_dir: str = None, pre_bin: str = None,
+                 why: str = 'initialised') -> dict:
+    """Record the fire's authoritative grid NOW, from its rectangle.
+
+    Called when a fire/AOI is created: the rectangle as it falls on the
+    province-wide pre-imagery layer IS the fire's footprint, before any
+    product exists. Every product -- whichever source, whichever date --
+    is then cut to exactly this grid. Overwrites any pin already there,
+    because at creation the rectangle is new by definition.
+    """
+    g = derive_aoi_grid(bbox_native, pre_bin)
+    save_pinned_grid(_pin_stub(identifier, instance_key, ram_dir),
+                     g['width'], g['height'], g['gt'], g['proj'])
+    sys.stderr.write(
+        '[aoi_stack] %s: authoritative AOI grid %s from the pre-imagery '
+        'layer: %dx%d at (%.3f, %.3f) px %.9f\n'
+        % (identifier, why, g['width'], g['height'], g['gt'][0],
+           g['gt'][3], g['gt'][1]))
+    return g
+
+
+def resolve_aoi_grid(out_bin: str, bbox_native, pre_bin: str = None) -> dict:
+    """The authoritative grid for a build of *out_bin*.
+
+    The fire's pin when the pin is this rectangle's; otherwise -- a fire
+    created before pins were recorded at creation, or one whose pin was
+    left by a different rectangle -- pinned now from the pre-imagery
+    layer, the same way creation does.
+    """
+    pin = load_pinned_grid(out_bin)
+    if pin and grid_is_hull_of_bbox(pin, bbox_native):
+        return pin
+    derived = derive_aoi_grid(bbox_native, pre_bin)
+    if pin and grid_is_for_bbox(pin, derived['width'], derived['height'],
+                                derived['gt']):
+        return pin               # e.g. an AOI clipped at the layer's edge
+    if pin:
+        sys.stderr.write(
+            '[aoi_stack] the pinned AOI grid %dx%d at (%.3f, %.3f) is not '
+            'this rectangle\'s footprint; re-pinning from the pre-imagery '
+            'layer\n' % (pin['width'], pin['height'], pin['gt'][0],
+                          pin['gt'][3]))
+    save_pinned_grid(out_bin, derived['width'], derived['height'],
+                     derived['gt'], derived['proj'])
+    return load_pinned_grid(out_bin) or derived
+
+
 def _window_for_bbox(gt, raster_w, raster_h, xmin, ymin, xmax, ymax):
     """Map a native-CRS bbox to an integer pixel window.
 
@@ -901,7 +1015,16 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
         # nothing to do with the fire. The window computed above is
         # used only to ESTABLISH the grid the first time.
         _pin = load_pinned_grid(out_bin)
-        if _pin and not grid_is_for_bbox(_pin, xsize, ysize, win_gt):
+        # A pin is this rectangle's when it is the rectangle's footprint
+        # on SOME lattice (grid_is_hull_of_bbox), or when it equals the
+        # window derived now (an AOI clipped at the layer's edge). The
+        # old test -- equality only -- replaced the pin whenever the
+        # source raster or the recorded bbox moved by a pixel, and every
+        # later product then landed on a different grid from the earlier
+        # ones.
+        if _pin and not (grid_is_for_bbox(_pin, xsize, ysize, win_gt)
+                         or grid_is_hull_of_bbox(
+                             _pin, (xmin, ymin, xmax, ymax))):
             # The pin belongs to a DIFFERENT rectangle.
             #
             # "Does it cover the bbox?" was the wrong question. A pin
@@ -1012,6 +1135,17 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
                     f'post override is {ds_override.RasterXSize}x'
                     f'{ds_override.RasterYSize} but the AOI window is '
                     f'{xsize}x{ysize}')
+            # Same size is not enough: a buffer cut on another lattice
+            # has the right shape and the wrong ground, and stamping this
+            # grid on it would misregister post against pre silently.
+            _ogt = ds_override.GetGeoTransform() or ()
+            _tol = 0.01 * abs(float(win_gt[1]) or 1.0)
+            if len(_ogt) == 6 and (abs(_ogt[0] - win_gt[0]) > _tol
+                                   or abs(_ogt[3] - win_gt[3]) > _tol):
+                raise AoiStackError(
+                    f'post override origin ({_ogt[0]:.3f}, {_ogt[3]:.3f}) '
+                    f'is not the AOI grid origin ({win_gt[0]:.3f}, '
+                    f'{win_gt[3]:.3f}); refusing to misregister it')
             n_band = min(n_band, ds_override.RasterCount)
 
         pre_names = _parse_band_names(existing_hdr(pre_bin)
@@ -1133,6 +1267,23 @@ def build_aoi_stack(out_bin: str, xmin: float, ymin: float,
     _p('writing header', 0.96)
     _write_envi_header(tmp_hdr, xsize, ysize, total,
                        band_names, win_gt, proj)
+
+    # The grid being published must BE the fire's grid. Everything above
+    # cuts to the pin, so this can only fail if the pin changed while
+    # this stack was being written -- and then publishing would put one
+    # product on a grid the fire no longer has. Refused, not published.
+    _pin_now = load_pinned_grid(out_bin)
+    if _pin_now and not grid_is_for_bbox(_pin_now, xsize, ysize, win_gt):
+        for _junk in (tmp_bin, tmp_hdr):
+            try:
+                os.remove(_junk)
+            except OSError:
+                pass
+        raise AoiStackError(
+            f'refusing to publish {os.path.basename(out_bin)}: it was cut '
+            f'to {xsize}x{ysize} at ({win_gt[0]:.3f}, {win_gt[3]:.3f}) but '
+            f'the AOI grid is now {_pin_now["width"]}x{_pin_now["height"]} '
+            f'at ({_pin_now["gt"][0]:.3f}, {_pin_now["gt"][3]:.3f})')
 
     # Publish atomically: header first, then the data file. A reader
     # checks for BOTH (see stack_is_valid), and only the .bin rename
@@ -1451,7 +1602,44 @@ def stack_covers_bbox(path: str, bbox_native, slack_px: float = 1.5):
         ds = None
 
 
-def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
+import threading as _threading
+_ensure_tls = _threading.local()
+
+
+def ensure_aoi_stack(*args, **kwargs) -> dict:
+    """Build (or reuse) one product's AOI stack. See _ensure_aoi_stack_impl.
+
+    This wrapper keeps the product's own row in the Sources panel honest:
+    a build that fails says so on that row (instead of the row going
+    quiet), and a finished build clears its "building" note.
+    """
+    _ensure_tls.row = ('', '')
+    try:
+        info = _ensure_aoi_stack_impl(*args, **kwargs)
+    except Exception as exc:
+        ident, key = getattr(_ensure_tls, 'row', ('', ''))
+        if ident and key:
+            try:
+                from .prepare import note_product_state
+                note_product_state(ident, key, 'build_failed',
+                                   str(exc)[:300])
+            except Exception:
+                pass
+        raise
+    ident, key = getattr(_ensure_tls, 'row', ('', ''))
+    if ident and key and (info or {}).get('rebuilt'):
+        try:
+            from .prepare import clear_product_state
+            clear_product_state(ident, key)
+        except Exception:
+            pass
+    return info
+
+
+ensure_aoi_stack.__doc__ = None   # set below from the implementation
+
+
+def _ensure_aoi_stack_impl(identifier: str, bbox_native, progress_cb=None,
                      ram_dir: str = RAM_DIR, force: bool = False,
                      instance_key: str = '',
                      post_source: str = 'mrap',
@@ -1639,6 +1827,41 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             f'({xmin:.1f}, {ymin:.1f}, {xmax:.1f}, {ymax:.1f}) ...\n')
         sys.stderr.flush()
 
+        # This product's own row: every progress message the builders
+        # send lands on it, with the same stages, percentage and ETA the
+        # fire list shows (prepare.note_product_state).
+        _row_key = ''
+        _note = _stage_of = None
+        try:
+            from .prepare import (product_key_for_path as _pkfp,
+                                  note_product_state as _note,
+                                  stage_for_stack_detail as _stage_of)
+            _row_key = _pkfp(out_bin) or ''
+        except Exception:
+            _note = None
+        _ensure_tls.row = (identifier, _row_key)
+        _outer_cb = progress_cb
+
+        def progress_cb(detail, frac=0.0, _o=_outer_cb):
+            if _note is not None and _row_key:
+                try:
+                    _note(identifier, _row_key, 'building', detail or '',
+                          frac=frac, stage=_stage_of(detail or ''))
+                except Exception:
+                    pass
+            if _o:
+                _o(detail, frac)
+
+        if _note is not None and _row_key:
+            _note(identifier, _row_key, 'building',
+                  'cutting the AOI grid', frac=0.0, stage='locating')
+
+        # The fire's grid is settled BEFORE anything is cut. The L2
+        # composite is built first and used to window itself from its
+        # own reference raster, honouring the pin only when that
+        # derivation happened to agree; now it is handed the pin.
+        _aoi_grid = resolve_aoi_grid(out_bin, (xmin, ymin, xmax, ymax))
+
         override = None
         post_tag = ''
         if post_source == 'l2':
@@ -1651,6 +1874,7 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
             try:
                 l2_info = build_l2_recent_post(
                     (xmin, ymin, xmax, ymax), ref, l2_tmp,
+                    aoi_grid=_aoi_grid,
                     progress_cb=(
                         (lambda d, f: progress_cb(d, 0.6 * f))
                         if progress_cb else None),
@@ -1855,3 +2079,6 @@ def purge_other_aoi_stacks(keep_paths, ram_dir: str = RAM_DIR) -> int:
             except OSError:
                 pass
     return removed
+
+
+ensure_aoi_stack.__doc__ = _ensure_aoi_stack_impl.__doc__

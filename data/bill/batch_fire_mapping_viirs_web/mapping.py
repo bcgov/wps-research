@@ -327,18 +327,13 @@ def copy_preview_geo(cache_dir: str, src_name: str,
         gj = os.path.join(cache_dir, 'previews', 'geo.json')
         if not os.path.isfile(gj):
             return False
-        with open(gj, encoding='utf-8') as f:
-            data = json.load(f) or {}
-        if src_name not in data:
+        # Under the fire's preview lock: see preview_fs.merge_json.
+        from .preview_fs import merge_json
+        if not merge_json(gj, copy_from=(src_name, dst_name)):
             sys.stderr.write(
                 f'[geo] copy {src_name} -> {dst_name}: no source entry; '
                 f'{dst_name} would report a stale extent\n')
             return False
-        data[dst_name] = dict(data[src_name])
-        tmp = f'{gj}.{os.getpid()}.{threading.get_ident()}.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(data, f)
-        os.replace(tmp, gj)
         sys.stderr.write(
             f'[geo] copied georeferencing {src_name} -> {dst_name}\n')
         return True
@@ -387,19 +382,13 @@ def record_preview_geo(cache_dir: str, raster_path: str,
             pass
 
         gj = os.path.join(cache_dir, 'previews', 'geo.json')
-        data = {}
-        if os.path.isfile(gj):
-            try:
-                with open(gj, encoding='utf-8') as f:
-                    data = json.load(f)
-            except (OSError, ValueError):
-                data = {}
-        data[out_name] = {'gt': gt, 'rw': rw, 'rh': rh,
-                          'w': pw or rw, 'h': ph or rh}
-        tmp = f'{gj}.{os.getpid()}.{threading.get_ident()}.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(data, f)
-        os.replace(tmp, gj)
+        # Read-modify-write under the fire's preview lock. Two views
+        # recorded at once used to read the same file and the second
+        # rename dropped the first entry; and a switch clearing
+        # previews/ mid-write made the rename fail outright.
+        from .preview_fs import merge_json
+        merge_json(gj, {out_name: {'gt': gt, 'rw': rw, 'rh': rh,
+                                   'w': pw or rw, 'h': ph or rh}})
     except Exception as exc:
         sys.stderr.write(f'[overlay] geo record failed for '
                          f'{out_name}: {exc}\n')
@@ -720,10 +709,12 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
             rgba[mask, 2] = b
             rgba[mask, 3] = 0.7
             out_path = os.path.join(_pdir, f'{out_name}.png')
-            _tmp = out_path + '.tmp%d_%d.png' % (os.getpid(),
-                                                 threading.get_ident())
+            # Rendered outside the directory, committed under the
+            # fire's preview lock (see preview_fs).
+            from .preview_fs import scratch_path, commit
+            _tmp = scratch_path(out_path, '.tmp.png')
             imsave(_tmp, np.clip(rgba, 0, 1))
-            os.replace(_tmp, out_path)
+            commit(_tmp, out_path, who='hint mask')
             record_preview_geo(fire.cache_dir, fire.crop_bin,
                                out_name, out_path)
             return
@@ -758,10 +749,12 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
         # Atomic for the same reason as preview.py: overlays are
         # rewritten by prebuilds and re-renders while the page may be
         # fetching them.
-        _tmp = out_path + '.tmp%d_%d.png' % (os.getpid(),
-                                                 threading.get_ident())
+        # Rendered outside the directory, committed under the fire's
+        # preview lock (see preview_fs).
+        from .preview_fs import scratch_path, commit
+        _tmp = scratch_path(out_path, '.tmp.png')
         imsave(_tmp, np.clip(result, 0, 1))
-        os.replace(_tmp, out_path)
+        commit(_tmp, out_path, who='overlay')
         # The PNG is in the CURRENT crop's space; record that so split
         # sync can align it against previews from other paddings.
         record_preview_geo(fire.cache_dir, fire.crop_bin,

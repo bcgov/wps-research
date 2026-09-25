@@ -2928,12 +2928,21 @@ async function loadDatePlot() {
         if (st) st.textContent = 'Generating now (this re-reads the '
                                + 'source imagery; watch the console) ...';
         try {
-            await fetch(
+            const _rr = await fetch(
                 `/api/fire/${encodeURIComponent(FIRE)}/date_plot/rebuild`,
                 {method: 'POST',
                  headers: {'Content-Type': 'application/json',
                            'X-Requested-With': 'fetch'},
                  body: '{}'});
+            if (_rr.status === 409) {
+                // Not now: the fire is being prepared, or this product is
+                // not built, and its own build writes the coverage. Ask
+                // again in a minute rather than never.
+                const _j = await _rr.json().catch(() => ({}));
+                if (st) st.textContent = _j.reason
+                    || 'Coverage appears when this product is built.';
+                setTimeout(() => { _datePlotRebuildAsked = false; }, 60000);
+            }
             // Poll until the sidecar lands, then draw it.
             if (_datePlotPoll) clearInterval(_datePlotPoll);
             _datePlotPoll = setInterval(loadDatePlot, 5000);
@@ -8122,99 +8131,42 @@ function layerBusyRowsVisible() {
 }
 
 function layerStatusPaint() {
-    // Reported in the BOTTOM progress bar, where every other long
-    // operation reports. Over the toolbar it sat on top of the buttons
-    // and shifted them about -- exactly where a transient message
-    // should never go.
+    // Layer work is reported on its own product's row in the Sources
+    // panel, never in a bar across the bottom of the view -- that bar
+    // popped up whenever a layer's row was not on screen (panel
+    // collapsed, or a load with no product key). The bar is kept for
+    // Map Fire runs only (renderProgress).
     const el = document.getElementById('layer-status');
     if (el) el.style.display = 'none';        // never in the toolbar
-
     const bar = document.getElementById('progress-bar');
-    const title = document.getElementById('progress-title');
-    const eta = document.getElementById('progress-eta');
-    if (!bar || !title) return;
-
-    if (!_layerBusyTickets.size) {
-        // Clear any note left in the list, then put the bar away.
-        try {
-            const box = document.getElementById('sources-list');
-            if (box) {
-                box.querySelectorAll('.src-row .src-why')
-                   .forEach((c) => {
-                       if (c.dataset.busyNote === '1') {
-                           c.textContent = '';
-                           c.dataset.busyNote = '';
-                       }
-                   });
+    if (bar && bar.dataset.layerOwned === '1') {
+        bar.classList.add('is-collapsed');
+        bar.dataset.layerOwned = '';
+        const eta = document.getElementById('progress-eta');
+        if (eta) eta.textContent = '';
+    }
+    try {
+        const box = document.getElementById('sources-list');
+        if (!box) return;
+        const keys = _layerBusyTickets.size ? _layerBusyAllKeys() : [];
+        for (const k of keys) {
+            const row = box.querySelector(`.src-row[data-row-key="${k}"]`);
+            if (!row) continue;
+            const cell = row.querySelector('.src-why');
+            if (cell) {
+                cell.textContent = layerBusyNoteFor(k);
+                cell.dataset.busyNote = '1';
             }
-        } catch (_) {}
-        // Only put the bar away if WE opened it: a mapping run may be
-        // using it, and stealing it back would hide real progress.
-        if (bar.dataset.layerOwned === '1') {
-            bar.classList.add('is-collapsed');
-            bar.dataset.layerOwned = '';
-            if (eta) eta.textContent = '';
         }
-        return;
-    }
-    // Report in the Sources list when it can carry the message.
-    //
-    // The bar under the imagery is the fallback, not the default: it
-    // appears and disappears under the picture, which is exactly where
-    // a transient message is most distracting. The list already has a
-    // column for per-layer status, and the message is about a layer.
-    if (layerBusyRowsVisible()) {
-        if (bar.dataset.layerOwned === '1') {
-            bar.classList.add('is-collapsed');
-            bar.dataset.layerOwned = '';
-            if (eta) eta.textContent = '';
-        }
-        try {
-            const box = document.getElementById('sources-list');
-            // Each row is painted from its own ticket, so two rows
-            // busy with different work show different messages and
-            // count their own seconds.
-            for (const k of _layerBusyAllKeys()) {
-                const row = box && box.querySelector(
-                    `.src-row[data-row-key="${k}"]`);
-                if (!row) continue;
-                const cell = row.querySelector('.src-why');
-                if (cell) {
-                    cell.textContent = layerBusyNoteFor(k);
-                    cell.dataset.busyNote = '1';
-                }
+        box.querySelectorAll('.src-row').forEach((row) => {
+            const cell = row.querySelector('.src-why');
+            if (!cell || cell.dataset.busyNote !== '1') return;
+            if (!layerBusyNoteFor(row.dataset.rowKey || '')) {
+                cell.textContent = '';
+                cell.dataset.busyNote = '';
             }
-            // A row that WAS busy and no longer is must lose its note
-            // now, even while other rows are still working.
-            box.querySelectorAll('.src-row').forEach((row) => {
-                const cell = row.querySelector('.src-why');
-                if (!cell || cell.dataset.busyNote !== '1') return;
-                if (!layerBusyNoteFor(row.dataset.rowKey || '')) {
-                    cell.textContent = '';
-                    cell.dataset.busyNote = '';
-                }
-            });
-        } catch (_) { /* informational */ }
-        return;
-    }
-
-    // The bar is a single line, so it reports the newest ticket.
-    let _newest = null;
-    let _newestId = -1;
-    for (const [id, t] of _layerBusyTickets) {
-        if (id > _newestId) { _newest = t; _newestId = id; }
-    }
-    if (!_newest) return;
-    const secs = (performance.now() - _newest.start) / 1000;
-    const mapping = (typeof isMapping !== 'undefined') && isMapping;
-    if (mapping && bar.dataset.layerOwned !== '1') return;
-    bar.dataset.layerOwned = '1';
-    bar.classList.remove('is-collapsed');
-    title.textContent = _newest.label;
-    if (eta) {
-        eta.textContent = `${secs.toFixed(1)}s`
-            + (secs > 20 ? '  (still working)' : '');
-    }
+        });
+    } catch (_) { /* informational */ }
 }
 
 
@@ -10616,6 +10568,8 @@ function renderSourcesList(data) {
                        e.failed ? ' is-failed' : ''}"
                      data-row-key="${e.key}"
                      data-pending="${e.pending ? '1' : ''}"
+                     data-unbuilt="${(e.built === false && !e.pending)
+                                     ? '1' : ''}"
                      title="${e.key} — click to show this source">
             <input type="checkbox" data-src-key="${e.key}"
                    ${_srcSelected.has(e.key) ? 'checked' : ''}
@@ -10654,6 +10608,12 @@ function renderSourcesList(data) {
     box.querySelectorAll('.src-row[data-row-key]').forEach((row) => {
         row.addEventListener('click', () => {
             // A product that does not exist yet cannot be displayed.
+            if (row.dataset.unbuilt === '1') {
+                log(`[sources] ${row.dataset.rowKey} is not built yet; `
+                    + `build it from Date select, or pick it in the `
+                    + `source selector`, 'dim');
+                return;
+            }
             if (row.dataset.pending === '1') {
                 log(`[sources] ${row.dataset.rowKey} is still being `
                     + `built; it will be selectable when it appears`,
@@ -10844,7 +10804,12 @@ async function refreshSourcesPanel() {
         // Keep polling while anything is still caching or any cloud
         // figure is outstanding: this panel exists to show that the
         // background work is happening.
-        const busy = (d.sources || []).some((e) => !e.ready)
+        // Only while something is actually happening: a row the server
+        // marks active (building, queued, rendering), or the fire being
+        // prepared. An unbuilt product nobody is building used to keep
+        // this polling every 4 s for as long as the page was open.
+        const busy = (d.sources || []).some((e) => !e.ready && e.active)
+            || !!d.preparing
             || d.cloud_pending
             // Keep polling while anything is still being built, or the
             // placeholder row would never be replaced by the real one.
@@ -11225,7 +11190,9 @@ function formatSeconds(s) {
 function renderProgress(p) {
     const bar = document.getElementById('progress-bar');
     if (!bar) return;
-    if (!p || !p.stage || !(p.status === 'mapping' || p.status === 'preparing')) {
+    // Map Fire runs only. A fire being prepared reports on the product
+    // rows of the Sources panel instead of popping this bar up.
+    if (!p || !p.stage || p.status !== 'mapping') {
         bar.classList.add('is-collapsed');
         return;
     }

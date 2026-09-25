@@ -1235,6 +1235,22 @@ class FireListRoutes:
         # and before the worker starts.
         _purge_web_cache(name, 'create')
 
+        # Record the fire's authoritative grid NOW, from the rectangle as
+        # it falls on the province-wide pre-imagery layer -- before any
+        # product exists. Every product of this fire, whichever source
+        # and date, is cut to exactly this grid (aoi_stack.pin_aoi_grid).
+        # A failure here is reported, not fatal: the first build pins the
+        # grid from the same layer the same way.
+        try:
+            from ..aoi_stack import pin_aoi_grid
+            pin_aoi_grid(name, fire.bbox_native,
+                         instance_key=getattr(state, 'shared_root', '')
+                         or '', why='recorded at creation')
+        except Exception as exc:
+            sys.stderr.write(
+                f'[create] {name}: could not record the AOI grid at '
+                f'creation ({exc}); the first build will record it\n')
+
         # If the user previewed before confirming, seed cache_dir with
         # the cumulative shapefile so the worker skips accumulate (the
         # dominant cost). The seed is only honoured when the request's

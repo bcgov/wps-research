@@ -573,7 +573,8 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
                          tiles_shp: str = TILES_SHP,
                          log_cb=None,
                          fill_target: float = FILL_TARGET,
-                         start_date: str = '') -> dict:
+                         start_date: str = '',
+                         aoi_grid: dict = None) -> dict:
     """Build the 4-band most-recent-L2 composite over the AOI.
 
     Output is on the SAME grid the AOI stack uses (from *ref_raster*),
@@ -622,7 +623,7 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
         ref = None
 
     from .aoi_stack import (_window_for_bbox, load_pinned_grid,
-                            grid_is_for_bbox)
+                            grid_is_for_bbox, grid_is_hull_of_bbox)
     xmin, ymin, xmax, ymax = (float(v) for v in bbox_native)
     xoff, yoff, xsize, ysize, win_gt = _window_for_bbox(
         gt, rW, rH, xmin, ymin, xmax, ymax)
@@ -640,8 +641,16 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     # COVERS this rectangle may belong to a different one -- a deleted
     # fire's, for instance -- and cutting the post-fire buffer to it
     # would put this product on a grid the fire does not own.
-    _pin = load_pinned_grid(out_bin)
-    if _pin and grid_is_for_bbox(_pin, xsize, ysize, win_gt):
+    # ensure_aoi_stack hands over the fire's grid (aoi_grid), already
+    # settled from the pre-imagery layer, and it is used as given. Only
+    # a direct caller falls back to the pin, accepted when it is this
+    # rectangle's footprint on any lattice -- not merely when this
+    # reference raster happens to derive the same window, which a
+    # reference on another lattice never does.
+    _pin = aoi_grid or load_pinned_grid(out_bin)
+    if _pin and (aoi_grid
+                 or grid_is_for_bbox(_pin, xsize, ysize, win_gt)
+                 or grid_is_hull_of_bbox(_pin, bbox_native)):
         win_gt = tuple(_pin['gt'])
         xsize, ysize = _pin['width'], _pin['height']
         xoff = int(round((win_gt[0] - gt[0]) / gt[1]))

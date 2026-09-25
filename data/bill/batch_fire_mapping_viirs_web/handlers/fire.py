@@ -385,7 +385,14 @@ class FireRoutes:
             except Exception:
                 fire.user_post_source = source
         if not result.get('ok'):
-            self._send_json({'error': result.get('error', 'unknown')}, 400)
+            # "Busy" is not a refusal: another switch or the background
+            # prebuild holds this fire. 409 makes the client wait and
+            # retry, and a newer request supersedes it -- stepping
+            # through sources while a fire is being prepared used to get
+            # one 400 per step and the steps were lost.
+            self._send_json({'error': result.get('error', 'unknown'),
+                             'busy': bool(result.get('busy'))},
+                            409 if result.get('busy') else 400)
             return
         # The selectors read this: a switch is often the first moment
         # a newly built product is complete on disk.
@@ -585,10 +592,13 @@ class FireRoutes:
                 # so this cannot describe anything but `key`.
                 def _stage_cb(detail, frac=0.0):
                     try:
-                        _lbl = prep_stage_label(
-                            stage_for_stack_detail(detail or ''))
-                        note_product_state(fire_numbe, key, 'building',
-                                           _lbl or (detail or ''))
+                        # Detail and fraction, not just the stage name:
+                        # the label alone left the row saying
+                        # "Reading Sentinel-2 data" for minutes on end.
+                        note_product_state(
+                            fire_numbe, key, 'building', detail or '',
+                            frac=frac,
+                            stage=stage_for_stack_detail(detail or ''))
                     except Exception:
                         pass
 
@@ -800,7 +810,10 @@ class FireRoutes:
             # Per-PRODUCT state, keyed by product. The stage fields
             # above come from fire.progress, which is one slot for the
             # whole fire; these are the ones a row may safely read.
-            'product_states': _product_states_payload(fire_numbe),
+            # A staticmethod: reached through self. The bare name raised
+            # NameError, so build_status never returned per-product
+            # states and Date-select rows got no detail at all.
+            'product_states': self._product_states_payload(fire_numbe),
         })
 
     def handle_api_products(self, fire_numbe):
@@ -950,7 +963,12 @@ class FireRoutes:
                                     os.path.join(r, f2))
                             except OSError:
                                 pass
-                    _sh.rmtree(path, ignore_errors=True)
+                    if os.path.basename(path).startswith('previews'):
+                        # Never pulled from under a render in flight.
+                        from ..preview_fs import rmtree as _pf_rmtree
+                        _pf_rmtree(path)
+                    else:
+                        _sh.rmtree(path, ignore_errors=True)
                     removed.append(path)
                 elif os.path.isfile(path):
                     try:
@@ -1134,6 +1152,8 @@ class FireRoutes:
                 # "not built yet", or as their live note while a build
                 # is running.
                 unbuilt = p.get('built') is False
+                _preparing = (getattr(fire, 'status', None)
+                              == FireStatus.PREPARING)
                 src, start, post = product_parts(key)
                 day = start or post or ''
                 if src == 'l2' and re.fullmatch(r'\d{8}', day or ''):
@@ -1237,12 +1257,37 @@ class FireRoutes:
                 # A live note describes what is happening NOW, so it
                 # outranks the state inferred from the files on disk.
                 # Only for this row: _note was fetched with this key.
+                #
+                # 'active' = something is working on this row right now.
+                # The panel polls only while some row is active (or the
+                # fire is being prepared), so an unbuilt product that
+                # nobody is building no longer keeps it polling forever.
+                _active = False
                 if _note and not ready:
                     try:
-                        from ..prepare import product_state_text
+                        from ..prepare import (product_state_text,
+                                               ACTIVE_PRODUCT_STATES)
                         _nt = product_state_text(_note)
                         if _nt:
                             why = _nt
+                        _active = (_note.get('state')
+                                   in ACTIVE_PRODUCT_STATES)
+                    except Exception:
+                        pass
+                elif not ready and path and os.path.isfile(path):
+                    _active = True          # previews queued / rendering
+                # Cross-referenced with the fire list: while the fire is
+                # being prepared, a row with nothing of its own to report
+                # shows the fire's own progress line -- the stage, detail,
+                # ETA and stall flag the fire list shows for it.
+                if (not ready and not _note and _preparing
+                        and why == 'not built yet'):
+                    try:
+                        from ..prepare import progress_line
+                        _fl = progress_line(
+                            getattr(fire, 'progress', None) or {})
+                        why = ('waiting \u2014 this fire is being prepared'
+                               + (f': {_fl}' if _fl else ''))
                     except Exception:
                         pass
 
@@ -1257,6 +1302,9 @@ class FireRoutes:
                     'status': why,
                     'current': key == cur_key,
                     'built': not unbuilt,
+                    'active': _active,
+                    'progress': (_note.get('fraction')
+                                 if (_note and not ready) else None),
                 })
 
             # Products withheld above are still products: show them
@@ -1336,6 +1384,8 @@ class FireRoutes:
                     # merely missing.
                     e['cloud'] = None
             self._send_json({'sources': out,
+                             'preparing': (getattr(fire, 'status', None)
+                                           == FireStatus.PREPARING),
                              'cloud_pending': cc_pending,
                              'cloud_store': os.path.join(
                                  state.output_root, '.cloud_cover',
@@ -1628,6 +1678,29 @@ class FireRoutes:
             self._send_json(
                 {'error': 'Coverage applies to the L2 source only.'}, 400)
             return
+        # Coverage is written by the product's own build. While the fire
+        # is being prepared, or for a product not built yet, there is
+        # nothing to regenerate -- and forcing a build here used to start
+        # a second, undated L2 stack beside the one being created.
+        if getattr(fire, 'status', None) == FireStatus.PREPARING:
+            self._send_json(
+                {'error': 'building',
+                 'reason': 'this fire is still being prepared; coverage '
+                           'appears when its L2 product is built'}, 409)
+            return
+        from ..prepare import stack_path_for_product as _spfp
+        _stk = _spfp(fire, _chosen) if _chosen else ''
+        if not _stk or not os.path.isfile(_stk):
+            self._send_json(
+                {'error': 'not built',
+                 'reason': f'{_chosen or "this product"} is not built yet; '
+                           f'its build writes the coverage'}, 409)
+            return
+        # Rebuild THIS product: a dated L2 keeps its start date, instead
+        # of the undated most-recent composite being built in its place.
+        _chosen_date = _pp(_chosen)[1] if _chosen else ''
+        if not re.fullmatch(r'\d{8}', _chosen_date or ''):
+            _chosen_date = ''
 
         def _work():
             try:
@@ -1637,6 +1710,7 @@ class FireRoutes:
                     'coverage (this re-reads the source zips) ...')
                 ensure_aoi_stack(
                     fire.fire_numbe, fire.bbox_native, force=True,
+                    l2_start_date=_chosen_date,
                     instance_key=getattr(state, 'shared_root', '') or '',
                     post_source='l2',
                     ref_raster=(state.rasters_by_year.get(fire.fire_year)
@@ -2360,8 +2434,9 @@ class FireRoutes:
             # "Live is authoritative" only when the live pictures are
             # the requested product's. When they are not, fall through
             # to the stash or the on-demand build.
-            if _req_key == _cur_key and (not _live_key
-                                         or _live_key == _req_key):
+            if (_req_key == _cur_key
+                    and (not _live_key or _live_key == _req_key)
+                    and self._live_previews_on_grid(fire, fire_numbe)):
                 # The requested source IS the one loaded, so previews/
                 # is authoritative. A stash for the same source is a
                 # SNAPSHOT from before it was last made current, and
@@ -3868,14 +3943,50 @@ class FireRoutes:
                              f'({exc}); treating as current\n')
             return True
 
+    def _live_previews_on_grid(self, fire, fire_numbe):
+        """Were the live previews rendered on the loaded stack's grid?
+
+        previews/ records its grid in geo.json. When that record exists
+        and disagrees with the stack being shown, the pictures are from
+        another grid -- a predecessor fire's, or a footprint this fire
+        no longer has -- and are not served: the request falls through
+        to the product's stash or its on-demand render instead. No
+        record, or no stack to compare with, cannot be judged and is
+        served as before.
+        """
+        try:
+            from ..preview_fs import read_geo, geo_entry_matches
+            entry = read_geo(os.path.join(fire.cache_dir,
+                                          'previews')).get('post')
+            cb = getattr(fire, 'crop_bin', '') or ''
+            if not entry or not cb or not os.path.isfile(cb):
+                return True
+            from osgeo import gdal
+            ds = gdal.Open(cb, gdal.GA_ReadOnly)
+            if ds is None:
+                return True
+            rw, rh, gt = ds.RasterXSize, ds.RasterYSize, ds.GetGeoTransform()
+            ds = None
+            if geo_entry_matches(entry, rw, rh, gt, tol_px=0.01):
+                return True
+            sys.stderr.write(
+                f'[preview] {fire_numbe}: live previews are on '
+                f'{entry.get("rw")}x{entry.get("rh")} but the loaded stack '
+                f'is {rw}x{rh}; not serving them\n')
+            return False
+        except Exception:
+            return True
+
     def _drop_stale_stash(self, fire, stash_dir, why):
         sys.stderr.write(
             f'[preview] {fire.fire_numbe}: STALE stash '
             f'{os.path.basename(stash_dir)} ({why}) -- deleting so it '
             f'is rebuilt on the current grid\n')
         try:
-            import shutil as _sh
-            _sh.rmtree(stash_dir, ignore_errors=True)
+            # Under the fire's preview lock, so a warm render still
+            # writing into this stash cannot lose its file mid-rename.
+            from ..preview_fs import rmtree as _pf_rmtree
+            _pf_rmtree(stash_dir)
         except Exception:
             pass
         try:
