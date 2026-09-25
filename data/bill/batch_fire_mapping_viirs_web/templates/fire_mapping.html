@@ -10568,17 +10568,25 @@ function renderMemoryRows(serverRows, browserRows) {
           <span style="${num}" title="${tip}">${fmtMemMB(r.free_mb)}</span>
           <span style="${cell}" title="${tip}">${memPctCell(r.pct)}</span>`;
     };
-    const head = ['Type', 'Size (MB)', 'Used (MB)', 'Free (MB)', '%']
+    // The number is the share USED (the red part of the bar), so the
+    // column says so.
+    const head = ['Type', 'Size (MB)', 'Used (MB)', 'Free (MB)', '% Used']
         .map((h, i) => `<span style="${cell};font-weight:600;color:#666;
                                      text-align:${i && i < 4 ? 'right'
                                                             : 'left'}">${h}</span>`)
         .join('');
+    // Fullest first, so what is running out is at the top. A row with no
+    // figure (unavailable, or no capacity such as absent swap) goes last;
+    // equal figures keep the monitor's order (Array.sort is stable).
+    const _pctKey = (r) => ((typeof r.pct === 'number' && isFinite(r.pct))
+                            ? r.pct : -1);
+    const srvSorted = [...(serverRows || [])]
+        .sort((a, b) => _pctKey(b) - _pctKey(a));
     box.innerHTML = `<div style="display:grid;align-items:center;
                           grid-template-columns:repeat(5, auto);
                           justify-content:start;column-gap:10px;row-gap:1px">
       ${head}
-      ${section('Server', true)}
-      ${serverRows.map(line).join('')}
+      ${srvSorted.map(line).join('')}
       ${section('Browser', false)}
       ${browserRows.map(line).join('')}
     </div>`;
