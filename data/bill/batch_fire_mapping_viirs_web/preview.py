@@ -5,6 +5,7 @@ No external dependencies beyond numpy, GDAL, scipy, and matplotlib
 """
 
 import os
+import threading
 import sys
 import re
 
@@ -184,7 +185,13 @@ def generate_preview_png(raster_path: str, band_indices: list[int],
     # prebuild rewrites these files, so a page open can land exactly
     # in that window. tmp+rename makes the swap indivisible: a reader
     # sees either the whole old file or the whole new one.
-    _tmp = output_path + '.tmp.png'
+    # Unique per process AND thread. A fixed temp name is the
+    # SAME path for two concurrent renders of this artifact: the
+    # first rename wins and the second fails with FileNotFound,
+    # which is why previews for a freshly created fire silently
+    # failed and the layers only appeared after re-entering it.
+    _tmp = (f'{output_path}.{os.getpid()}.'
+            f'{threading.get_ident()}.tmp.png')
     imsave(_tmp, rgb_uint8)
     os.replace(_tmp, output_path)
 
@@ -243,7 +250,8 @@ def _write_low_proxy(rgb_uint8, png_path: str) -> str:
     for b in range(3):
         mem.GetRasterBand(b + 1).WriteArray(small[:, :, b])
     out_path = os.path.splitext(png_path)[0] + '.low.jpg'
-    tmp = out_path + '.tmp.jpg'
+    tmp = (f'{out_path}.{os.getpid()}.'
+           f'{threading.get_ident()}.tmp.jpg')
     drv = gdal.GetDriverByName('JPEG')
     if drv is None:
         raise RuntimeError('GDAL has no JPEG driver')
@@ -277,7 +285,7 @@ def _write_jpeg_twin(rgb_uint8, png_path: str) -> str:
     for b in range(3):
         mem.GetRasterBand(b + 1).WriteArray(rgb_uint8[:, :, b])
     jpg = os.path.splitext(png_path)[0] + '.jpg'
-    tmp = jpg + '.tmp.jpg'
+    tmp = f'{jpg}.{os.getpid()}.{threading.get_ident()}.tmp.jpg'
     drv = gdal.GetDriverByName('JPEG')
     if drv is None:
         raise RuntimeError('GDAL has no JPEG driver')

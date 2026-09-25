@@ -335,7 +335,7 @@ def copy_preview_geo(cache_dir: str, src_name: str,
                 f'{dst_name} would report a stale extent\n')
             return False
         data[dst_name] = dict(data[src_name])
-        tmp = gj + '.tmp'
+        tmp = f'{gj}.{os.getpid()}.{threading.get_ident()}.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f)
         os.replace(tmp, gj)
@@ -396,7 +396,7 @@ def record_preview_geo(cache_dir: str, raster_path: str,
                 data = {}
         data[out_name] = {'gt': gt, 'rw': rw, 'rh': rh,
                           'w': pw or rw, 'h': ph or rh}
-        tmp = gj + '.tmp'
+        tmp = f'{gj}.{os.getpid()}.{threading.get_ident()}.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f)
         os.replace(tmp, gj)
