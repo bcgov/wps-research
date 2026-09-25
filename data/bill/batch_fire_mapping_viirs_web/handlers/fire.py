@@ -850,6 +850,37 @@ class FireRoutes:
             self._send_json({'error': 'no products named'}, 400)
             return
 
+        # Only BUILT products can be deleted. The Sources panel now
+        # lists unbuilt ones too, and deletion is addressed by key --
+        # so deleting an unbuilt 'l2' while it is being built would
+        # remove the build's own partial files and previews from under
+        # it. Such keys are refused, not silently dropped.
+        unbuilt_refused = []
+        try:
+            _built_keys = {p2.get('key') for p2 in
+                           self._built_products(fire_numbe, fire)
+                           if p2.get('key')
+                           and p2.get('built') is not False}
+            unbuilt_refused = [k for k in keys if k not in _built_keys]
+            keys = [k for k in keys if k in _built_keys]
+        except Exception as exc:
+            sys.stderr.write(
+                f'[sources] {fire_numbe}: product scan failed before '
+                f'delete ({exc}); deleting nothing\n')
+            self._send_json({'error': 'could not confirm which products '
+                                      'are built; nothing was deleted',
+                             'refused': keys}, 409)
+            return
+        if unbuilt_refused:
+            sys.stderr.write(
+                f'[sources] {fire_numbe}: refusing to delete unbuilt '
+                f'{unbuilt_refused}\n')
+        if not keys:
+            self._send_json({'error': 'those products are not built yet; '
+                                      'there is nothing to delete',
+                             'refused': unbuilt_refused}, 409)
+            return
+
         # Never delete the product the fire is currently loaded on:
         # the panes are showing it, and Map Fire and Download use it.
         try:
@@ -1016,7 +1047,7 @@ class FireRoutes:
             pass
         self._send_json({'deleted': keys, 'files': len(removed),
                          'freed_mb': round(freed / 1048576.0, 1),
-                         'refused': refused})
+                         'refused': refused + unbuilt_refused})
 
     def handle_api_sources(self, fire_numbe):
         """Every product this fire can display, with size and readiness.
@@ -1092,8 +1123,17 @@ class FireRoutes:
             l2_days = []
             for p in prods:
                 key = p.get('key') or ''
-                if not key or p.get('built') is False:
+                if not key:
                     continue
+                # An unbuilt product is still a row. While a fire is
+                # being created NEITHER base product is built yet, so
+                # skipping them here returned an empty list and the
+                # panel said "No products yet" for the whole build --
+                # though _built_products had offered both. They go
+                # through the same status logic below and read as
+                # "not built yet", or as their live note while a build
+                # is running.
+                unbuilt = p.get('built') is False
                 src, start, post = product_parts(key)
                 day = start or post or ''
                 if src == 'l2' and re.fullmatch(r'\d{8}', day or ''):
@@ -1102,7 +1142,13 @@ class FireRoutes:
                 # Where the scan actually found it. Falling back to
                 # the by-key lookup only when the scan had nothing.
                 path = p.get('_path') or ''
-                if not path:
+                # No by-key lookup for an unbuilt product. The lookup
+                # can copy a stack back from the durable store, which a
+                # polled GET should not set off for a product the scan
+                # already found absent; and a half-written .bin on the
+                # ramdisk mid-build must not be measured or queued for
+                # preview rendering as if it were finished.
+                if not path and not unbuilt:
                     path = stack_path_for_product(fire, key)
                 ram_mb = _mb(path) if path else None
                 ssd_mb = None
@@ -1210,6 +1256,7 @@ class FireRoutes:
                     'ready': ready,
                     'status': why,
                     'current': key == cur_key,
+                    'built': not unbuilt,
                 })
 
             # Products withheld above are still products: show them

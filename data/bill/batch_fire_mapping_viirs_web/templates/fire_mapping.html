@@ -10528,10 +10528,18 @@ function renderSourcesList(data) {
     // pending entry disappears only when the server reports the real
     // product -- see reapPendingProducts.
     try {
-        const live = new Set(rows.map((r) => r.key));
+        // Only a BUILT server row is "the real product". The server
+        // also lists unbuilt products now, and the newest date's L2 is
+        // keyed plain 'l2' -- the same key as the unbuilt placeholder --
+        // so reaping on any server row would drop a pending entry, and
+        // its status and failed flag, the moment the build began. Until
+        // the product is built the pending row stands in for it.
+        const live = new Set(rows.filter((r) => r.built !== false)
+                                 .map((r) => r.key));
         reapPendingProducts(live);
         for (const [k, p] of _pendingProducts) {
             if (live.has(k)) continue;
+            rows = rows.filter((r) => r.key !== k);
             const parts = parseProductKey(k);
             rows = rows.concat([{
                 key: k,
@@ -10611,7 +10619,7 @@ function renderSourcesList(data) {
                      title="${e.key} — click to show this source">
             <input type="checkbox" data-src-key="${e.key}"
                    ${_srcSelected.has(e.key) ? 'checked' : ''}
-                   ${e.pending
+                   ${(e.pending || e.built === false)
                      ? 'disabled title="not built yet"' : ''}
                    ${e.current
                      ? 'title="currently loaded — deleting it switches '
