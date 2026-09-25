@@ -935,6 +935,51 @@ let rightPostSource = 'l2';
 const _previewBlobs = new Map();
 // Size of each cached preview, for the Memory panel's image-cache row.
 const _previewBlobBytes = new Map();
+// The cache's capacity. It used to have none: every preview fetched was
+// kept until the page was left. Now it holds at most a quarter of the
+// device memory the browser reports, capped at 1 GB (1 GB where the
+// browser does not report it). When full, the least recently used
+// previews go first -- never one that is on screen -- and a preview that
+// went is simply fetched again when next needed.
+const PREVIEW_CACHE_BUDGET = (() => {
+    const GB = 1073741824;
+    const dm = (typeof navigator !== 'undefined'
+                && typeof navigator.deviceMemory === 'number'
+                && navigator.deviceMemory > 0) ? navigator.deviceMemory : 0;
+    return dm ? Math.min(GB, Math.floor(dm * GB / 4)) : GB;
+})();
+
+function previewCacheBytes() {
+    let b = 0;
+    for (const k of _previewBlobs.keys()) b += _previewBlobBytes.get(k) || 0;
+    return b;
+}
+
+function enforcePreviewCacheBudget(keepKey) {
+    let total = previewCacheBytes();
+    if (total <= PREVIEW_CACHE_BUDGET) return;
+    const onScreen = new Set();
+    try {
+        document.querySelectorAll('img').forEach((im) => {
+            if (im.src && im.src.startsWith('blob:')) onScreen.add(im.src);
+        });
+    } catch (_) {}
+    let dropped = 0;
+    for (const [k, u] of [..._previewBlobs.entries()]) {   // oldest first
+        if (total <= PREVIEW_CACHE_BUDGET) break;
+        if (k === keepKey || onScreen.has(u)) continue;
+        try { URL.revokeObjectURL(u); } catch (_) {}
+        _previewBlobs.delete(k);
+        total -= _previewBlobBytes.get(k) || 0;
+        _previewBlobBytes.delete(k);
+        dropped += 1;
+    }
+    if (dropped) {
+        log(`[perf] preview cache over its ${fmtBytes(PREVIEW_CACHE_BUDGET)} `
+            + `budget: released ${dropped} least recently used preview(s)`,
+            'dim');
+    }
+}
 let _previewStamp = Date.now();
 // Separate stamp for HINT images only.
 //
@@ -1020,7 +1065,13 @@ const _previewInflight = new Map();
 // starts exactly one. Callers must never fetch a preview any other
 // way, or the duplication returns.
 function getPreviewObjectURL(key, url, announce) {
-    if (_previewBlobs.has(key)) return Promise.resolve(_previewBlobs.get(key));
+    if (_previewBlobs.has(key)) {
+        // Most recently used goes to the back: eviction takes the front.
+        const u = _previewBlobs.get(key);
+        _previewBlobs.delete(key);
+        _previewBlobs.set(key, u);
+        return Promise.resolve(u);
+    }
     const pending = _previewInflight.get(key);
     if (pending) return pending;
 
@@ -1082,6 +1133,7 @@ function getPreviewObjectURL(key, url, announce) {
         const obj = URL.createObjectURL(blob);
         _previewBlobs.set(key, obj);
         _previewBlobBytes.set(key, blob.size);
+        enforcePreviewCacheBudget(key);
         _productByUrl.set(obj, served || wanted || '');
         // Bind the georeferencing to the BYTES, not to a view name.
         // Whatever ends up in an <img>, its geotransform travels with
@@ -10416,45 +10468,45 @@ async function serverMemoryRows() {
 async function browserMemoryRows() {
     const MB = 1048576;
     const rows = [];
+    // JavaScript heap of this tab: Chrome and Edge only (and rounded by
+    // Chrome unless it is started with --enable-precise-memory-info).
+    // Image pixels are NOT in this heap, so it stays low while images
+    // are what fills memory.
     const pm = (typeof performance !== 'undefined') && performance.memory;
     if (pm && pm.jsHeapSizeLimit) {
         rows.push({type: 'JS heap', capacity_mb: pm.jsHeapSizeLimit / MB,
                    used_mb: pm.usedJSHeapSize / MB,
-                   where: 'JavaScript memory of this tab'});
+                   where: 'JavaScript objects of this tab (image pixels are '
+                          + 'held outside it)'});
     } else {
         rows.push({type: 'JS heap', error: 'not reported by this browser '
                    + '(Chrome and Edge report it)'});
     }
-    let bytes = 0, n = 0;
-    for (const k of _previewBlobs.keys()) {
-        bytes += _previewBlobBytes.get(k) || 0;
-        n += 1;
-    }
+    // The preview images this tab keeps, against the budget enforced on
+    // them (PREVIEW_CACHE_BUDGET).
+    let n = 0;
+    for (const k of _previewBlobs.keys()) { if (_previewBlobBytes.has(k)) n += 1; }
     for (const k of [..._previewBlobBytes.keys()]) {
         if (!_previewBlobs.has(k)) _previewBlobBytes.delete(k);
     }
-    rows.push({type: 'image cache', capacity_mb: null, used_mb: bytes / MB,
-               where: `${n} preview image(s) held by this tab; `
-                      + 'no fixed limit'});
+    rows.push({type: 'image cache', capacity_mb: PREVIEW_CACHE_BUDGET / MB,
+               used_mb: previewCacheBytes() / MB,
+               where: `${n} preview image(s) kept by this tab; least `
+                      + 'recently used released first when full'});
+    // The storage this browser allows the site for client-side caching
+    // (Cache API, IndexedDB), shared by all its tabs, as the browser
+    // reports it.
     try {
         if (navigator.storage && navigator.storage.estimate) {
             const e = await navigator.storage.estimate();
-            rows.push({type: 'browser storage',
-                       capacity_mb: (e.quota || 0) / MB,
-                       used_mb: (e.usage || 0) / MB,
-                       where: 'this site\u2019s storage quota in this '
-                              + 'browser, shared by all its tabs'});
+            if (typeof e.quota === 'number' && e.quota > 0) {
+                rows.push({type: 'browser storage',
+                           capacity_mb: e.quota / MB,
+                           used_mb: (e.usage || 0) / MB,
+                           where: 'client-side caching storage this browser '
+                                  + 'allows the site, shared by all its tabs'});
+            }
         }
-    } catch (_) {}
-    try {
-        let ls = 0;
-        for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i) || '';
-            ls += (k.length + (localStorage.getItem(k) || '').length) * 2;
-        }
-        rows.push({type: 'localStorage', capacity_mb: 5, used_mb: ls / MB,
-                   where: 'saved page settings; browsers allow about '
-                          + '5 MB per site'});
     } catch (_) {}
     for (const r of rows) {
         if (typeof r.capacity_mb === 'number' && typeof r.used_mb === 'number') {
@@ -10496,30 +10548,40 @@ function renderMemoryRows(serverRows, browserRows) {
     if (!box) return;
     const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g,
         (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-    const td = 'padding:1px 4px;white-space:nowrap';
-    const num = td + ';text-align:right;font-family:monospace';
+    // A grid of spans rather than a <table>: the stylesheet's global
+    // table rules (13 px cells, 12 px upper-case headings) made this
+    // area larger than the rest of the panel. Every cell sets 11 px
+    // itself -- the size of the percentage next to each bar.
+    const cell = 'font-size:11px;white-space:nowrap';
+    const num = cell + ';font-family:monospace;text-align:right';
+    const section = (label, first) =>
+        `<span style="grid-column:1 / -1;font-size:11px;font-weight:600;
+                      color:#888;padding:${first ? '0' : '4px'} 0 1px;
+                      ${first ? '' : 'border-top:1px solid #eee;'}">${label}</span>`;
     const line = (r) => {
-        const tip = r.error ? `${r.where ? r.where + ' \u2014 ' : ''}`
-                              + `unavailable: ${r.error}`
-                            : (r.where || '');
-        return `<tr title="${esc(tip)}">
-          <td style="${td};color:#333">${esc(r.type)}</td>
-          <td style="${num}">${fmtMemMB(r.capacity_mb)}</td>
-          <td style="${num}">${fmtMemMB(r.used_mb)}</td>
-          <td style="${num}">${fmtMemMB(r.free_mb)}</td>
-          <td style="${td}">${memPctCell(r.pct)}</td></tr>`;
+        const tip = esc(r.error ? `${r.where ? r.where + ' \u2014 ' : ''}`
+                                  + `unavailable: ${r.error}`
+                                : (r.where || ''));
+        return `<span style="${cell};color:#333" title="${tip}">${esc(r.type)}</span>
+          <span style="${num}" title="${tip}">${fmtMemMB(r.capacity_mb)}</span>
+          <span style="${num}" title="${tip}">${fmtMemMB(r.used_mb)}</span>
+          <span style="${num}" title="${tip}">${fmtMemMB(r.free_mb)}</span>
+          <span style="${cell}" title="${tip}">${memPctCell(r.pct)}</span>`;
     };
-    const head = ['Type', 'Capacity', 'Used', 'Free', '%'].map((h, i) =>
-        `<th style="${td};text-align:${i && i < 4 ? 'right' : 'left'};
-                   color:#666;font-weight:600">${h}</th>`).join('');
-    box.innerHTML = `<table style="border-collapse:collapse;font-size:11px">
-      <thead><tr>${head}</tr></thead><tbody>
+    const head = ['Type', 'Size (MB)', 'Used (MB)', 'Free (MB)', '%']
+        .map((h, i) => `<span style="${cell};font-weight:600;color:#666;
+                                     text-align:${i && i < 4 ? 'right'
+                                                            : 'left'}">${h}</span>`)
+        .join('');
+    box.innerHTML = `<div style="display:grid;align-items:center;
+                          grid-template-columns:repeat(5, auto);
+                          justify-content:start;column-gap:10px;row-gap:1px">
+      ${head}
+      ${section('Server', true)}
       ${serverRows.map(line).join('')}
-      <tr><td colspan="5" style="padding:4px 4px 1px;color:#888;
-          font-size:10px;border-top:1px solid #eee">this browser</td></tr>
+      ${section('Browser', false)}
       ${browserRows.map(line).join('')}
-      </tbody></table>
-      <div style="color:#999;font-size:10px;padding:2px 4px">MB</div>`;
+    </div>`;
 }
 
 async function memoryTick() {

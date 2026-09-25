@@ -16,6 +16,9 @@ Rows, all in MB:
   store, output, /tmp
               the durable store, the output root and the temporary
               directory -- only when one is on a volume of its own
+  cgroup      the memory limit of the server's control group (systemd
+              MemoryMax, a container) -- only when one is set below RAM:
+              the kernel stops the server there even with RAM free
   GPU n       each CUDA device's memory (via nvidia-smi, as KGC uses)
   GDAL cache  GDAL's raster block cache in this server (GDAL_CACHEMAX)
 """
@@ -102,6 +105,64 @@ def _sample_swap():
     where = ('all swap devices and files together' if total
              else 'no swap is configured')
     _publish('swap', total, max(0, total - free), free, where)
+
+
+def _cgroup_files():
+    """(limit file, usage file) of this process's memory cgroup, or None."""
+    try:
+        with open('/proc/self/cgroup', encoding='ascii') as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        lines = []
+    cands = []
+    for ln in lines:
+        parts = ln.split(':', 2)
+        if len(parts) != 3:
+            continue
+        hid, ctrls, path = parts
+        if hid == '0' and ctrls == '':                       # cgroup v2
+            base = '/sys/fs/cgroup' + path.rstrip('/')
+            cands.append((base + '/memory.max', base + '/memory.current'))
+        elif 'memory' in ctrls.split(','):                   # cgroup v1
+            base = '/sys/fs/cgroup/memory' + path.rstrip('/')
+            cands.append((base + '/memory.limit_in_bytes',
+                          base + '/memory.usage_in_bytes'))
+    cands.append(('/sys/fs/cgroup/memory.max',
+                  '/sys/fs/cgroup/memory.current'))
+    for lim, cur in cands:
+        if os.path.isfile(lim) and os.path.isfile(cur):
+            return lim, cur
+    return None
+
+
+def _read_int(path):
+    with open(path, encoding='ascii') as fh:
+        t = fh.read().strip()
+    return None if t == 'max' else int(t)
+
+
+def _cgroup_sampler():
+    """A sampler for the cgroup limit -- or None when none constrains us."""
+    files = _cgroup_files()
+    if not files:
+        return None
+    lim_f, cur_f = files
+    try:
+        limit = _read_int(lim_f)
+        total = _meminfo().get('MemTotal', 0)
+    except (OSError, ValueError):
+        return None
+    if limit is None or not total or limit >= total:
+        return None                     # unlimited, or no tighter than RAM
+
+    def sample():
+        lim = _read_int(lim_f) or 0
+        used = _read_int(cur_f) or 0
+        _publish('cgroup', lim, min(used, lim), max(0, lim - used),
+                 f'memory limit of this server\'s control group '
+                 f'({os.path.dirname(lim_f)}); usage includes file cache '
+                 f'the kernel can reclaim')
+    return sample
 
 
 def _mount_point(path: str) -> str:
@@ -205,6 +266,9 @@ def ensure_started(output_root: str = '') -> None:
             return
         _started = True
     samplers = [('RAM', _sample_ram), ('swap', _sample_swap)]
+    cg = _cgroup_sampler()
+    if cg:
+        samplers.append(('cgroup', cg))
     for name, path, what in _volumes(output_root):
         samplers.append((name, _disk_sampler(name, path, what)))
     gs = _gpu_sampler()
