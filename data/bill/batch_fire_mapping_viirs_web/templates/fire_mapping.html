@@ -3724,6 +3724,11 @@ function collectUiState() {
         overlays: !!overlaysVisible,
         panel_collapsed: !!_panelCollapsed,
         sources_collapsed: !!_sourcesCollapsed,
+        // Widths the operator dragged the Sources columns to. Nulls
+        // mean "still at the default", so a later default change is
+        // picked up rather than frozen in.
+        source_cols: Array.isArray(_srcColWidths)
+            ? _srcColWidths.slice() : null,
         use_hdbscan: c('use-hdbscan'),
         eraser_size: v('p-eraser_size'),
         eraser_on: c('eraser-on'),
@@ -3872,6 +3877,19 @@ function applySavedUiState(ui, kgcParams) {
                 && ui.sources_collapsed !== _sourcesCollapsed) {
             toggleSourcesPanel(ui.sources_collapsed);
         }
+        try {
+            if (Array.isArray(ui.source_cols)) {
+                // Take only what this build has columns for, and only
+                // values that are strings, so a stale or malformed
+                // entry cannot wedge the grid.
+                for (let i = 0; i < _srcColWidths.length; i++) {
+                    const w = ui.source_cols[i];
+                    _srcColWidths[i] = (typeof w === 'string' && w)
+                        ? w : null;
+                }
+                applySourceColWidths();
+            }
+        } catch (_) {}
 
         const setSel = (id, val) => {
             const el = document.getElementById(id);
@@ -5457,6 +5475,9 @@ let _buildSeen = false;
 let _buildGrace = 0;
 // Whether the bottom progress bar is currently reporting OUR builds.
 let _buildBarOn = false;
+// The watcher's own busy ticket, so it ends ITS work and not
+// whatever else happens to be open at the time.
+let _buildBusyId = null;
 // Is this product already built and offered?
 //
 // Used to grey out a date the fire already has: ticking it achieves
@@ -5544,22 +5565,50 @@ function startBuildWatch() {
                 // from the pane's own top-left corner, and no resize
                 // handler refits.
                 try {
-                    const _lbl = `Building ${j.current || 'products'}`
-                        + ` \u2014 ${j.done + 1} of ${j.total}`;
-                    // Progress belongs beside the layer it concerns.
-                    const _keys = String(j.current || '')
+                    // Each row gets ITS OWN state.
+                    //
+                    // Every queued product used to be given the same
+                    // string -- the batch counter "building (1 of 3)"
+                    // -- so three independent products all claimed to
+                    // be building, and the ones merely waiting said
+                    // nothing about waiting. The server already
+                    // separates what is building (current) from what
+                    // is behind it (queued), so the rows can too.
+                    const _cur = String(j.current || '')
                         .split(',').map((x) => x.trim())
                         .filter(Boolean);
-                    for (const k of _keys) {
-                        notePendingProduct(k,
-                            `building (${j.done + 1} of ${j.total})`);
+                    const _qd = (Array.isArray(j.queued) ? j.queued : [])
+                        .map((x) => String(x || '').trim())
+                        .filter(Boolean);
+                    const _stage = String(j.stage || '').trim();
+                    const _detail = String(j.detail || '').trim();
+                    for (const k of _cur) {
+                        let _t = 'building';
+                        if (_stage) _t += ` \u2014 ${_stage}`;
+                        if (_detail) _t += ` (${_detail})`;
+                        setPendingStatus(k, _t);
                     }
+                    let _ahead = 0;
+                    for (const k of _qd) {
+                        if (_cur.includes(k)) continue;
+                        setPendingStatus(k, _ahead === 0
+                            ? 'queued \u2014 next'
+                            : `queued \u2014 ${_ahead} ahead`);
+                        _ahead++;
+                    }
+                    // One repaint for the whole batch.
+                    try {
+                        renderSourcesList(_lastSourcesData
+                                          || {sources: []});
+                    } catch (_) {}
+                    const _lbl = `Building ${j.current || 'products'}`
+                        + ` \u2014 ${j.done + 1} of ${j.total}`;
+                    // The bar names only what is actually building.
                     if (!_buildBarOn) {
                         _buildBarOn = true;
-                        layerBusyBegin(_lbl, _keys);
+                        _buildBusyId = layerBusyBegin(_lbl, _cur);
                     } else {
-                        _layerLabel = _lbl;
-                        layerStatusPaint();
+                        layerBusyUpdate(_buildBusyId, _lbl, _cur);
                     }
                 } catch (_) {}
                 if (prog) {
@@ -5626,7 +5675,10 @@ function startBuildWatch() {
                 // Hand the bottom bar back.
                 if (_buildBarOn) {
                     _buildBarOn = false;
-                    try { layerBusyEnd(); } catch (_) {}
+                    // End OUR ticket, not whichever happens to be
+                    // newest: an unrelated pane load may be open.
+                    try { layerBusyEnd(_buildBusyId); } catch (_) {}
+                    _buildBusyId = null;
                 }
                 // The batch is over: the watcher releases both.
                 _dateApplying = false;
@@ -7941,46 +7993,89 @@ function applyPaneFit(pane, img, provisional) {
 }
 
 // ---- Imagery loading indicator -----------------------------------
-let _layerBusy = 0;
-let _layerLabel = '';
-let _layerStart = 0;
 let _layerTimer = null;
 
-// Which product rows this activity concerns, so it can be reported
-// in the Sources list beside the layer it is about, rather than in a
-// bar that appears under the imagery.
-let _layerBusyKeys = [];
+// One ticket per operation; each names the product rows it concerns.
+//
+// This was a single global label, a single start time and a single
+// counter shared by EVERY busy row. Three ways that leaked state
+// between rows that represent independent products:
+//
+//   * one label -- a second operation overwrote it, so the first
+//     row's message silently changed to the second's;
+//   * one start time -- set on the first begin only, so every row
+//     counted the FIRST operation's elapsed seconds, not its own;
+//   * one counter, and an end() that named no keys -- so the last
+//     end cleared the message on rows that were still working, and
+//     an end belonging to one operation decremented a counter the
+//     other was relying on.
+//
+// A ticket carries its own label, its own start and its own keys, so
+// a row reads only the work that actually concerns it.
+const _layerBusyTickets = new Map();     // id -> {keys, label, start}
+let _layerBusySeq = 0;
 
 function layerBusyBegin(label, keys) {
-    _layerBusy++;
-    _layerLabel = label || 'Loading';
-    if (keys) {
-        // Accumulate, do not replace. Two panes can be loading at
-        // once; replacing would leave the first pane's row showing a
-        // message that is no longer being updated until the last load
-        // finished and cleared everything.
-        for (const k of (Array.isArray(keys) ? keys : [keys])) {
-            if (k && !_layerBusyKeys.includes(k)) _layerBusyKeys.push(k);
-        }
-    }
-    if (_layerBusy === 1) _layerStart = performance.now();
+    const id = ++_layerBusySeq;
+    const list = (keys == null) ? []
+        : (Array.isArray(keys) ? keys : [keys]).filter(Boolean);
+    _layerBusyTickets.set(id, {keys: list,
+                               label: label || 'Loading',
+                               start: performance.now()});
     layerStatusPaint();
     if (!_layerTimer) _layerTimer = setInterval(layerStatusPaint, 250);
+    return id;
 }
 
-function layerBusyEnd() {
-    _layerBusy = Math.max(0, _layerBusy - 1);
-    if (_layerBusy === 0) {
-        if (_layerTimer) {
-            clearInterval(_layerTimer);
-            _layerTimer = null;
-        }
-        // Only the LAST end clears the rows: nested loads share the
-        // counter, and clearing on the first would leave the remaining
-        // work unreported.
-        _layerBusyKeys = [];
+// Change what an OPEN ticket says without restarting its clock.
+// For a watcher that reports progress as it polls.
+function layerBusyUpdate(id, label, keys) {
+    const t = _layerBusyTickets.get(id);
+    if (!t) return;
+    if (label) t.label = label;
+    if (keys != null) {
+        t.keys = (Array.isArray(keys) ? keys : [keys]).filter(Boolean);
     }
     layerStatusPaint();
+}
+
+// End one ticket. With no id, ends the most recent still-open one,
+// which is what the callers that do not track an id expect.
+function layerBusyEnd(id) {
+    if (id != null && _layerBusyTickets.has(id)) {
+        _layerBusyTickets.delete(id);
+    } else if (id == null && _layerBusyTickets.size) {
+        let last = -1;
+        for (const k of _layerBusyTickets.keys()) {
+            if (k > last) last = k;
+        }
+        _layerBusyTickets.delete(last);
+    }
+    if (!_layerBusyTickets.size && _layerTimer) {
+        clearInterval(_layerTimer);
+        _layerTimer = null;
+    }
+    layerStatusPaint();
+}
+
+// The newest open ticket naming this key, or null. Newest wins so a
+// row shows what is happening to it NOW.
+function _layerBusyTicketFor(key) {
+    let best = null;
+    let bestId = -1;
+    for (const [id, t] of _layerBusyTickets) {
+        if (id > bestId && t.keys.includes(key)) { best = t; bestId = id; }
+    }
+    return best;
+}
+
+// Every key any open ticket names, without duplicates.
+function _layerBusyAllKeys() {
+    const out = [];
+    for (const t of _layerBusyTickets.values()) {
+        for (const k of t.keys) if (!out.includes(k)) out.push(k);
+    }
+    return out;
 }
 
 // The transient message for one product row, or ''.
@@ -7991,10 +8086,12 @@ function layerBusyEnd() {
 // asks this function instead, and the painter below updates the cell
 // between renders for immediacy. One source of truth, two readers.
 function layerBusyNoteFor(key) {
-    if (_layerBusy <= 0 || !key) return '';
-    if (!_layerBusyKeys.includes(key)) return '';
-    const secs = (performance.now() - _layerStart) / 1000;
-    return `${_layerLabel}  ${secs.toFixed(1)}s`;
+    if (!key) return '';
+    // This row's OWN ticket -- its own label, its own clock.
+    const t = _layerBusyTicketFor(key);
+    if (!t) return '';
+    const secs = (performance.now() - t.start) / 1000;
+    return `${t.label}  ${secs.toFixed(1)}s`;
 }
 
 // Can the Sources list carry the message right now?
@@ -8002,8 +8099,9 @@ function layerBusyRowsVisible() {
     try {
         if (_sourcesCollapsed) return false;
         const box = document.getElementById('sources-list');
-        if (!box || !_layerBusyKeys.length) return false;
-        return _layerBusyKeys.some((k) => box.querySelector(
+        const keys = _layerBusyAllKeys();
+        if (!keys.length) return false;
+        return keys.some((k) => box.querySelector(
             `.src-row[data-row-key="${k}"]`));
     } catch (_) {
         return false;
@@ -8023,7 +8121,7 @@ function layerStatusPaint() {
     const eta = document.getElementById('progress-eta');
     if (!bar || !title) return;
 
-    if (_layerBusy <= 0) {
+    if (!_layerBusyTickets.size) {
         // Clear any note left in the list, then put the bar away.
         try {
             const box = document.getElementById('sources-list');
@@ -8060,7 +8158,10 @@ function layerStatusPaint() {
         }
         try {
             const box = document.getElementById('sources-list');
-            for (const k of _layerBusyKeys) {
+            // Each row is painted from its own ticket, so two rows
+            // busy with different work show different messages and
+            // count their own seconds.
+            for (const k of _layerBusyAllKeys()) {
                 const row = box && box.querySelector(
                     `.src-row[data-row-key="${k}"]`);
                 if (!row) continue;
@@ -8070,16 +8171,33 @@ function layerStatusPaint() {
                     cell.dataset.busyNote = '1';
                 }
             }
+            // A row that WAS busy and no longer is must lose its note
+            // now, even while other rows are still working.
+            box.querySelectorAll('.src-row').forEach((row) => {
+                const cell = row.querySelector('.src-why');
+                if (!cell || cell.dataset.busyNote !== '1') return;
+                if (!layerBusyNoteFor(row.dataset.rowKey || '')) {
+                    cell.textContent = '';
+                    cell.dataset.busyNote = '';
+                }
+            });
         } catch (_) { /* informational */ }
         return;
     }
 
-    const secs = (performance.now() - _layerStart) / 1000;
+    // The bar is a single line, so it reports the newest ticket.
+    let _newest = null;
+    let _newestId = -1;
+    for (const [id, t] of _layerBusyTickets) {
+        if (id > _newestId) { _newest = t; _newestId = id; }
+    }
+    if (!_newest) return;
+    const secs = (performance.now() - _newest.start) / 1000;
     const mapping = (typeof isMapping !== 'undefined') && isMapping;
     if (mapping && bar.dataset.layerOwned !== '1') return;
     bar.dataset.layerOwned = '1';
     bar.classList.remove('is-collapsed');
-    title.textContent = _layerLabel;
+    title.textContent = _newest.label;
     if (eta) {
         eta.textContent = `${secs.toFixed(1)}s`
             + (secs > 20 ? '  (still working)' : '');
@@ -10243,6 +10361,112 @@ function srcCloudCell(e) {
     }
 }
 
+
+// ---- Sources columns: header, widths, drag-to-resize --------------
+//
+// The list is ONE css grid (see style.css), so a column is a single
+// track shared by every row. Sizing it here therefore moves the whole
+// column at once and rows cannot drift apart.
+const SRC_COL_LABELS = ['', 'Product', 'Cloud', '', 'Size', 'Status'];
+const SRC_COL_DEFAULTS = ['16px', 'minmax(7em, 1fr)', '132px',
+                          '12px', '4.6em', 'minmax(0, 10em)'];
+// Null means "leave this column at its default".
+let _srcColWidths = [null, null, null, null, null, null];
+
+function sourcesHeaderHtml() {
+    return '<div class="src-head">' + SRC_COL_LABELS.map((lab, i) => {
+        // No handle after the last column: there is nothing to its
+        // right to give or take the space.
+        const grip = (i < SRC_COL_LABELS.length - 1)
+            ? `<i class="src-grip" data-col="${i}"
+                  title="Drag to resize. Double-click to reset."></i>`
+            : '';
+        return `<span class="src-h" data-col="${i}"
+                      title="${lab || ''}">${lab}${grip}</span>`;
+    }).join('') + '</div>';
+}
+
+// Write the chosen widths onto the grid as css variables.
+function applySourceColWidths() {
+    const box = document.getElementById('sources-list');
+    if (!box) return;
+    _srcColWidths.forEach((w, i) => {
+        if (w == null) box.style.removeProperty(`--src-c${i}`);
+        else box.style.setProperty(`--src-c${i}`, w);
+    });
+}
+
+// Pixel width of a column right now, measured from a real cell.
+function measureSourceCol(i) {
+    const box = document.getElementById('sources-list');
+    if (!box) return 0;
+    const cell = box.querySelector(`.src-h[data-col="${i}"]`);
+    return cell ? Math.round(cell.getBoundingClientRect().width) : 0;
+}
+
+let _srcDrag = null;
+
+function initSourceColResize() {
+    const box = document.getElementById('sources-list');
+    if (!box || box.dataset.colResize === '1') return;
+    box.dataset.colResize = '1';          // listeners attach once
+
+    box.addEventListener('pointerdown', (ev) => {
+        const grip = ev.target.closest('.src-grip');
+        if (!grip || !box.contains(grip)) return;
+        ev.preventDefault();
+        ev.stopPropagation();             // never a row click
+        const col = parseInt(grip.dataset.col, 10);
+        if (!(col >= 0)) return;
+        _srcDrag = {col: col, x: ev.clientX, w0: measureSourceCol(col)};
+        grip.classList.add('is-dragging');
+        document.body.classList.add('src-resizing');
+        try { grip.setPointerCapture(ev.pointerId); } catch (_) {}
+    });
+
+    box.addEventListener('pointermove', (ev) => {
+        if (!_srcDrag) return;
+        ev.preventDefault();
+        // 24px floor: a column narrower than that cannot be grabbed
+        // again, which would strand it.
+        const w = Math.max(24, _srcDrag.w0 + (ev.clientX - _srcDrag.x));
+        _srcColWidths[_srcDrag.col] = w + 'px';
+        applySourceColWidths();
+    });
+
+    const finish = (ev) => {
+        if (!_srcDrag) return;
+        _srcDrag = null;
+        box.querySelectorAll('.src-grip.is-dragging')
+           .forEach((g) => g.classList.remove('is-dragging'));
+        document.body.classList.remove('src-resizing');
+        try { saveUiState(); } catch (_) {}
+    };
+    box.addEventListener('pointerup', finish);
+    box.addEventListener('pointercancel', finish);
+
+    // Double-click a handle: that column goes back to its default.
+    box.addEventListener('dblclick', (ev) => {
+        const grip = ev.target.closest('.src-grip');
+        if (!grip || !box.contains(grip)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const col = parseInt(grip.dataset.col, 10);
+        if (!(col >= 0)) return;
+        _srcColWidths[col] = null;
+        applySourceColWidths();
+        try { saveUiState(); } catch (_) {}
+    });
+
+    // A click that started on a handle must not also select a row.
+    box.addEventListener('click', (ev) => {
+        if (ev.target.closest('.src-grip')) {
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+    }, true);
+}
+
 function renderSourcesList(data) {
     const box = document.getElementById('sources-list');
     if (!box) return;
@@ -10295,8 +10519,11 @@ function renderSourcesList(data) {
     } catch (_) {}
 
     if (!rows.length) {
-        box.innerHTML = '<div style="color:#888;font-size:11px;'
+        box.innerHTML = sourcesHeaderHtml()
+            + '<div style="color:#888;font-size:11px;'
             + 'padding:6px">No products yet.</div>';
+        applySourceColWidths();
+        initSourceColResize();
         return;
     }
     for (const k of [..._srcSelected]) {
@@ -10309,7 +10536,8 @@ function renderSourcesList(data) {
     let shown = '';
     try { shown = currentProductKey() || ''; } catch (_) { shown = ''; }
 
-    box.innerHTML = rows.map((e) => {
+    const _head = sourcesHeaderHtml();
+    box.innerHTML = _head + rows.map((e) => {
         // Date first, exactly as the source selectors name it.
         const name = selectorLabel({key: e.key, label: e.label});
         const mb = (e.ram_mb != null) ? e.ram_mb
@@ -10345,6 +10573,8 @@ function renderSourcesList(data) {
                   >${_busyNote || (e.ready ? '' : (e.status || ''))}</span>
         </div>`;
     }).join('');
+    applySourceColWidths();
+    initSourceColResize();
     box.querySelectorAll('input[data-src-key]').forEach((cb) => {
         cb.addEventListener('change', () => {
             if (cb.checked) _srcSelected.add(cb.dataset.srcKey);
@@ -10409,7 +10639,12 @@ const _pendingProducts = new Map();
 // that reads it, so the order is obvious rather than merely safe.
 let _lastSourcesData = null;
 
-function notePendingProduct(key, status) {
+// Record one product's status WITHOUT redrawing.
+//
+// Split out so a batch can set several rows and repaint once. The
+// map is keyed by product, so one row's status can never be written
+// into another's.
+function setPendingStatus(key, status) {
     if (!key) return;
     const prev = _pendingProducts.get(key) || {};
     _pendingProducts.set(key, {
@@ -10417,6 +10652,11 @@ function notePendingProduct(key, status) {
         since: prev.since || Date.now(),
         failed: false,
     });
+}
+
+function notePendingProduct(key, status) {
+    if (!key) return;
+    setPendingStatus(key, status);
     // Draw it NOW, from the payload already in hand.
     //
     // Waiting for the server round trip would leave a window in which

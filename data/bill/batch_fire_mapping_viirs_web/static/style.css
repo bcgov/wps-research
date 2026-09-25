@@ -1445,8 +1445,16 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 }
 .sources-list {
     display: grid;
+    /* Track widths come from variables so a drag can change one
+       column without touching the others. The defaults are the
+       widths this list has always had. */
     grid-template-columns:
-        16px minmax(7em, 1fr) 132px 12px 4.6em minmax(0, 10em);
+        var(--src-c0, 16px)
+        var(--src-c1, minmax(7em, 1fr))
+        var(--src-c2, 132px)
+        var(--src-c3, 12px)
+        var(--src-c4, 4.6em)
+        var(--src-c5, minmax(0, 10em));
     align-items: center;
     column-gap: 6px;
     row-gap: 0;
@@ -1542,3 +1550,54 @@ tbody tr.row-mapping:hover { background: #ede1ff; }
 .src-row.is-pending .src-name { font-style: italic; }
 .src-row.is-pending .src-why { color: #2f6fd0; }
 .src-row.is-pending.is-failed .src-why { color: #c33; }
+
+
+/* ---- Resizable Sources columns ----------------------------------
+   A header row of the same grid, with a drag handle on the right
+   edge of each column. Sticky so it stays put while the list
+   scrolls, like a spreadsheet's column headings. */
+.src-head { display: contents; }
+.sources-list > .src-head > .src-h {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: #fafafa;
+    border-bottom: 1px solid #ddd;
+    padding: 3px 0;
+    font-size: 10px;
+    font-weight: 600;
+    color: #667;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    user-select: none;
+}
+/* The handle sits in the gutter to the right of its own column, so
+   dragging it never lands on the neighbouring text. */
+.src-h { position: relative; }
+.src-grip {
+    position: absolute;
+    top: 0;
+    right: -6px;
+    width: 9px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 4;
+}
+.src-grip::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 4px;
+    width: 1px;
+    background: #cfcfcf;
+}
+.src-grip:hover::after,
+.src-grip.is-dragging::after { background: #2f6fd0; width: 2px; }
+/* While dragging, the whole page shows the resize cursor and stops
+   selecting text under the pointer. */
+body.src-resizing { cursor: col-resize !important; user-select: none; }
