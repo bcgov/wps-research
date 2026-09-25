@@ -570,8 +570,32 @@ class FireRoutes:
             src, start, post = product_parts(key)
             try:
                 from ..aoi_stack import ensure_aoi_stack
+                from ..prepare import (note_product_state,
+                                       clear_product_state,
+                                       stage_for_stack_detail,
+                                       prep_stage_label)
+
+                # Report progress against THIS product's key.
+                #
+                # Deliberately not fire.progress: that is one slot per
+                # FIRE, shared by every product being built and by a
+                # mapping run, so reading a stage from it would show
+                # one product's work -- or a KGC run's -- on another
+                # product's row. The note store is keyed by product,
+                # so this cannot describe anything but `key`.
+                def _stage_cb(detail, frac=0.0):
+                    try:
+                        _lbl = prep_stage_label(
+                            stage_for_stack_detail(detail or ''))
+                        note_product_state(fire_numbe, key, 'building',
+                                           _lbl or (detail or ''))
+                    except Exception:
+                        pass
+
+                note_product_state(fire_numbe, key, 'building', '')
                 info = ensure_aoi_stack(
                     fire_numbe, fire.bbox_native,
+                    progress_cb=_stage_cb,
                     instance_key=getattr(state, 'shared_root', '') or '',
                     post_source=src,
                     ref_raster=(state.rasters_by_year.get(fire.fire_year)
@@ -594,6 +618,7 @@ class FireRoutes:
                 from ..prepare import product_key_for_path as _pkfp
                 _made = _pkfp(path) if path else ''
                 if _made and _made != key:
+                    clear_product_state(fire_numbe, key)
                     return key, '', (
                         f'built {_made} instead of {key} -- the '
                         f'requested date could not be produced'
@@ -617,6 +642,7 @@ class FireRoutes:
                            os.path.basename(existing_hdr(path) or 'NONE'),
                            (info or {}).get('rebuilt'), _cov))
                     if _cov is False:
+                        clear_product_state(fire_numbe, key)
                         return key, '', (
                             'the stack built for this date does not '
                             'cover the fire AOI'
@@ -632,8 +658,13 @@ class FireRoutes:
                     sys.stderr.write(
                         f'[build] {fire_numbe}: {key} built but not '
                         f'warmed: {wexc}\n')
+                # Built and warmed: this product has nothing pending,
+                # so its row goes quiet. Only THIS key is cleared.
+                clear_product_state(fire_numbe, key)
                 return key, path, None, time.time() - t0
             except Exception as exc:
+                note_product_state(fire_numbe, key, 'building',
+                                   'failed')
                 return key, '', f'{type(exc).__name__}: {exc}', \
                     time.time() - t0
 
@@ -711,6 +742,19 @@ class FireRoutes:
         self._send_json({'queued': len(todo), 'skipped': skipped,
                          'merged': False})
 
+    @staticmethod
+    def _product_states_payload(fire_numbe):
+        """Live per-product notes, as {key: {state, text}}."""
+        try:
+            from ..prepare import (product_states_for_fire,
+                                   product_state_text)
+            return {k: {'state': n.get('state', ''),
+                        'text': product_state_text(n)}
+                    for k, n in (product_states_for_fire(fire_numbe)
+                                 or {}).items()}
+        except Exception:
+            return {}
+
     def handle_api_build_status(self, fire_numbe):
         """Progress of the background batch, if one is running."""
         fire_numbe = unquote(fire_numbe)
@@ -748,6 +792,15 @@ class FireRoutes:
             'stage_fraction': pr.get('stage_fraction'),
             'fraction': pr.get('fraction'),
             'stage_eta_s': pr.get('eta_s'),
+            # Whose progress the stage fields describe. fire.progress
+            # is written by the prepare path AND by a mapping run, so
+            # a consumer that labels them "Building" must check this
+            # before believing them.
+            'stage_kind': pr.get('kind', ''),
+            # Per-PRODUCT state, keyed by product. The stage fields
+            # above come from fire.progress, which is one slot for the
+            # whole fire; these are the ones a row may safely read.
+            'product_states': _product_states_payload(fire_numbe),
         })
 
     def handle_api_products(self, fire_numbe):
@@ -1093,8 +1146,23 @@ class FireRoutes:
                 # without a separate trigger: enqueueing is idempotent
                 # and costs nothing for a product already queued,
                 # already rendering, or already done.
+                # This product's OWN note, if one is live. Keyed by
+                # product, so it can never be another row's.
+                _note = None
+                try:
+                    from ..prepare import product_state_note
+                    _note = product_state_note(fire_numbe, key)
+                except Exception:
+                    _note = None
+
                 if ready:
                     why = ''
+                    # Settled: drop any note so it cannot reappear.
+                    try:
+                        from ..prepare import clear_product_state
+                        clear_product_state(fire_numbe, key)
+                    except Exception:
+                        pass
                 elif path and os.path.isfile(path):
                     try:
                         from ..prepare import (enqueue_preview_warm,
@@ -1120,6 +1188,18 @@ class FireRoutes:
                 else:
                     why = 'not built yet'
 
+                # A live note describes what is happening NOW, so it
+                # outranks the state inferred from the files on disk.
+                # Only for this row: _note was fetched with this key.
+                if _note and not ready:
+                    try:
+                        from ..prepare import product_state_text
+                        _nt = product_state_text(_note)
+                        if _nt:
+                            why = _nt
+                    except Exception:
+                        pass
+
                 out.append({
                     'key': key,
                     'label': p.get('label') or key,
@@ -1131,6 +1211,38 @@ class FireRoutes:
                     'status': why,
                     'current': key == cur_key,
                 })
+
+            # Products withheld above are still products: show them
+            # with the reason, rather than letting them disappear.
+            #
+            # ready=False and no size, so nothing treats them as
+            # switchable; they exist in the list only to explain
+            # themselves. Keys already in `out` are never duplicated.
+            try:
+                from ..prepare import (product_states_for_fire,
+                                       product_state_text,
+                                       product_parts)
+                _seen_keys = {e['key'] for e in out}
+                for _k, _n in (product_states_for_fire(fire_numbe)
+                               or {}).items():
+                    if _k in _seen_keys:
+                        continue
+                    if _n.get('state') not in ('withheld', 'retired'):
+                        continue
+                    _s2, _st2, _p2 = product_parts(_k)
+                    out.append({
+                        'key': _k,
+                        'label': _k,
+                        'source': _s2,
+                        'date': _st2 or _p2 or '',
+                        'ram_mb': None,
+                        'ssd_mb': None,
+                        'ready': False,
+                        'status': product_state_text(_n),
+                        'current': False,
+                    })
+            except Exception:
+                pass
 
             # Cloud cover for the L2 days, from the shared store.
             cover, cc_pending = {}, False
@@ -3857,6 +3969,20 @@ class FireRoutes:
                                 'this AOI\'s grid; it will be rebuilt '
                                 'when next requested\n'
                                 % (fire_numbe, _bn))
+                            # Record WHY against this product, so the
+                            # row can say it rather than the product
+                            # simply not appearing. Still withheld from
+                            # the selector -- this only explains it.
+                            try:
+                                from ..prepare import (
+                                    note_product_state,
+                                    product_key_for_path)
+                                _wk = product_key_for_path(cand)
+                                if _wk:
+                                    note_product_state(
+                                        fire_numbe, _wk, 'withheld', _bn)
+                            except Exception:
+                                pass
                             continue
                     except Exception:
                         pass

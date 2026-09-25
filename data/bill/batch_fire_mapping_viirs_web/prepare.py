@@ -868,6 +868,148 @@ _preview_workers_started = False
 _preview_stats = {'done': 0, 'failed': 0, 'skipped': 0}
 
 
+# ---------------------------------------------------------------------
+# Per-product state notes
+# ---------------------------------------------------------------------
+#
+# Keyed by FIRE **and** PRODUCT, so a note can only ever describe the
+# one product it was written for. The fire-wide ``fire.progress`` is
+# deliberately NOT used here: it is a single slot shared by every
+# product of a fire (and by a mapping run), so a note taken from it
+# would show one product's work against another's row.
+#
+# Every note expires. A message that outlives the thing it describes
+# is worse than no message, so each state carries the longest time it
+# can still be true for; a stale entry is dropped on read as well as
+# on write.
+_product_state = {}
+_product_state_lock = threading.Lock()
+
+# Seconds a note stays believable. Work that is actively re-reported
+# (building, rendering) gets a short life and is refreshed by its own
+# progress; a conclusion that persists until something changes the
+# product (withheld, retired) gets a long one.
+PRODUCT_STATE_TTL = {
+    'building': 30.0,
+    'restoring': 60.0,
+    'repointing': 20.0,
+    'busy': 20.0,
+    'rerendering': 60.0,
+    'preview_failed': 900.0,
+    'preview_skipped': 60.0,
+    'hint_empty': 900.0,
+    'withheld': 3600.0,
+    'retired': 600.0,
+    'grid_deviates': 3600.0,
+}
+_PRODUCT_STATE_DEFAULT_TTL = 60.0
+_PRODUCT_STATE_MAX = 4000        # a hard ceiling; oldest go first
+
+
+def _product_state_ident(fire_numbe: str, key: str) -> str:
+    return '%s:%s' % (fire_numbe or '', key or '')
+
+
+def note_product_state(fire_numbe: str, key: str, state: str,
+                       detail: str = '') -> None:
+    """Record what is happening to ONE product, for its own row."""
+    if not fire_numbe or not key or not state:
+        return
+    try:
+        now = time.time()
+        ttl = PRODUCT_STATE_TTL.get(state, _PRODUCT_STATE_DEFAULT_TTL)
+        with _product_state_lock:
+            _product_state[_product_state_ident(fire_numbe, key)] = {
+                'state': state, 'detail': detail or '',
+                'at': now, 'ttl': ttl}
+            if len(_product_state) > _PRODUCT_STATE_MAX:
+                # Drop what has already expired first; only if that is
+                # not enough does age decide.
+                dead = [i for i, n in _product_state.items()
+                        if now - n['at'] > n['ttl']]
+                for i in dead:
+                    _product_state.pop(i, None)
+                while len(_product_state) > _PRODUCT_STATE_MAX:
+                    oldest = min(_product_state,
+                                 key=lambda i: _product_state[i]['at'])
+                    _product_state.pop(oldest, None)
+    except Exception:
+        pass                      # a note is never worth an exception
+
+
+def clear_product_state(fire_numbe: str, key: str) -> None:
+    """Forget this product's note -- it has reached a settled state."""
+    try:
+        with _product_state_lock:
+            _product_state.pop(
+                _product_state_ident(fire_numbe, key), None)
+    except Exception:
+        pass
+
+
+def product_state_note(fire_numbe: str, key: str):
+    """This product's note, or None if there is none or it expired."""
+    try:
+        ident = _product_state_ident(fire_numbe, key)
+        now = time.time()
+        with _product_state_lock:
+            n = _product_state.get(ident)
+            if not n:
+                return None
+            if now - n['at'] > n['ttl']:
+                _product_state.pop(ident, None)
+                return None
+            return dict(n)
+    except Exception:
+        return None
+
+
+def product_states_for_fire(fire_numbe: str) -> dict:
+    """Every live note for one fire, keyed by product key."""
+    out = {}
+    try:
+        pre = '%s:' % (fire_numbe or '')
+        now = time.time()
+        with _product_state_lock:
+            for ident, n in list(_product_state.items()):
+                if not ident.startswith(pre):
+                    continue
+                if now - n['at'] > n['ttl']:
+                    _product_state.pop(ident, None)
+                    continue
+                out[ident[len(pre):]] = dict(n)
+    except Exception:
+        pass
+    return out
+
+
+# What each state says in the Sources column. Kept beside the states
+# so the wording and the producers cannot drift apart.
+PRODUCT_STATE_TEXT = {
+    'building': 'building',
+    'restoring': 'restoring from the durable store',
+    'repointing': 'repointing to imagery already built',
+    'busy': 'waiting: another switch holds this fire',
+    'rerendering': 'previews stale for this grid; re-rendering',
+    'preview_failed': 'preview render failed; will retry on use',
+    'preview_skipped': 'preview render skipped',
+    'hint_empty': 'no hint pixels for this product',
+    'withheld': 'withheld: not on this AOI grid; rebuilds on use',
+    'retired': 'retired: built on an older grid; rebuilding',
+    'grid_deviates': 'grid differs from this AOI',
+}
+
+
+def product_state_text(note) -> str:
+    """The Sources-column wording for one note."""
+    if not note:
+        return ''
+    base = PRODUCT_STATE_TEXT.get(note.get('state'),
+                                  note.get('state') or '')
+    d = (note.get('detail') or '').strip()
+    return f'{base} \u2014 {d}' if (base and d) else (base or d)
+
+
 def preview_queue_status() -> dict:
     """What the warming queue is doing, for the Sources panel."""
     with _preview_lock:
@@ -896,6 +1038,12 @@ def _preview_worker() -> None:
         except Exception:
             continue
         ident = ''
+        # Reset with ident: these persist across loop iterations, so a
+        # failed unpack would otherwise leave the PREVIOUS product's
+        # fire and key in scope and the error below would be recorded
+        # against the wrong row.
+        fire = None
+        key = None
         try:
             fire, key, stack_path, ident = item
             # Check again at the moment of doing it: the product may
@@ -904,6 +1052,8 @@ def _preview_worker() -> None:
             if previews_complete(fire, key):
                 with _preview_lock:
                     _preview_stats['skipped'] += 1
+                # Already rendered: this product has nothing pending.
+                clear_product_state(fire.fire_numbe, key)
                 continue
             if not stack_path or not os.path.isfile(stack_path):
                 sys.stderr.write(
@@ -911,12 +1061,21 @@ def _preview_worker() -> None:
                     f'render\n')
                 with _preview_lock:
                     _preview_stats['skipped'] += 1
+                note_product_state(fire.fire_numbe, key,
+                                   'preview_skipped', 'stack is gone')
                 continue
             t0 = time.time()
             warm_product_artifacts(fire, stack_path)
             ok = previews_complete(fire, key)
             with _preview_lock:
                 _preview_stats['done' if ok else 'failed'] += 1
+            # The counters above are process-wide and cannot say WHICH
+            # product failed; this note can, because it is keyed.
+            if ok:
+                clear_product_state(fire.fire_numbe, key)
+            else:
+                note_product_state(fire.fire_numbe, key,
+                                   'preview_failed', 'produced no preview')
             sys.stderr.write(
                 '[warmq] %s: %s in %.1fs (%d still queued)\n'
                 % (ident, 'rendered' if ok else 'produced no preview',
@@ -924,6 +1083,12 @@ def _preview_worker() -> None:
         except Exception as exc:
             with _preview_lock:
                 _preview_stats['failed'] += 1
+            try:
+                if fire is not None and key:
+                    note_product_state(fire.fire_numbe, key,
+                                       'preview_failed', str(exc)[:80])
+            except Exception:
+                pass
             sys.stderr.write(f'[warmq] {ident or "?"}: failed: {exc}\n')
         finally:
             if ident:
@@ -2298,6 +2463,13 @@ def _switch_post_source_locked(fire: FireInfo, source: str) -> dict:
         sys.stderr.write(
             f'[prepare] {fire.fire_numbe}: repointing to '
             f'{os.path.basename(_want_path)} (already built)\n')
+        try:
+            _rk = product_key_for_path(_want_path)
+            if _rk:
+                note_product_state(fire.fire_numbe, _rk, 'repointing',
+                                   os.path.basename(_want_path))
+        except Exception:
+            pass
         info = {'path': _want_path}
         _src2, _start2, _post2 = product_parts(
             product_key_for_path(_want_path))

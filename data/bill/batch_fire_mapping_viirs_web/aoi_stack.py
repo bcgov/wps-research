@@ -408,6 +408,16 @@ def check_grid_conformance(paths, label: str = '', log=None) -> dict:
                % (label or 'fire', os.path.basename(p),
                   ', '.join(differing), got[0], got[1], ref[0], ref[1]))
         sys.stderr.write(msg + '\n')
+        # Attribute the deviation to the product it is about.
+        try:
+            from .prepare import (product_key_for_path,
+                                  note_product_state)
+            _dk = product_key_for_path(p)
+            if _dk and label:
+                note_product_state(label, _dk, 'grid_deviates',
+                                   ', '.join(differing))
+        except Exception:
+            pass
         if log:
             try:
                 log(msg)
@@ -1579,6 +1589,19 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
     if not force:
         try:
             from .durable import restore_stack
+            # Note it against the product being restored. The fire
+            # comes from `identifier` -- the caller's own, unsanitized
+            # name -- never from the filename, whose name field is
+            # lossy and could collide with another fire's.
+            try:
+                from .prepare import (product_key_for_path,
+                                      note_product_state)
+                _sk = product_key_for_path(out_bin)
+                if _sk:
+                    note_product_state(identifier, _sk, 'restoring',
+                                       os.path.basename(out_bin))
+            except Exception:
+                pass
             if restore_stack(out_bin, log=log_cb) \
                     and stack_is_valid(out_bin):
                 _cov = stack_covers_bbox(out_bin, bbox_native)
@@ -1715,6 +1738,19 @@ def ensure_aoi_stack(identifier: str, bbox_native, progress_cb=None,
                         sys.stderr.write(msg + '\n')
                         if log_cb:
                             log_cb('  ' + msg)
+                        # Name the product whose file is being retired,
+                        # so its own row can say so. Derived from the
+                        # victim's path, never from this build's key.
+                        try:
+                            from .prepare import (product_key_for_path,
+                                                  note_product_state)
+                            _vk = product_key_for_path(_ref)
+                            if _vk:
+                                note_product_state(
+                                    identifier, _vk, 'retired',
+                                    os.path.basename(_ref))
+                        except Exception:
+                            pass
                         for _ext in ('.bin', '.hdr', '_dates.json'):
                             _victim = os.path.splitext(_ref)[0] + _ext
                             try:

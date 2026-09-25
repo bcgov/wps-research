@@ -5580,13 +5580,19 @@ function startBuildWatch() {
                     const _qd = (Array.isArray(j.queued) ? j.queued : [])
                         .map((x) => String(x || '').trim())
                         .filter(Boolean);
-                    const _stage = String(j.stage || '').trim();
-                    const _detail = String(j.detail || '').trim();
+                    // NOT j.stage / j.detail.
+                    //
+                    // Those come from fire.progress, which is ONE slot
+                    // per fire, shared by every product being built
+                    // and written by a mapping run too -- so a KGC run
+                    // overlapping a build would have put mapping stage
+                    // text on a building product's row. The server now
+                    // reports a stage per product key instead, and a
+                    // row reads only its own.
+                    const _ps = (j.product_states || {});
                     for (const k of _cur) {
-                        let _t = 'building';
-                        if (_stage) _t += ` \u2014 ${_stage}`;
-                        if (_detail) _t += ` (${_detail})`;
-                        setPendingStatus(k, _t);
+                        const _n = _ps[k];
+                        setPendingStatus(k, (_n && _n.text) || 'building');
                     }
                     let _ahead = 0;
                     for (const k of _qd) {
@@ -5634,18 +5640,25 @@ function startBuildWatch() {
                             || parseProductKey(k)))
                         .join(' + '));
                     parts.push(`${j.done + 1} of ${j.total}`);
-                    if (j.stage) {
+                    // Only when the stage really is a build's.
+                    // fire.progress is shared with the mapping run
+                    // (kgc.py writes kind='kgc'), and showing its
+                    // stage under "Building ..." would describe work
+                    // on a different thing entirely.
+                    const _stageIsBuild = !j.stage_kind
+                        || j.stage_kind === 'prepare';
+                    if (j.stage && _stageIsBuild) {
                         const pct = (typeof j.stage_fraction === 'number')
                             ? ` ${Math.round(j.stage_fraction * 100)}%` : '';
                         const si = (j.stage_idx && j.stage_total)
                             ? ` (step ${j.stage_idx}/${j.stage_total})` : '';
                         parts.push(`${j.stage}${si}${pct}`);
                     }
-                    if (j.detail) parts.push(j.detail);
+                    if (j.detail && _stageIsBuild) parts.push(j.detail);
                     if (typeof j.elapsed_s === 'number') {
                         parts.push(`${fmtShortDur(j.elapsed_s)} elapsed`);
                     }
-                    if (typeof j.stage_eta_s === 'number') {
+                    if (typeof j.stage_eta_s === 'number' && _stageIsBuild) {
                         parts.push(`~${fmtShortDur(j.stage_eta_s)} for `
                                    + `this build`);
                     }
@@ -10467,6 +10480,41 @@ function initSourceColResize() {
     }, true);
 }
 
+
+// ---- Per-row state transition logging ----------------------------
+//
+// Edge-triggered: the watcher polls four times a second, so logging
+// the level would bury everything else. A line is written only when a
+// row's status string actually CHANGES, and each row is tracked under
+// its own key so one product's transition is never logged as
+// another's.
+const _rowStateLast = new Map();      // product key -> last status seen
+
+// Rows whose status is a live clock would log on every tick, so the
+// seconds are stripped before comparing: "Loading X 1.2s" and
+// "Loading X 1.4s" are the same state.
+function _rowStateNormalise(txt) {
+    return String(txt || '').replace(/\s+\d+\.\d+s\b/, '').trim();
+}
+
+function logRowTransition(key, status) {
+    if (!key) return;
+    const now = _rowStateNormalise(status);
+    const was = _rowStateLast.has(key) ? _rowStateLast.get(key) : null;
+    if (was === now) return;                 // level unchanged
+    _rowStateLast.set(key, now);
+    if (was === null && !now) return;        // first sight, already idle
+    const from = was || 'new';
+    const to = now || 'ready';
+    log(`[state] ${key}: ${from} \u2192 ${to}`, 'dim');
+}
+
+// Forget a product entirely, so a rebuilt one starts from 'new'
+// rather than from whatever it said before it was deleted.
+function forgetRowState(key) {
+    if (key) _rowStateLast.delete(key);
+}
+
 function renderSourcesList(data) {
     const box = document.getElementById('sources-list');
     if (!box) return;
@@ -10550,6 +10598,11 @@ function renderSourcesList(data) {
         // status: it is what is happening right now.
         let _busyNote = '';
         try { _busyNote = layerBusyNoteFor(e.key); } catch (_) {}
+        // Exactly what this row will show, computed once so the cell
+        // and the transition log can never disagree.
+        const _rowStatus = _busyNote
+            || (e.ready ? '' : (e.status || ''));
+        try { logRowTransition(e.key, _rowStatus); } catch (_) {}
         return `<div class="src-row${isShown ? ' is-shown' : ''}${
                        e.pending ? ' is-pending' : ''}${
                        e.failed ? ' is-failed' : ''}"
@@ -10570,7 +10623,7 @@ function renderSourcesList(data) {
                                    : (e.status || 'not ready')}"></span>
             <span class="src-size">${size}</span>
             <span class="src-why"${_busyNote ? ' data-busy-note="1"' : ''}
-                  >${_busyNote || (e.ready ? '' : (e.status || ''))}</span>
+                  >${_rowStatus}</span>
         </div>`;
     }).join('');
     applySourceColWidths();
