@@ -1255,8 +1255,17 @@ def _preview_worker() -> None:
                                    'preview_skipped', 'stack is gone')
                 continue
             t0 = time.time()
-            warm_product_artifacts(fire, stack_path)
-            ok = previews_complete(fire, key)
+            # A render can lose its files to a directory cleared while it
+            # ran (see preview_fs) -- nothing wrong with the product. Try
+            # again before calling it a failure, and if it still fails,
+            # say why rather than "produced no preview".
+            _res, ok = {}, False
+            for _attempt in range(3):
+                _res = warm_product_artifacts(fire, stack_path) or {}
+                ok = previews_complete(fire, key)
+                if ok or not os.path.isfile(stack_path):
+                    break
+                time.sleep(0.5 * (_attempt + 1))
             with _preview_lock:
                 _preview_stats['done' if ok else 'failed'] += 1
             # The counters above are process-wide and cannot say WHICH
@@ -1264,8 +1273,10 @@ def _preview_worker() -> None:
             if ok:
                 clear_product_state(fire.fire_numbe, key)
             else:
-                note_product_state(fire.fire_numbe, key,
-                                   'preview_failed', 'produced no preview')
+                note_product_state(
+                    fire.fire_numbe, key, 'preview_failed',
+                    ('; '.join(_res.get('errors') or [])
+                     or 'no preview was produced')[:160])
             sys.stderr.write(
                 '[warmq] %s: %s in %.1fs (%d still queued)\n'
                 % (ident, 'rendered' if ok else 'produced no preview',
@@ -1660,8 +1671,12 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
     try:
         from .preview import generate_all_previews
         outdir = os.path.join(fire.cache_dir, f'previews_{key}')
-        have = os.path.isdir(outdir) and any(
-            f.endswith('.png') for f in os.listdir(outdir))
+        # Rendered means the post-fire preview exists -- the same test as
+        # previews_complete(). "Any PNG" was satisfied by the hint masks
+        # written into the same directory, so a stash whose preview
+        # render had been lost was skipped for ever and reported as a
+        # failed render on every retry.
+        have = os.path.isfile(os.path.join(outdir, 'post.png'))
         if have and not preview_dir_grid_ok(fire, outdir):
             # Rendered on a grid this fire no longer has: never shown,
             # so re-rendered from this product's stack.
@@ -1683,6 +1698,8 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
                                           fire.fire_numbe,
                                           preview_dir=outdir)
             out['previews'] = len(views or [])
+            if not views:
+                out['errors'].append('no preview views were rendered')
             try:
                 with open(os.path.join(outdir, '.product'), 'w',
                           encoding='utf-8') as f:

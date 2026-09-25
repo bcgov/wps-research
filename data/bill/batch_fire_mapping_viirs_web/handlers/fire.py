@@ -20,6 +20,10 @@ import traceback
 import zipfile
 import sys
 import threading
+
+# fire -> product keys whose deletion is still running in the background.
+_SOURCES_DELETING = {}
+_SOURCES_DELETING_LOCK = threading.Lock()
 import time
 from urllib.parse import urlparse, unquote, parse_qs
 
@@ -910,12 +914,12 @@ class FireRoutes:
         # switched to the newest OTHER product before anything is
         # removed, so the panes and Map Fire keep a valid source.
         refused = []
+        target = ''
         if cur in keys:
-            others = [p2.get('key') for p2 in
+            _order = [p2.get('key') for p2 in
                       self._built_products(fire_numbe, fire)
-                      if p2.get('key') and p2.get('key') != cur
-                      and p2.get('key') not in keys
-                      and p2.get('built') is not False]
+                      if p2.get('key') and p2.get('built') is not False]
+            others = [k for k in _order if k not in keys]
             if not others:
                 self._send_json(
                     {'error': 'this is the only product left; deleting '
@@ -923,149 +927,205 @@ class FireRoutes:
                               'display',
                      'refused': [cur]}, 409)
                 return
-            target = sorted(others, reverse=True)[0]
-            try:
-                from ..prepare import switch_post_source, product_parts
-                _s2, _start2, _post2 = product_parts(target)
-                res = switch_post_source(
-                    fire, _s2,
-                    l2_date=(_start2 if _s2 == 'l2' else ''),
-                    product=target)
-                if not (res or {}).get('ok'):
-                    self._send_json(
-                        {'error': f'could not switch off {cur} first: '
-                                  f'{(res or {}).get("error", "busy")}',
-                         'refused': [cur]}, 409)
-                    return
-                sys.stderr.write(
-                    '[sources] %s: switched to %s so %s could be '
-                    'deleted\n' % (fire_numbe, target, cur))
-            except Exception as exc:
-                self._send_json(
-                    {'error': f'could not switch off {cur} first: '
-                              f'{exc}', 'refused': [cur]}, 409)
-                return
+            # The fire moves to the product the page is switching the
+            # pane to -- the next one DOWN the Sources list -- or, without
+            # one, the next after it in listing order, else the nearest
+            # before it. (It used to jump to the newest product, and
+            # refused the whole deletion whenever that switch was busy,
+            # which is most of the time while anything is building.)
+            want = str(body.get('switch_to') or '')
+            if want in others:
+                target = want
+            else:
+                _i = _order.index(cur) if cur in _order else -1
+                after = [k for k in _order[_i + 1:] if k in others]
+                before = [k for k in _order[:max(_i, 0)] if k in others]
+                target = (after[0] if after
+                          else (before[-1] if before else others[0]))
 
-        import glob as _g
-        import shutil as _sh
-        from ..prepare import stack_path_for_product
-        from ..durable import store_dir
-        removed, freed = [], 0
-
-        def _rm(path):
-            nonlocal freed
+        def _work(keys=keys):
             try:
-                if os.path.isdir(path):
-                    for r, _d, fs2 in os.walk(path):
-                        for f2 in fs2:
+                if target:
+                    # Never delete what the fire is loaded on: switch it off
+                    # first, waiting while another switch or a background
+                    # build holds the fire, as long as that takes.
+                    from ..prepare import (switch_post_source, product_parts,
+                                           product_key_for_path as _pk)
+                    ok = False
+                    for _attempt in range(600):
+                        if (_pk(getattr(fire, 'crop_bin', '') or '')
+                                or '') not in keys:
+                            ok = True          # the page already switched it
+                            break
+                        try:
+                            _s2, _start2, _post2 = product_parts(target)
+                            res = switch_post_source(
+                                fire, _s2,
+                                l2_date=(_start2 if _s2 == 'l2' else ''),
+                                product=target)
+                        except Exception as exc:
+                            res = {'ok': False, 'error': str(exc)}
+                        if (res or {}).get('ok'):
+                            ok = True
+                            sys.stderr.write(
+                                '[sources] %s: switched to %s so %s could '
+                                'be deleted\n' % (fire_numbe, target, cur))
+                            break
+                        if not (res or {}).get('busy'):
+                            sys.stderr.write(
+                                f'[sources] {fire_numbe}: could not switch '
+                                f'off {cur}: {(res or {}).get("error")}\n')
+                            break
+                        time.sleep(1.0)
+                    if not ok:
+                        refused.append(cur)
+                        keys = [k for k in keys if k != cur]
+                        sys.stderr.write(
+                            f'[sources] {fire_numbe}: KEPT {cur} -- the fire '
+                            f'is still loaded on it\n')
+                import glob as _g
+                import shutil as _sh
+                from ..prepare import stack_path_for_product
+                from ..durable import store_dir
+                removed, freed = [], 0
+
+                def _rm(path):
+                    nonlocal freed
+                    try:
+                        if os.path.isdir(path):
+                            for r, _d, fs2 in os.walk(path):
+                                for f2 in fs2:
+                                    try:
+                                        freed += os.path.getsize(
+                                            os.path.join(r, f2))
+                                    except OSError:
+                                        pass
+                            if os.path.basename(path).startswith('previews'):
+                                # Never pulled from under a render in flight.
+                                from ..preview_fs import rmtree as _pf_rmtree
+                                _pf_rmtree(path)
+                            else:
+                                _sh.rmtree(path, ignore_errors=True)
+                            removed.append(path)
+                        elif os.path.isfile(path):
                             try:
-                                freed += os.path.getsize(
-                                    os.path.join(r, f2))
+                                freed += os.path.getsize(path)
                             except OSError:
                                 pass
-                    if os.path.basename(path).startswith('previews'):
-                        # Never pulled from under a render in flight.
-                        from ..preview_fs import rmtree as _pf_rmtree
-                        _pf_rmtree(path)
-                    else:
-                        _sh.rmtree(path, ignore_errors=True)
-                    removed.append(path)
-                elif os.path.isfile(path):
+                            os.remove(path)
+                            removed.append(path)
+                    except OSError as exc:
+                        sys.stderr.write(f'[sources] remove {path}: {exc}\n')
+
+                store = store_dir()
+                for key in keys:
+                    # The stack and its sidecars, wherever they live.
+                    path = stack_path_for_product(fire, key)
+                    stems = []
+                    if path:
+                        stems.append(os.path.splitext(path)[0])
+                        if store:
+                            stems.append(os.path.join(
+                                store,
+                                os.path.splitext(os.path.basename(path))[0]))
+                    for stem in stems:
+                        for sfx in ('.bin', '.hdr', '.bin.hdr',
+                                    '_dates.json', '_overlays.json',
+                                    # The post-fire buffer this product was
+                                    # composited from, and its header.
+                                    '.bin.post.bin', '.bin.post.hdr',
+                                    '.bin.post.bin.hdr', '.post.bin',
+                                    '.post.hdr'):
+                            _rm(stem + sfx)
+                        # Everything else derived from this stack: the band
+                        # subset the clustering reads, its KGC graph files, and
+                        # any partial copy left by an interrupted restore.
+                        #
+                        # Left behind, these are ghosts: the band subset keeps
+                        # the product's name on the ramdisk, the graph files are
+                        # gigabytes each, and a '.part' copy can be completed by
+                        # a later restore and bring the product back.
+                        for junk in _g.glob(stem + '_nob8*') \
+                                + _g.glob(stem + '*.kgc*') \
+                                + _g.glob(stem + '*.part') \
+                                + _g.glob(stem + '*.tmp*') \
+                                + _g.glob(stem + '_selected*'):
+                            _rm(junk)
+                    # Previews, hints and the coverage sidecar for this product.
+                    _rm(os.path.join(fire.cache_dir, f'previews_{key}'))
+                    for h in _g.glob(os.path.join(fire.cache_dir, '_redwins',
+                                                  f'*_{key}_hint.*')):
+                        _rm(h)
+                    _rm(os.path.join(fire.cache_dir, 'coverage',
+                                     f'{key}_dates.json'))
+                    # Classification results derived from THIS product only.
                     try:
-                        freed += os.path.getsize(path)
-                    except OSError:
-                        pass
-                    os.remove(path)
-                    removed.append(path)
-            except OSError as exc:
-                sys.stderr.write(f'[sources] remove {path}: {exc}\n')
+                        kept = []
+                        for r in list(getattr(fire, 'serial_results', None)
+                                      or []):
+                            if str(r.get('product') or '') == key:
+                                for p2 in (r.get('classified'), r.get('raw')):
+                                    if p2:
+                                        _rm(p2)
+                                _rm(os.path.join(
+                                    fire.cache_dir, 'previews',
+                                    f'serial_{r.get("run_id")}.png'))
+                            else:
+                                kept.append(r)
+                        fire.serial_results = kept
+                    except Exception as exc:
+                        sys.stderr.write(
+                            f'[sources] results for {key}: {exc}\n')
+                    sys.stderr.write(
+                        f'[sources] {fire_numbe}: deleted {key}\n')
 
-        store = store_dir()
-        for key in keys:
-            # The stack and its sidecars, wherever they live.
-            path = stack_path_for_product(fire, key)
-            stems = []
-            if path:
-                stems.append(os.path.splitext(path)[0])
-                if store:
-                    stems.append(os.path.join(
-                        store,
-                        os.path.splitext(os.path.basename(path))[0]))
-            for stem in stems:
-                for sfx in ('.bin', '.hdr', '.bin.hdr',
-                            '_dates.json', '_overlays.json',
-                            # The post-fire buffer this product was
-                            # composited from, and its header.
-                            '.bin.post.bin', '.bin.post.hdr',
-                            '.bin.post.bin.hdr', '.post.bin',
-                            '.post.hdr'):
-                    _rm(stem + sfx)
-                # Everything else derived from this stack: the band
-                # subset the clustering reads, its KGC graph files, and
-                # any partial copy left by an interrupted restore.
-                #
-                # Left behind, these are ghosts: the band subset keeps
-                # the product's name on the ramdisk, the graph files are
-                # gigabytes each, and a '.part' copy can be completed by
-                # a later restore and bring the product back.
-                for junk in _g.glob(stem + '_nob8*') \
-                        + _g.glob(stem + '*.kgc*') \
-                        + _g.glob(stem + '*.part') \
-                        + _g.glob(stem + '*.tmp*') \
-                        + _g.glob(stem + '_selected*'):
-                    _rm(junk)
-            # Previews, hints and the coverage sidecar for this product.
-            _rm(os.path.join(fire.cache_dir, f'previews_{key}'))
-            for h in _g.glob(os.path.join(fire.cache_dir, '_redwins',
-                                          f'*_{key}_hint.*')):
-                _rm(h)
-            _rm(os.path.join(fire.cache_dir, 'coverage',
-                             f'{key}_dates.json'))
-            # Classification results derived from THIS product only.
-            try:
-                kept = []
-                for r in list(getattr(fire, 'serial_results', None)
-                              or []):
-                    if str(r.get('product') or '') == key:
-                        for p2 in (r.get('classified'), r.get('raw')):
-                            if p2:
-                                _rm(p2)
-                        _rm(os.path.join(
-                            fire.cache_dir, 'previews',
-                            f'serial_{r.get("run_id")}.png'))
-                    else:
-                        kept.append(r)
-                fire.serial_results = kept
-            except Exception as exc:
+                # The manifest loses exactly those paths.
+                try:
+                    from ..manifest import load as _mload, save as _msave
+                    man = _mload(fire)
+                    gone = set(os.path.abspath(p2) for p2 in removed)
+                    before = len(man.get('entries') or [])
+                    man['entries'] = [e for e in (man.get('entries') or [])
+                                      if os.path.abspath(e.get('path') or '')
+                                      not in gone]
+                    _msave(fire, man)
+                    sys.stderr.write(
+                        '[sources] %s: manifest %d -> %d entries\n'
+                        % (fire_numbe, before, len(man['entries'])))
+                except Exception as exc:
+                    sys.stderr.write(f'[sources] manifest update: {exc}\n')
+
+                try:
+                    from ..persistence import _save_fire_state
+                    _save_fire_state()
+                except Exception:
+                    pass
                 sys.stderr.write(
-                    f'[sources] results for {key}: {exc}\n')
-            sys.stderr.write(
-                f'[sources] {fire_numbe}: deleted {key}\n')
+                    '[sources] %s: deletion finished -- %s; %d file(s), '
+                    '%.1f MB freed%s\n'
+                    % (fire_numbe, ', '.join(keys) or 'nothing',
+                       len(removed), freed / 1048576.0,
+                       (f'; kept {refused}' if refused else '')))
+            except Exception as exc:
+                sys.stderr.write(f'[sources] {fire_numbe}: background '
+                                 f'deletion failed: {exc}\n')
+            finally:
+                with _SOURCES_DELETING_LOCK:
+                    left = (_SOURCES_DELETING.get(fire_numbe)
+                            or set()) - set(_all_keys)
+                    if left:
+                        _SOURCES_DELETING[fire_numbe] = left
+                    else:
+                        _SOURCES_DELETING.pop(fire_numbe, None)
 
-        # The manifest loses exactly those paths.
-        try:
-            from ..manifest import load as _mload, save as _msave
-            man = _mload(fire)
-            gone = set(os.path.abspath(p2) for p2 in removed)
-            before = len(man.get('entries') or [])
-            man['entries'] = [e for e in (man.get('entries') or [])
-                              if os.path.abspath(e.get('path') or '')
-                              not in gone]
-            _msave(fire, man)
-            sys.stderr.write(
-                '[sources] %s: manifest %d -> %d entries\n'
-                % (fire_numbe, before, len(man['entries'])))
-        except Exception as exc:
-            sys.stderr.write(f'[sources] manifest update: {exc}\n')
-
-        try:
-            from ..persistence import _save_fire_state
-            _save_fire_state()
-        except Exception:
-            pass
-        self._send_json({'deleted': keys, 'files': len(removed),
-                         'freed_mb': round(freed / 1048576.0, 1),
-                         'refused': refused + unbuilt_refused})
+        # Gone from every listing from this moment; the files follow.
+        _all_keys = list(keys)
+        with _SOURCES_DELETING_LOCK:
+            _SOURCES_DELETING.setdefault(fire_numbe, set()).update(_all_keys)
+        threading.Thread(target=_work, daemon=True,
+                         name=f'sources-delete-{fire_numbe}').start()
+        self._send_json({'deleting': _all_keys, 'switch_to': target,
+                         'refused': unbuilt_refused}, 202)
 
     def handle_api_sources(self, fire_numbe):
         """Every product this fire can display, with size and readiness.
@@ -4059,6 +4119,22 @@ class FireRoutes:
                 os.path.splitext(bin_path or '')[0] + '.hdr')
 
     def _built_products(self, fire_numbe, fire, keep_paths=False):
+        """Every product of this fire, minus any being deleted.
+
+        A deletion finishes in the background; until it has, the product
+        is already gone as far as every listing is concerned -- the
+        Sources panel, the selectors, the products endpoint -- so nothing
+        can display it or offer it while its files are being removed.
+        """
+        out = self._built_products_all(fire_numbe, fire,
+                                       keep_paths=keep_paths)
+        with _SOURCES_DELETING_LOCK:
+            gone = set(_SOURCES_DELETING.get(fire_numbe) or ())
+        if not gone:
+            return out
+        return [p for p in out if (p.get('key') or '') not in gone]
+
+    def _built_products_all(self, fire_numbe, fire, keep_paths=False):
         """Every product on disk for this AOI, newest first.
 
         One entry per STACK FILE, so last night's MRAP composite and

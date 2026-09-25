@@ -1315,6 +1315,7 @@ async function onPostSourceChange() {
 
     const label = productLabel(_products.find((q) => q.key === key)
                                || parts);
+    if (!productReadyToPlot(key)) blankPane('left');
     layerBusyBegin(`Loading ${label}`, key);
 
     (async () => {
@@ -1894,6 +1895,31 @@ function syncPaneMask(pane) {
     m.style.left = img.style.left;
     m.style.top = img.style.top;
     m.style.visibility = img.style.visibility;
+}
+
+// Is this product ready to plot? The Sources panel's server data (its
+// previews rendered) is the freshest answer; failing that, whether it is
+// built at all.
+function productReadyToPlot(key) {
+    try {
+        const rows = (_lastSourcesData && _lastSourcesData.sources) || [];
+        const r = rows.find((e) => e.key === key);
+        if (r) return !!r.ready;
+    } catch (_) {}
+    const p = (_products || []).find((q) => q.key === key);
+    return !!(p && p.built !== false);
+}
+
+// The empty dark-grey pane: the previous product's imagery must not stay
+// on screen under a selector that names a product not ready to plot.
+// visibility (not display) -- the successful load restores it.
+function blankPane(pane) {
+    try {
+        const { img } = getPaneElements(pane);
+        if (img) img.style.visibility = 'hidden';
+        const m = paneMaskEl(pane);
+        if (m) m.style.display = 'none';
+    } catch (_) {}
 }
 
 function getPaneElements(pane) {
@@ -4574,8 +4600,9 @@ async function openMrapDatePicker(dlg, list, note, prog) {
                         padding:3px 0;cursor:pointer">
                 <input type="checkbox" name="mrap-date" value="${d.date}"
                        ${d.ready
-                         ? 'disabled title="Already built"' : ''}
-                       ${d.date === cur ? 'checked' : ''}>
+                         ? 'disabled data-ready="1" title="Already built"'
+                         : ''}
+                       ${(d.date === cur && !d.ready) ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="font-family:monospace">${d.date}</span>
                 <span style="color:${d.ready ? '#2a7' : '#888'};
@@ -4687,8 +4714,9 @@ async function openDatePicker() {
                 <input type="checkbox" name="l2-date" class="date-pick"
                        value="${d.date}"
                        ${_isBuilt
-                         ? 'disabled title="Already built"' : ''}
-                       ${d.date === sel ? 'checked' : ''}>
+                         ? 'disabled data-ready="1" title="Already built"'
+                         : ''}
+                       ${(d.date === sel && !_isBuilt) ? 'checked' : ''}>
                 <span data-cloud-day="${d.date}">${cloudCell(d.date)}</span>
                 <span style="min-width:6.5em">${pretty}</span>
                 <span style="color:#888;min-width:7em">${d.zips} zip(s),
@@ -4721,7 +4749,8 @@ async function applyMrapDateSelection() {
     const btn = document.getElementById('btn-apply-date');
     const prog = document.getElementById('date-picker-progress');
     const picked = [...document.querySelectorAll(
-        'input[name="mrap-date"]:checked')].map((el) => el.value);
+        'input[name="mrap-date"]:checked:not([data-ready="1"])')]
+        .map((el) => el.value);
     if (!picked.length) return;
     picked.sort().reverse();
 
@@ -4808,7 +4837,9 @@ function setApplyEnabled(on) {
     try {
         for (const el of document.querySelectorAll(
                 '#date-picker-list input[type=checkbox]')) {
-            el.disabled = !on;
+            // A ready (already built) row stays disabled: re-enabling
+            // every box after a batch is how built dates became tickable.
+            el.disabled = !on || el.dataset.ready === '1';
         }
     } catch (_) {}
     const btn = document.getElementById('btn-apply-date');
@@ -4843,7 +4874,8 @@ async function applyDateSelection() {
         return applyMrapDateSelection();
     }
     const prog = document.getElementById('date-picker-progress');
-    const picked = [...document.querySelectorAll('.date-pick:checked')]
+    const picked = [...document.querySelectorAll(
+            '.date-pick:checked:not([data-ready="1"])')]
         .map((el) => el.value);
     if (!picked.length) return;
     picked.sort().reverse();
@@ -8471,8 +8503,11 @@ async function loadPaneImage(pane, viewKey) {
     // below reads real dimensions rather than the previous image's.
     img.dataset.full = '1';
     img.src = finalUrl;
-    // Back on screen: this is the layer that was asked for.
+    // Back on screen: this is the layer that was asked for. Also undo a
+    // display:none left by an earlier load that ran out of retries, or
+    // the pane would stay empty although its image had arrived.
     img.style.visibility = '';
+    if (img.style.display === 'none') img.style.display = 'block';
 
     // The hint mask rides on top for hint views, and is taken down
     // for every other view.
@@ -8560,6 +8595,7 @@ async function onRightPostSourceChange() {
     rightPostSource = src;
     rightL2Date = _rsel.date;
     rightProduct = _rkey;
+    if (!productReadyToPlot(_rkey)) blankPane('right');
     try { invalidateEraseBuffers('source changed'); } catch (_) {}
     // Same treatment as the left: grey both selectors while this runs,
     // because both read the per-source preview stash.
@@ -10275,6 +10311,10 @@ function syncRightPaneControls() {
 // ---------------------------------------------------------------
 let _sourcesCollapsed = false;
 let _srcSelected = new Set();
+// Products deleted from this page whose deletion the server may still be
+// finishing: their rows stay hidden until the server stops listing them,
+// so a refresh already in flight cannot put them back.
+const _srcDeleting = new Set();
 let _srcTimer = null;
 
 function toggleSourcesPanel(force) {
@@ -10471,6 +10511,10 @@ function renderSourcesList(data) {
     const box = document.getElementById('sources-list');
     if (!box) return;
     let rows = (data && data.sources) || [];
+    for (const k of [..._srcDeleting]) {
+        if (!rows.some((r) => r.key === k)) _srcDeleting.delete(k);
+    }
+    if (_srcDeleting.size) rows = rows.filter((r) => !_srcDeleting.has(r.key));
 
     // Merge in products that have been requested but do not exist yet.
     //
@@ -10829,24 +10873,82 @@ async function deleteSelectedSources() {
             + `them. Other products of this fire are untouched.`)) {
         return;
     }
+    const gone = new Set(keys);
+    // Where a pane showing a deleted product goes: the next row DOWN the
+    // Sources list that is staying and is built; failing that, the
+    // nearest one above. A pane showing anything else is left alone.
+    const order = [...document.querySelectorAll('#sources-list .src-row')]
+        .map((row) => row.dataset.rowKey || '').filter(Boolean);
+    const usable = (k) => !gone.has(k)
+        && (_products || []).some((q) => q.key === k && q.built !== false);
+    const nextFor = (k) => {
+        const i = order.indexOf(k);
+        if (i >= 0) {
+            for (let j = i + 1; j < order.length; j++) {
+                if (usable(order[j])) return order[j];
+            }
+            for (let j = i - 1; j >= 0; j--) {
+                if (usable(order[j])) return order[j];
+            }
+        }
+        return order.find(usable) || '';
+    };
+    const leftKey = currentProductKey();
+    const rightKey = splitActive ? rightProductKey() : '';
+    const leftTo = gone.has(leftKey) ? nextFor(leftKey) : '';
+    const rightTo = (rightKey && gone.has(rightKey)) ? nextFor(rightKey) : '';
+
+    // The rows go now; the files go in the background.
+    for (const k of keys) {
+        _srcDeleting.add(k);
+        _srcSelected.delete(k);
+        const row = document.querySelector(
+            `#sources-list .src-row[data-row-key="${k}"]`);
+        if (row) row.remove();
+    }
+    if (_lastSourcesData && Array.isArray(_lastSourcesData.sources)) {
+        _lastSourcesData.sources =
+            _lastSourcesData.sources.filter((e) => !gone.has(e.key));
+    }
+    try { syncSourcesDeleteButton(); } catch (_) {}
+    if (leftTo) {
+        log(`[sources] left pane: ${leftKey} is being deleted; `
+            + `showing ${leftTo}`, 'dim');
+        try { await switchToProduct(leftTo); } catch (_) {}
+    }
+    if (rightTo) {
+        log(`[sources] right pane: ${rightKey} is being deleted; `
+            + `showing ${rightTo}`, 'dim');
+        try {
+            const rs = document.getElementById('post-source-select-right');
+            setSourceSelectValue(rs, rightTo);
+            if (rs && rs.value === rightTo) onRightPostSourceChange();
+        } catch (_) {}
+    }
     try {
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/sources/delete`,
             {method: 'POST',
              headers: {'Content-Type': 'application/json',
                        'X-Requested-With': 'fetch'},
-             body: JSON.stringify({keys})});
+             body: JSON.stringify({keys, switch_to: leftTo || ''})});
         const j = await r.json().catch(() => ({}));
         if (!r.ok || j.error) {
+            // Nothing was deleted: bring the rows back as they were.
+            for (const k of keys) _srcDeleting.delete(k);
+            refreshSourcesPanel();
             alert(`Could not delete: ${j.error || 'HTTP ' + r.status}`);
             return;
         }
-        log(`[sources] deleted ${(j.deleted || []).join(', ')} `
-            + `(${j.files} file(s), ${j.freed_mb} MB)`, 'dim');
-        _srcSelected.clear();
+        const took = j.deleting || j.deleted || keys;
+        log(`[sources] deleting ${took.join(', ')}`
+            + ` -- files are being removed in the background`, 'dim');
+        for (const k of (j.refused || [])) _srcDeleting.delete(k);
         await checkForNewProducts('sources deleted');
         refreshSourcesPanel();
     } catch (err) {
+        for (const k of keys) _srcDeleting.delete(k);
+        refreshSourcesPanel();
         alert('Could not delete: ' + err.message);
     }
 }
