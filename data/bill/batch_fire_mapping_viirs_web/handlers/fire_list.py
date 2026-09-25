@@ -133,6 +133,61 @@ def _list_visible(f) -> bool:
     return not getattr(f, 'hidden', False)
 
 
+
+def _purge_web_cache(fire_name: str, why: str) -> None:
+    """Delete <out_root>/.web_cache/<fire_name>/ entirely, and say so.
+
+    The preview cache is addressed by the fire's NAME -- the creation
+    worker, the cancel handler and every preview reader all derive
+    <out_root>/.web_cache/<name> -- so it belongs to whichever fire
+    holds that name. When a fire is deleted and another is created
+    under the same name, anything left there is inherited: the old
+    rectangle's previews, geo.json, stashes, date-coverage sidecars
+    and hint masks, all on the OLD grid. Their product keys are
+    date-based (l2_d20260923, mrap_p20260923), so a recreated fire
+    with the same dates matches them exactly and serves them as its
+    own -- which is how a new fire showed one source on its pinned
+    grid and the other on its predecessor's footprint.
+
+    Loud on purpose: the removal this replaces used ignore_errors and
+    logged nothing, so a directory that survived could not be seen.
+    """
+    out_root = getattr(state, 'output_root', '') or ''
+    if not out_root or not fire_name:
+        return
+    root = os.path.abspath(os.path.join(out_root, '.web_cache'))
+    path = os.path.abspath(os.path.join(root, fire_name))
+    # Names are validated at creation (no separators, no '..'), but
+    # never let a derived path leave the cache root.
+    if os.path.dirname(path) != root:
+        sys.stderr.write(
+            f'[{why}] {fire_name}: refusing to purge {path} -- not '
+            f'directly inside {root}\n')
+        return
+    # Never raises. Creation calls this after the fire is already in
+    # state.fires, so an exception here would leave a fire stuck in
+    # PREPARING with no worker; a purge that fails is reported instead.
+    try:
+        if not os.path.isdir(path):
+            return
+        n_files = 0
+        for _dp, _dn, _fn in os.walk(path):
+            n_files += len(_fn)
+        shutil.rmtree(path, ignore_errors=True)
+        if os.path.isdir(path):
+            left = sum(len(_fn) for _dp, _dn, _fn in os.walk(path))
+            sys.stderr.write(
+                f'[{why}] {fire_name}: could not fully remove its preview '
+                f'cache {path}: {left} of {n_files} file(s) remain\n')
+        else:
+            sys.stderr.write(
+                f'[{why}] {fire_name}: removed its preview cache {path} '
+                f'({n_files} file(s))\n')
+    except Exception as exc:
+        sys.stderr.write(
+            f'[{why}] {fire_name}: preview cache purge failed at {path}: '
+            f'{type(exc).__name__}: {exc}\n')
+
 class FireListRoutes:
     """Fire-list / per-fire navigation routes (home page, fire page, notes)."""
 
@@ -425,6 +480,13 @@ class FireListRoutes:
                 shutil.rmtree(cache_dir, ignore_errors=True)
             except Exception:
                 pass
+        # And the cache at the path this NAME resolves to.
+        #
+        # fire.cache_dir is empty on a record recovered from disk, so
+        # the block above can do nothing at all -- and the next fire
+        # created under this name then inherits every preview, stash
+        # and geo.json of this one, on this one's grid.
+        _purge_web_cache(fire_numbe, 'remove')
 
         # Purge what THIS RECORD owns -- identified by the paths the
         # record itself holds, never by its name.
@@ -1160,6 +1222,18 @@ class FireListRoutes:
             except Exception:
                 pass
             state.fires[name] = fire
+
+        # A new fire starts with an EMPTY preview cache.
+        #
+        # Anything already at .web_cache/<name> belongs to an earlier
+        # fire of the same name -- removed, cancelled or crashed -- and
+        # is on THAT fire's grid. Left in place it is served as this
+        # fire's imagery until each file happens to be overwritten, and
+        # the ones that never are (a failed render, a view this fire
+        # has not produced yet) stay on the old footprint for good.
+        # Cleared here, before the preview seed below writes into it
+        # and before the worker starts.
+        _purge_web_cache(name, 'create')
 
         # If the user previewed before confirming, seed cache_dir with
         # the cumulative shapefile so the worker skips accumulate (the
