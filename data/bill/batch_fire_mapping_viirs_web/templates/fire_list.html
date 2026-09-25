@@ -19,16 +19,18 @@
        style="font-size:11px;padding:3px 10px">+ New Fire</a>
     {{{ admin_link }}}
     {{{ logout_link }}}
-    <label id="open-when-ready-wrap" title="When a newly created fire
-           finishes preparing, open it automatically. Only applies while
-           you stay on this page -- navigating away cancels it, so a
-           fire finishing later will not yank you out of what you are
-           doing."
+    <label id="open-when-ready-wrap" title="Go straight into a newly
+           created fire, without waiting for it to finish preparing.
+           The Sources panel inside reports each product's own progress
+           as it is built, which says more than the single line shown
+           here. Unchecked, you stay on this list until you open the
+           fire yourself. Only applies while you stay on this page --
+           navigating away cancels it."
            style="font-size:11px;margin-left:10px;display:inline-flex;
                   align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" id="open-when-ready" checked
              onchange="saveOpenWhenReady()">
-      Open when ready
+      Open immediately
     </label>
     <img src="/static/BC-Wildfire-Service-logo.png" alt="BC Wildfire Service" class="header-logo">
 </header>
@@ -1617,13 +1619,17 @@ function checkAutoOpen(fires) {
     for (const f of fires) {
         const id = f.fire_numbe || f.name;
         if (!id || !pending.includes(id)) continue;
-        // Openable statuses, from FireStatus in state.py. 'accepted'
-        // and 'mapping' are included: preparation is finished in both,
-        // which is the condition the user asked to be notified of.
+        // Open it NOW, whatever stage it is at.
+        //
+        // Waiting for 'ready' meant watching one summary line from
+        // outside while the interesting information -- what each
+        // individual product is doing -- was only visible inside. The
+        // fire page works perfectly well during preparation: it polls,
+        // and its Sources panel reports every product's own state. The
+        // one status NOT opened is 'error', handled just below.
         const st = String(f.status || '').toLowerCase();
-        if (st === 'ready' || st === 'mapped' || st === 'accepted'
-                || st === 'mapping') {
-            console.log(`[auto-open] "${id}" is ${st} -- opening`);
+        if (st !== 'error') {
+            console.log(`[auto-open] "${id}" is ${st} -- opening now`);
             _autoOpenNavigating = true;
             clearAutoOpen(null);
             try { markFireOpened(encodeURIComponent(id)); } catch (_) {}

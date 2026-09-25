@@ -964,6 +964,27 @@ def product_state_note(fire_numbe: str, key: str):
         return None
 
 
+def forget_fire_product_states(fire_numbe: str) -> int:
+    """Drop every note belonging to one fire.
+
+    A deleted fire's notes must not outlive it. The key is the fire
+    NUMBER, which is reused the moment the operator recreates a fire
+    with the same name, so a surviving note would be read as the new
+    fire's -- which is exactly how a freshly created fire came to show
+    'withheld' rows describing the deleted one's products.
+    """
+    gone = 0
+    try:
+        pre = '%s:' % (fire_numbe or '')
+        with _product_state_lock:
+            for ident in [i for i in _product_state if i.startswith(pre)]:
+                _product_state.pop(ident, None)
+                gone += 1
+    except Exception:
+        pass
+    return gone
+
+
 def product_states_for_fire(fire_numbe: str) -> dict:
     """Every live note for one fire, keyed by product key."""
     out = {}

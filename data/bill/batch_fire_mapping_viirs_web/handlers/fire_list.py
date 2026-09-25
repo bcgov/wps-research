@@ -688,6 +688,23 @@ class FireListRoutes:
             except Exception as exc:
                 sys.stderr.write(f'[remove] queue purge: {exc}\n')
 
+            # Its per-product state notes go with it too.
+            #
+            # They are keyed by fire NUMBER, which is free for reuse
+            # the instant this record goes, so a note left behind is
+            # read as the next fire of that name -- which is how a
+            # newly created fire showed 'withheld' rows describing the
+            # deleted one's products.
+            try:
+                from ..prepare import forget_fire_product_states
+                _ns = forget_fire_product_states(fire_numbe)
+                if _ns:
+                    sys.stderr.write(
+                        f'[remove] {fire_numbe}: dropped {_ns} '
+                        f'product state note(s)\n')
+            except Exception as exc:
+                sys.stderr.write(f'[remove] state notes: {exc}\n')
+
             # Its pending messages go with it. A completion notice for
             # a fire that no longer exists cannot be acted on and only
             # confuses whoever opens the list next.
