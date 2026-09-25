@@ -34,7 +34,7 @@
     <span>ML Size: <strong id="ml-size-text">--</strong></span>
     <span>Status: <span id="status-badges"><strong id="status-text">{{ fire_status }}</strong></span></span>
     <span id="agreement-info"></span>
-    <span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="Agreement % compares the ML-classified burn footprint against the hint perimeter (VIIRS hotspot polygon). 100% = the ML result exactly matches the hint; lower values mean the ML deviated from the hint. It's a sanity check, not ground truth — a low agreement may mean the hint was loose, not that the map is wrong.">?</span>
+    <span class="help" tabindex="0" aria-label="About agreement" aria-expanded="false" data-tip="Agreement % compares the ML-classified burn footprint against the hint mask (VIIRS hotspot polygon). 100% = the ML result exactly matches the hint; lower values mean the ML deviated from the hint. It's a sanity check, not ground truth — a low agreement may mean the hint was loose, not that the map is wrong.">?</span>
     <span id="crop-info"></span>
     <span id="hint-mode-group" class="hint-mode-group" style="display:none"></span>
     <label id="restrict-hint-wrap"
@@ -870,7 +870,7 @@ const RUN_VIEWS = new Set(['result', 'result_prebrush']);
 const VIEW_LABELS = {
     pre: 'Pre-fire', post: 'Post-fire',
     diff1: 'Diff 1', diff2: 'Diff 2', diff3: 'Diff 3',
-    result: 'ML classification', hint: 'Hint perimeter',
+    result: 'ML classification', hint: 'Hint mask',
     result_prebrush: 'ML Classification \u2014 before brushing',
 };
 
@@ -1949,6 +1949,76 @@ let dragStartX = 0, dragStartY = 0;
 let dragStartPanX = 0, dragStartPanY = 0;
 
 // The hint mask layer for a pane, if the page has one.
+// The hint mask layer is fetched with its HTTP status, so "still being
+// made" (409) is waited out and asked again, instead of being taken for a
+// failure: one early 409 used to switch the mask layer off for the rest
+// of the session, and "Hint mask" then never showed the mask at all. A
+// mask the server says cannot exist for this product (404 "empty") is
+// reported once, with its reason. Only any other failure falls back to
+// the server-composited hint image, as before.
+function releaseHintMaskObject(m) {
+    const o = m && m.dataset.obj;
+    if (o) {
+        try { URL.revokeObjectURL(o); } catch (_) {}
+        m.dataset.obj = '';
+    }
+}
+
+async function loadHintMaskLayer(pane, m, url, viewKey, attempt = 0) {
+    if (m.dataset.url !== url) return;                    // superseded
+    if (attempt === 0) {
+        // Never leave the previous product's mask over this one.
+        m.removeAttribute('src');
+        releaseHintMaskObject(m);
+    }
+    let r = null;
+    try {
+        r = await fetch(url, {headers: {'X-Requested-With': 'fetch'}});
+    } catch (_) { r = null; }
+    if (m.dataset.url !== url) return;
+    if (r && r.ok) {
+        let blob = null;
+        try { blob = await r.blob(); } catch (_) { blob = null; }
+        if (m.dataset.url !== url) return;
+        if (blob) {
+            const obj = URL.createObjectURL(blob);
+            m.onerror = null;
+            m.onload = () => { syncPaneMask(pane); };
+            m.dataset.obj = obj;
+            m.src = obj;
+            return;
+        }
+    }
+    const status = r ? r.status : 0;
+    let j = {};
+    try { j = (r && !r.ok) ? await r.json() : {}; } catch (_) { j = {}; }
+    if (m.dataset.url !== url) return;
+    if (status === 404 && j.error === 'empty') {
+        m.style.display = 'none';
+        log(`[hint] no ${j.mode || ''} hint mask for `
+            + `${j.product || 'this product'}: `
+            + `${j.detail || 'the hint is empty'}`, 'warn');
+        return;
+    }
+    if (status === 409 || status === 0 || status === 503 || (r && r.ok)) {
+        if (attempt === 0) {
+            log('[hint] the hint mask is still being made; it appears '
+                + 'here as soon as it is ready', 'dim');
+        }
+        const wait = Math.min(10000, 1500 * (attempt + 1));
+        setTimeout(() => {
+            loadHintMaskLayer(pane, m, url, viewKey, attempt + 1);
+        }, wait);
+        return;
+    }
+    // Anything else: the mask layer itself is not being served here.
+    _useHintMask = false;
+    m.style.display = 'none';
+    log('[hint] mask layer unavailable; using the composited hint image',
+        'dim');
+    loadPaneImage(pane, viewKey);
+}
+
 function paneMaskEl(pane) {
     return document.getElementById(
         pane === 'right' ? 'right-hintmask' : 'main-hintmask');
@@ -8591,19 +8661,7 @@ async function loadPaneImage(pane, viewKey) {
                 const _mu = hintMaskUrlFor(pane);
                 if (_m.dataset.url !== _mu) {
                     _m.dataset.url = _mu;
-                    _m.onerror = () => {
-                        // No mask available: fall back to the
-                        // server-composited hint for the rest of the
-                        // session, which is the behaviour this
-                        // replaced and is known to work.
-                        _useHintMask = false;
-                        _m.style.display = 'none';
-                        log('[hint] mask layer unavailable; using the '
-                            + 'composited hint image', 'dim');
-                        loadPaneImage(pane, viewKey);
-                    };
-                    _m.onload = () => { syncPaneMask(pane); };
-                    _m.src = _mu;
+                    loadHintMaskLayer(pane, _m, _mu, viewKey);
                 }
                 _m.style.display = '';
                 syncPaneMask(pane);
@@ -8611,6 +8669,7 @@ async function loadPaneImage(pane, viewKey) {
                 _m.style.display = 'none';
                 _m.removeAttribute('src');
                 _m.dataset.url = '';
+                releaseHintMaskObject(_m);
             }
         }
     } catch (_) { /* the layer is an optimisation, never required */ }

@@ -1363,6 +1363,20 @@ class FireRoutes:
                 # A live note describes what is happening NOW, so it
                 # outranks the state inferred from the files on disk.
                 # Only for this row: _note was fetched with this key.
+                # Hint masks are made in the background too: a product
+                # whose previews are ready but which lacks a mask for any
+                # hint mode the fire offers goes on the warm queue, so
+                # "Hint mask" finds it made. The row's status is not
+                # changed -- its imagery is ready.
+                if ready and path and not unbuilt:
+                    try:
+                        from ..prepare import (hint_masks_complete,
+                                               enqueue_preview_warm as _epw)
+                        if (os.path.isfile(path)
+                                and not hint_masks_complete(fire, key)):
+                            _epw(fire, key, path)
+                    except Exception:
+                        pass
                 #
                 # 'active' = something is working on this row right now.
                 # The panel polls only while some row is active (or the
@@ -2556,7 +2570,8 @@ class FireRoutes:
                         if os.path.isfile(cand_png):
                             png = cand_png
             elif os.path.isdir(cand) and self._stash_view_current(
-                    fire, cand, view):
+                    fire, cand,
+                    'post' if view in ('hint', 'hintmask') else view):
                 _stash_dir = cand
                 png = os.path.join(cand, f'{view}.png')
             elif _nobuild:
@@ -2627,7 +2642,9 @@ class FireRoutes:
                             # Re-check under the lock: a concurrent warm
                             # may have rendered it while we waited.
                             if not self._stash_view_current(
-                                    fire, _outdir, view):
+                                    fire, _outdir,
+                                    'post' if view in ('hint', 'hintmask')
+                                    else view):
                                 # One implementation of "make this
                                 # product usable", shared with the
                                 # build paths -- so a product reached
@@ -2785,7 +2802,12 @@ class FireRoutes:
                     {'error': 'not ready', 'product': _req_key}, 409)
                 return
             _mp = os.path.join(_mdir, f'hintmask_{mode}.png')
-            if not os.path.isfile(_mp):
+            from ..prepare import hint_mask_problem
+            _pr = hint_mask_problem(_mdir, mode)
+            # Made synchronously if missing -- unless it is recorded as
+            # impossible for this product (the red-wins rule matching no
+            # pixel, no VIIRS or BCWS data), which is answered at once.
+            if not os.path.isfile(_mp) and not (_pr and _pr[1]):
                 try:
                     from ..prepare import render_hint_mask_for_product
                     _stk = stack_path_for_product(fire, _req_key)
@@ -2797,9 +2819,18 @@ class FireRoutes:
                         f'[fire] hint mask {mode} for {_req_key}: '
                         f'{exc}\n')
             if not os.path.isfile(_mp):
+                _pr = hint_mask_problem(_mdir, mode)
+                if _pr and _pr[1]:
+                    # Definitive: 404 "empty" with the reason, so the pane
+                    # says why instead of waiting for ever.
+                    self._send_json(
+                        {'error': 'empty', 'product': _req_key,
+                         'mode': mode, 'detail': _pr[0]}, 404)
+                    return
                 self._send_json(
                     {'error': 'not ready', 'product': _req_key,
-                     'detail': 'the hint mask is still being made'},
+                     'detail': (_pr[0] if _pr
+                                else 'the hint mask is still being made')},
                     409)
                 return
             self._send_file(_mp, 'image/png', cache_seconds=86400,

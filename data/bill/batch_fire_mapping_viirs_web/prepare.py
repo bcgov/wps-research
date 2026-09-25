@@ -1322,6 +1322,84 @@ def preview_dir_grid_ok(fire: FireInfo, pdir: str,
         return True
 
 
+# A hint mask that cannot be made -- the red-wins rule matching no pixel
+# of this product, no VIIRS data, no BCWS polygons -- is recorded beside
+# the product's previews (hintmask_<mode>.none) with the reason. Until the
+# record expires the mode counts as settled: the queue does not retry it
+# every few seconds, and a pane asking for it gets the reason at once
+# instead of "still being made" for ever. A transient failure is recorded
+# the same way, briefly, so it is retried soon but not in a tight loop.
+_HINT_EMPTY_TTL_S = 1800.0
+_HINT_RETRY_TTL_S = 60.0
+
+
+def available_hint_modes(fire: FireInfo) -> list:
+    """The hint modes this fire can offer a mask for right now."""
+    modes = ['redwins_post', 'redwins_diff']
+    try:
+        if fire.viirs_bin and os.path.isfile(fire.viirs_bin):
+            modes.insert(0, 'viirs')
+    except Exception:
+        pass
+    try:
+        from .bcws import _overlay_json_path
+        _bp = _overlay_json_path(state)
+        if _bp and os.path.isfile(_bp):
+            modes.append('bcws_perimeter')
+    except Exception:
+        pass
+    return modes
+
+
+def _hint_marker(pdir: str, mode: str) -> str:
+    return os.path.join(pdir, f'hintmask_{mode}.none')
+
+
+def hint_mask_problem(pdir: str, mode: str):
+    """The recorded reason this mode has no mask here, if still current.
+
+    Returns ``(reason, permanent)`` or ``None``.
+    """
+    try:
+        with open(_hint_marker(pdir, mode), encoding='utf-8') as fh:
+            rec = json.load(fh) or {}
+        perm = bool(rec.get('permanent'))
+        ttl = _HINT_EMPTY_TTL_S if perm else _HINT_RETRY_TTL_S
+        if time.time() - float(rec.get('at') or 0) <= ttl:
+            return (str(rec.get('reason') or ''), perm)
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
+def _record_hint_problem(pdir: str, mode: str, reason: str,
+                         permanent: bool) -> None:
+    try:
+        from .preview_fs import merge_json
+        merge_json(_hint_marker(pdir, mode),
+                   {'reason': (reason or '')[:300], 'at': time.time(),
+                    'permanent': bool(permanent)})
+    except Exception:
+        pass
+
+
+def hint_masks_complete(fire: FireInfo, key: str) -> bool:
+    """Is every available hint mode's mask made (or settled) for *key*?"""
+    try:
+        d = os.path.join(fire.cache_dir, f'previews_{key}')
+        if not os.path.isdir(d):
+            return False
+        for mode in available_hint_modes(fire):
+            if os.path.isfile(os.path.join(d, f'hintmask_{mode}.png')):
+                continue
+            if hint_mask_problem(d, mode):
+                continue
+            return False
+        return True
+    except Exception:
+        return True          # never let a check keep a product queued
+
+
 def previews_complete(fire: FireInfo, key: str) -> bool:
     """Has this product's post-fire preview been rendered, on its grid?"""
     try:
@@ -1351,7 +1429,8 @@ def _preview_worker() -> None:
             # Check again at the moment of doing it: the product may
             # have been warmed by the interactive path, or deleted,
             # while this item waited its turn.
-            if previews_complete(fire, key):
+            if (previews_complete(fire, key)
+                    and hint_masks_complete(fire, key)):
                 with _preview_lock:
                     _preview_stats['skipped'] += 1
                 # Already rendered: this product has nothing pending.
@@ -1437,7 +1516,10 @@ def enqueue_preview_warm(fire: FireInfo, key: str,
     if not fire or not key or not stack_path:
         return False
     ident = f'{fire.fire_numbe}:{key}'
-    if previews_complete(fire, key):
+    # Queued until the previews AND every available hint mode's mask are
+    # made (or recorded as impossible) -- not just the previews, which
+    # left products that already had previews without any hint mask.
+    if previews_complete(fire, key) and hint_masks_complete(fire, key):
         return False
     with _preview_lock:
         if ident in _preview_inflight:
@@ -1828,16 +1910,44 @@ def warm_product_artifacts(fire: FireInfo, stack_path: str,
     # Only the red-wins modes: the BCWS perimeter hint is derived from
     # the incident polygon rather than the imagery, and the VIIRS hint
     # does not vary by product.
-    for _mi, mode in enumerate(('redwins_post', 'redwins_diff')):
+    # Every hint mode the fire can offer -- VIIRS and BCWS too, not just
+    # the two red-wins rules -- so a pane showing "Hint mask" finds this
+    # product's mask already made, whichever mode is selected. A mode
+    # already made, or recorded as impossible, is skipped.
+    _outdir = os.path.join(fire.cache_dir, f'previews_{key}')
+    _modes = available_hint_modes(fire)
+    _labels = {'redwins_post': 'red-wins, post-fire',
+               'redwins_diff': 'red-wins, difference',
+               'viirs': 'VIIRS hotspots',
+               'bcws_perimeter': 'BCWS perimeters'}
+    for _mi, mode in enumerate(_modes):
+        if (os.path.isfile(os.path.join(_outdir, f'hintmask_{mode}.png'))
+                or hint_mask_problem(_outdir, mode)):
+            continue
         note_product_state(fire.fire_numbe, key, 'rendering',
-                           ('red-wins, post-fire' if mode == 'redwins_post'
-                            else 'red-wins, difference'),
-                           frac=_mi / 2.0, stage='hint')
+                           _labels.get(mode, mode),
+                           frac=_mi / float(len(_modes)), stage='hint')
+        if mode not in ('redwins_post', 'redwins_diff'):
+            # Not a red-wins rule: the mask comes straight from the
+            # fire's VIIRS raster or the BCWS polygons.
+            try:
+                if os.path.isdir(_outdir) and render_hint_mask_for_product(
+                        fire, mode, stack_path, _outdir):
+                    out['hints'] += 1
+                else:
+                    _pr = hint_mask_problem(_outdir, mode)
+                    out['errors'].append(
+                        f'{mode}: {_pr[0] if _pr else "no mask"}')
+            except Exception as _vexc:
+                out['errors'].append(f'{mode}: {_vexc}')
+            continue
         try:
             path, err = build_redwins_hint_for_fire(
                 fire, mode, stack_path=stack_path)
             if err:
                 out['errors'].append(f'{mode}: {err}')
+                if os.path.isdir(_outdir):
+                    _record_hint_problem(_outdir, mode, err, permanent=True)
             elif path:
                 out['hints'] += 1
                 # The mask layer too, while the derived hint is warm.
@@ -2432,6 +2542,9 @@ def render_hint_mask_for_product(fire: FireInfo, mode: str,
     if mode == 'viirs':
         mask = fire.viirs_bin
         if not mask or not os.path.isfile(mask):
+            _record_hint_problem(preview_dir, mode,
+                                 'there is no VIIRS hotspot data for this '
+                                 'fire', permanent=True)
             return False
     else:
         mask, err = build_derived_hint_for_fire(fire, mode,
@@ -2442,7 +2555,29 @@ def render_hint_mask_for_product(fire: FireInfo, mode: str,
             sys.stderr.write(
                 f'[prepare] hint mask {mode} for '
                 f'{os.path.basename(stack_path)}: {err}\n')
+            _record_hint_problem(preview_dir, mode,
+                                 err or 'the hint could not be derived',
+                                 permanent=True)
             return False
+    # A mask with no pixel set would be drawn as a fully transparent
+    # layer: "Hint mask" selected, nothing green, and no word why. That
+    # happens when an earlier derivation found nothing and a later call
+    # reuses its raster. Say so instead of drawing an empty layer.
+    try:
+        import numpy as _np
+        _mds = gdal.Open(mask, gdal.GA_ReadOnly)
+        _any = True
+        if _mds is not None:
+            _arr = _mds.GetRasterBand(1).ReadAsArray()
+            _any = bool(_np.any(_np.nan_to_num(_arr) > 0))
+        _mds = None
+    except Exception:
+        _any = True                      # cannot judge: draw it as before
+    if not _any:
+        _record_hint_problem(preview_dir, mode,
+                             'the hint mask is empty for this product: '
+                             'no pixel matched', permanent=True)
+        return False
     try:
         _overlay_mask_on_post(fire, mask, f'hintmask_{mode}',
                               (0.0, 0.8, 0.2),
@@ -2450,8 +2585,16 @@ def render_hint_mask_for_product(fire: FireInfo, mode: str,
     except Exception as exc:
         sys.stderr.write(
             f'[prepare] hint mask {mode} failed: {exc}\n')
+        _record_hint_problem(preview_dir, mode, f'rendering failed: {exc}',
+                             permanent=False)
         return False
-    return os.path.isfile(out)
+    ok = os.path.isfile(out)
+    if ok:
+        try:
+            os.remove(_hint_marker(preview_dir, mode))
+        except OSError:
+            pass
+    return ok
 
 
 def render_hint_for_mode(fire: FireInfo, mode: str) -> bool:
