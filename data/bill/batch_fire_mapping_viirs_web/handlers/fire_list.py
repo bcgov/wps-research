@@ -1234,6 +1234,13 @@ class FireListRoutes:
         # Cleared here, before the preview seed below writes into it
         # and before the worker starts.
         _purge_web_cache(name, 'create')
+        # Nor any per-product notes or deletion records kept in memory
+        # under this name by a predecessor.
+        try:
+            from ..prepare import forget_fire_product_states
+            forget_fire_product_states(name)
+        except Exception:
+            pass
 
         # Record the fire's authoritative grid NOW, from the rectangle as
         # it falls on the province-wide pre-imagery layer -- before any

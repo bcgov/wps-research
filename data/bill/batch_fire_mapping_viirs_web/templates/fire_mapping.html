@@ -86,6 +86,24 @@
             <div style="color:#888;font-size:11px;padding:6px">
               Loading ...</div>
           </div>
+          <!-- Memory: capacity, use and free space of every memory and
+               storage the application depends on, server and browser,
+               refreshed about once a second (memory_monitor.py). -->
+          <div id="memory-area"
+               style="flex:0 0 auto;border-top:1px solid #e5e5e5;
+                      max-height:45%;overflow:auto">
+            <div class="panel-head" style="justify-content:space-between">
+              <span style="font-size:11px;font-weight:600;color:#444">
+                Memory</span>
+              <button class="panel-collapse" id="memory-toggle"
+                      onclick="toggleMemoryArea()"
+                      title="Hide the memory figures">&#9660; Hide</button>
+            </div>
+            <div id="memory-list" style="padding:2px 6px 8px">
+              <div style="color:#888;font-size:11px;padding:4px">
+                Loading ...</div>
+            </div>
+          </div>
         </div>
 
 
@@ -915,6 +933,8 @@ let rightPostSource = 'l2';
 // entries under the old stamp simply stop being looked up and are
 // dropped by clearPreviewCache().
 const _previewBlobs = new Map();
+// Size of each cached preview, for the Memory panel's image-cache row.
+const _previewBlobBytes = new Map();
 let _previewStamp = Date.now();
 // Separate stamp for HINT images only.
 //
@@ -1061,6 +1081,7 @@ function getPreviewObjectURL(key, url, announce) {
         }
         const obj = URL.createObjectURL(blob);
         _previewBlobs.set(key, obj);
+        _previewBlobBytes.set(key, blob.size);
         _productByUrl.set(obj, served || wanted || '');
         // Bind the georeferencing to the BYTES, not to a view name.
         // Whatever ends up in an <img>, its geotransform travels with
@@ -10340,6 +10361,204 @@ function toggleSourcesPanel(force) {
 // states. Feeding the shared _cloudCover cache from this panel's
 // response also means whichever view is opened first fills it for the
 // other.
+// ---- Memory panel ---------------------------------------------------
+//
+// Server rows come from /api/memory, which only reads figures kept by
+// background sampler threads (one per row, refreshed each second, shared
+// by every page). Browser rows are measured here, in this tab.
+//
+// Several tabs of the app share the server figures over a
+// BroadcastChannel: a tab that heard figures less than a second old uses
+// them instead of asking the server again, so N tabs cost about one
+// request a second, not N. Browser rows are per tab by nature (each tab
+// has its own heap and image cache) except storage, which the browser
+// reports per site and so is the same in every tab.
+let _memoryHidden = false;
+let _memoryBusy = false;
+let _memoryTimer = null;
+let _memShared = null;              // {rows, at} -- newest server figures
+let _memChan = null;
+try {
+    _memChan = new BroadcastChannel('fire-mapping-memory');
+    _memChan.onmessage = (ev) => {
+        const d = ev && ev.data;
+        if (d && Array.isArray(d.rows)) _memShared = {rows: d.rows,
+                                                      at: Date.now()};
+    };
+} catch (_) { _memChan = null; }
+
+function toggleMemoryArea(force) {
+    _memoryHidden = (typeof force === 'boolean') ? force : !_memoryHidden;
+    const list = document.getElementById('memory-list');
+    const btn = document.getElementById('memory-toggle');
+    if (list) list.style.display = _memoryHidden ? 'none' : '';
+    if (btn) {
+        btn.innerHTML = _memoryHidden ? '&#9650; Show' : '&#9660; Hide';
+        btn.title = _memoryHidden ? 'Show the memory figures'
+                                  : 'Hide the memory figures';
+    }
+    try { localStorage.setItem('memoryHidden', _memoryHidden ? '1' : '0'); }
+    catch (_) {}
+    if (!_memoryHidden) memoryTick();
+}
+
+async function serverMemoryRows() {
+    if (_memShared && Date.now() - _memShared.at < 900) return _memShared.rows;
+    const r = await fetch('/api/memory', {cache: 'no-store',
+        headers: {'X-Requested-With': 'fetch'}});
+    const j = await r.json().catch(() => ({}));
+    const rows = Array.isArray(j.rows) ? j.rows : [];
+    _memShared = {rows, at: Date.now()};
+    try { if (_memChan) _memChan.postMessage({rows}); } catch (_) {}
+    return rows;
+}
+
+async function browserMemoryRows() {
+    const MB = 1048576;
+    const rows = [];
+    const pm = (typeof performance !== 'undefined') && performance.memory;
+    if (pm && pm.jsHeapSizeLimit) {
+        rows.push({type: 'JS heap', capacity_mb: pm.jsHeapSizeLimit / MB,
+                   used_mb: pm.usedJSHeapSize / MB,
+                   where: 'JavaScript memory of this tab'});
+    } else {
+        rows.push({type: 'JS heap', error: 'not reported by this browser '
+                   + '(Chrome and Edge report it)'});
+    }
+    let bytes = 0, n = 0;
+    for (const k of _previewBlobs.keys()) {
+        bytes += _previewBlobBytes.get(k) || 0;
+        n += 1;
+    }
+    for (const k of [..._previewBlobBytes.keys()]) {
+        if (!_previewBlobs.has(k)) _previewBlobBytes.delete(k);
+    }
+    rows.push({type: 'image cache', capacity_mb: null, used_mb: bytes / MB,
+               where: `${n} preview image(s) held by this tab; `
+                      + 'no fixed limit'});
+    try {
+        if (navigator.storage && navigator.storage.estimate) {
+            const e = await navigator.storage.estimate();
+            rows.push({type: 'browser storage',
+                       capacity_mb: (e.quota || 0) / MB,
+                       used_mb: (e.usage || 0) / MB,
+                       where: 'this site\u2019s storage quota in this '
+                              + 'browser, shared by all its tabs'});
+        }
+    } catch (_) {}
+    try {
+        let ls = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i) || '';
+            ls += (k.length + (localStorage.getItem(k) || '').length) * 2;
+        }
+        rows.push({type: 'localStorage', capacity_mb: 5, used_mb: ls / MB,
+                   where: 'saved page settings; browsers allow about '
+                          + '5 MB per site'});
+    } catch (_) {}
+    for (const r of rows) {
+        if (typeof r.capacity_mb === 'number' && typeof r.used_mb === 'number') {
+            r.free_mb = Math.max(0, r.capacity_mb - r.used_mb);
+            r.pct = r.capacity_mb > 0 ? 100 * r.used_mb / r.capacity_mb : null;
+        }
+    }
+    return rows;
+}
+
+function fmtMemMB(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return '\u2014';
+    return v >= 10 ? Math.round(v).toLocaleString('en-US') : v.toFixed(1);
+}
+
+// Same bar as the cloud-cover cell: the number in front, then the track
+// -- RED from the left for the share used, GREEN for the share free.
+function memPctCell(pct) {
+    const known = typeof pct === 'number' && isFinite(pct);
+    const p = known ? Math.max(0, Math.min(100, pct)) : 0;
+    const txt = known ? p.toFixed(1).padStart(5, ' ') : '    \u2014';
+    const bar = known
+        ? `<span style="display:block;height:100%;width:${p}%;
+                        background:#c0392b;float:left"></span>
+           <span style="display:block;height:100%;width:${100 - p}%;
+                        background:#2d8a4e;float:left"></span>`
+        : '';
+    return `<span style="display:inline-flex;align-items:center;gap:6px">
+      <span style="font-family:monospace;font-size:11px;color:#555;
+                   white-space:pre;width:3.4em;text-align:right">${txt}</span>
+      <span style="display:inline-block;width:70px;height:7px;
+                   background:#eee;border-radius:3px;overflow:hidden"
+            title="${known ? (100 - p).toFixed(1) + '% free'
+                           : 'not known'}">${bar}</span></span>`;
+}
+
+function renderMemoryRows(serverRows, browserRows) {
+    const box = document.getElementById('memory-list');
+    if (!box) return;
+    const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g,
+        (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+    const td = 'padding:1px 4px;white-space:nowrap';
+    const num = td + ';text-align:right;font-family:monospace';
+    const line = (r) => {
+        const tip = r.error ? `${r.where ? r.where + ' \u2014 ' : ''}`
+                              + `unavailable: ${r.error}`
+                            : (r.where || '');
+        return `<tr title="${esc(tip)}">
+          <td style="${td};color:#333">${esc(r.type)}</td>
+          <td style="${num}">${fmtMemMB(r.capacity_mb)}</td>
+          <td style="${num}">${fmtMemMB(r.used_mb)}</td>
+          <td style="${num}">${fmtMemMB(r.free_mb)}</td>
+          <td style="${td}">${memPctCell(r.pct)}</td></tr>`;
+    };
+    const head = ['Type', 'Capacity', 'Used', 'Free', '%'].map((h, i) =>
+        `<th style="${td};text-align:${i && i < 4 ? 'right' : 'left'};
+                   color:#666;font-weight:600">${h}</th>`).join('');
+    box.innerHTML = `<table style="border-collapse:collapse;font-size:11px">
+      <thead><tr>${head}</tr></thead><tbody>
+      ${serverRows.map(line).join('')}
+      <tr><td colspan="5" style="padding:4px 4px 1px;color:#888;
+          font-size:10px;border-top:1px solid #eee">this browser</td></tr>
+      ${browserRows.map(line).join('')}
+      </tbody></table>
+      <div style="color:#999;font-size:10px;padding:2px 4px">MB</div>`;
+}
+
+async function memoryTick() {
+    if (_memoryBusy || _memoryHidden || document.hidden) return;
+    if (typeof _sourcesCollapsed !== 'undefined' && _sourcesCollapsed) return;
+    _memoryBusy = true;
+    try {
+        let srv = [];
+        try { srv = await serverMemoryRows(); }
+        catch (err) {
+            srv = [{type: 'server', error: err.message || 'no answer'}];
+        }
+        const brw = await browserMemoryRows();
+        renderMemoryRows(srv, brw);
+    } catch (_) {
+        /* informational: never disturb the page */
+    } finally {
+        _memoryBusy = false;
+    }
+}
+
+function startMemoryMonitor() {
+    if (_memoryTimer) return;
+    try {
+        if (localStorage.getItem('memoryHidden') === '1') toggleMemoryArea(true);
+    } catch (_) {}
+    memoryTick();
+    _memoryTimer = setInterval(memoryTick, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) memoryTick();
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startMemoryMonitor);
+} else {
+    setTimeout(startMemoryMonitor, 0);
+}
+
 function srcCloudCell(e) {
     if (e.source !== 'l2') {
         // NA sits in the NUMBER column, beside the bar -- not under

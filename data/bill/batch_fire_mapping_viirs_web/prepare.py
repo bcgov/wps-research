@@ -1033,9 +1033,121 @@ def forget_fire_product_states(fire_numbe: str) -> int:
             for ident in [i for i in _product_state if i.startswith(pre)]:
                 _product_state.pop(ident, None)
                 gone += 1
+        # Its deletions go with it (the manifest holding them lives in
+        # the fire's cache, which is purged with the fire).
+        with _tomb_lock:
+            _tombs.pop(fire_numbe or '', None)
+            _tombs_loaded.discard(fire_numbe or '')
     except Exception:
         pass
     return gone
+
+
+# ---- Deleted products -------------------------------------------------
+#
+# A product the operator deletes must stay deleted. Several paths build a
+# product on their own initiative -- the on-demand preview path switching
+# the fire back to the operator's remembered product, the refresh of each
+# fire's default products at startup -- and each of them resurrected a
+# product that had just been deleted. A tombstone records the deletion;
+# those implicit paths skip a tombstoned product, and only an explicit
+# request to build it again (Date select) lifts the tombstone.
+#
+# Kept in memory, and in the fire's manifest so a restart honours it. The
+# manifest lives in the fire's cache, so a removed or recreated fire never
+# inherits another fire's tombstones.
+
+_tomb_lock = threading.Lock()
+_tombs = {}              # fire number -> {product key: deleted at}
+_tombs_loaded = set()    # fires whose manifest tombstones have been read
+
+
+def _tombs_for(fire) -> dict:
+    """This fire's tombstones (loaded from its manifest once per run)."""
+    fn = getattr(fire, 'fire_numbe', '') or ''
+    with _tomb_lock:
+        if fn in _tombs_loaded:
+            return _tombs.setdefault(fn, {})
+    got = {}
+    try:
+        from .manifest import load as _mload
+        got = dict((_mload(fire) or {}).get('deleted') or {})
+    except Exception:
+        got = {}
+    with _tomb_lock:
+        d = _tombs.setdefault(fn, {})
+        for k, v in got.items():
+            try:
+                d.setdefault(str(k), float(v))
+            except (TypeError, ValueError):
+                pass
+        _tombs_loaded.add(fn)
+        return d
+
+
+def _save_tombs(fire) -> None:
+    try:
+        from .manifest import load as _mload, save as _msave
+        with _tomb_lock:
+            snap = dict(_tombs.get(fire.fire_numbe) or {})
+        man = _mload(fire) or {}
+        man['deleted'] = snap
+        _msave(fire, man)
+    except Exception as exc:
+        sys.stderr.write(f'[sources] could not record deletions in the '
+                         f'manifest: {exc}\n')
+
+
+def tombstone_products(fire, keys) -> None:
+    """Record that the operator deleted these products."""
+    keys = [k for k in (keys or []) if k]
+    if not keys:
+        return
+    _tombs_for(fire)
+    now = time.time()
+    with _tomb_lock:
+        d = _tombs.setdefault(fire.fire_numbe, {})
+        for k in keys:
+            d[k] = now
+    _save_tombs(fire)
+
+
+def untombstone_product(fire, key: str) -> None:
+    """The operator asked for this product again: lift its tombstone."""
+    if not key or key not in _tombs_for(fire):
+        return
+    with _tomb_lock:
+        (_tombs.get(fire.fire_numbe) or {}).pop(key, None)
+    _save_tombs(fire)
+    sys.stderr.write(f'[sources] {fire.fire_numbe}: {key} requested '
+                     f'again; its deletion no longer applies\n')
+
+
+def product_tombstone(fire, key: str) -> float:
+    """When this product was deleted, or 0.0 if it was not."""
+    if not key:
+        return 0.0
+    try:
+        return float(_tombs_for(fire).get(key) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def product_state_deleted_since(fire, key: str, path: str) -> bool:
+    """Tombstoned, and not rebuilt since (no file newer than the deletion).
+
+    A copy of the deleted stack that survives -- the durable mirror
+    finishing a copy it had already started, say -- keeps the old file's
+    time, so it is still treated as deleted. A genuine rebuild writes a
+    new file and is not.
+    """
+    ts = product_tombstone(fire, key)
+    if not ts:
+        return False
+    try:
+        return not (path and os.path.getmtime(path) > ts)
+    except OSError:
+        return True
 
 
 def product_states_for_fire(fire_numbe: str) -> dict:
@@ -4268,6 +4380,11 @@ def ensure_default_products(fire: FireInfo, log=None,
             out['skipped'].append(key)
             _say(f'[refresh] {fn}: {key} is already present; not '
                  f'rebuilding it')
+            continue
+        if product_tombstone(fire, key):
+            out['skipped'].append(key)
+            _say(f'[refresh] {fn}: {key} was deleted by the operator; '
+                 f'not rebuilding it')
             continue
         try:
             info = ensure_aoi_stack(

@@ -115,6 +115,24 @@ class OpsRoutes:
     """Cross-cutting ops routes (years, queue, notifications, cache, report)."""
 
 
+
+    def handle_api_memory(self):
+        """Memory and storage figures for the Memory panel.
+
+        Reads the latest figures kept by the background samplers
+        (memory_monitor): nothing is queried per request, so any number of
+        pages polling this once a second costs the server nothing extra.
+        """
+        try:
+            from ..memory_monitor import snapshot
+            _root = ''
+            try:
+                _root = getattr(state, 'output_root', '') or ''
+            except Exception:
+                _root = ''
+            self._send_json(snapshot(output_root=_root))
+        except Exception as exc:
+            self._send_json({'rows': [], 'error': str(exc)}, 500)
     def handle_api_years(self):
         self._send_json({
             'years': sorted(state.rasters_by_year),

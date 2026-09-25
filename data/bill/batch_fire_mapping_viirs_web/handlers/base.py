@@ -159,6 +159,7 @@ class BaseHandler:
         (re.compile(r'^/fire/(?P<fire_numbe>[^/]+)$'), 'handle_fire_page'),
         (re.compile(r'^/api/fires$'), 'handle_api_fires'),
         (re.compile(r'^/api/settings$'), 'handle_api_settings_get'),
+        (re.compile(r'^/api/memory$'), 'handle_api_memory'),
         (re.compile(r'^/api/access/status$'), 'handle_api_access_status'),
         (re.compile(r'^/api/batch/status$'), 'handle_api_batch_status'),
         (re.compile(r'^/api/admin/ips$'), 'handle_api_admin_ips'),

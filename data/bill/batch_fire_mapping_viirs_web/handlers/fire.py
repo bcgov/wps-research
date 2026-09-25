@@ -362,6 +362,21 @@ class FireRoutes:
         # undoes the very switch the user is waiting on -- the source
         # flips to MRAP and then flips back, which is the reported
         # first-click failure.
+        # A deleted product can only be named by stale state -- a late
+        # retry, another tab -- since no list offers it. Refused before
+        # any of the fire's remembered choices are touched, so it cannot
+        # be switched to, and so built again. (Date select lifts the
+        # deletion when the operator really wants it back.)
+        if _product:
+            try:
+                from ..prepare import product_tombstone as _pt
+                _was_deleted = bool(_pt(fire, _product))
+            except Exception:
+                _was_deleted = False
+            if _was_deleted:
+                self._send_json({'error': f'{_product} was deleted',
+                                 'deleted': True}, 404)
+                return
         if source in ('l2', 'mrap'):
             fire.user_post_source = source
             if _date is not None:
@@ -576,6 +591,13 @@ class FireRoutes:
         from ..prepare import switch_post_source, product_parts
 
         def _build_one(key):
+            # Asked for explicitly: a deletion of this product no longer
+            # applies (see prepare.tombstone_products).
+            try:
+                from ..prepare import untombstone_product
+                untombstone_product(fire, key)
+            except Exception:
+                pass
             """Build ONE product's stack. Never touches the fire."""
             t0 = time.time()
             src, start, post = product_parts(key)
@@ -1117,6 +1139,30 @@ class FireRoutes:
                         _SOURCES_DELETING[fire_numbe] = left
                     else:
                         _SOURCES_DELETING.pop(fire_numbe, None)
+
+        # Deleted for good, and nothing still points at them. The
+        # on-demand preview path switches the fire BACK to
+        # fire.user_product after rendering another product; left naming
+        # a deleted product, that switch rebuilt it -- the row came back
+        # and the layer was resurrected.
+        try:
+            from ..prepare import (tombstone_products,
+                                   product_parts as _ppd)
+            tombstone_products(fire, keys)
+            if (getattr(fire, 'user_product', '') or '') in keys:
+                _new = target or (cur if cur not in keys else '')
+                fire.user_product = _new
+                if _new:
+                    _ns, _nstart, _npost = _ppd(_new)
+                    fire.user_post_source = _ns
+                    if _ns == 'l2':
+                        fire.user_l2_date = _nstart or ''
+                sys.stderr.write(
+                    f'[sources] {fire_numbe}: remembered product is now '
+                    f'{_new or "(none)"}\n')
+        except Exception as exc:
+            sys.stderr.write(f'[sources] {fire_numbe}: could not record '
+                             f'the deletion: {exc}\n')
 
         # Gone from every listing from this moment; the files follow.
         _all_keys = list(keys)
@@ -2625,6 +2671,14 @@ class FireRoutes:
                     # By PRODUCT, so a dated request builds that date
                     # rather than whichever composite the source would
                     # default to.
+                    # A deleted product is never built again to answer a
+                    # preview request -- that is a stale pane (another
+                    # tab, a late retry), not the operator asking for it.
+                    from ..prepare import product_tombstone as _ptomb
+                    if _ptomb(fire, _req_key):
+                        raise RuntimeError(
+                            f'{_req_key} was deleted; not rebuilding it '
+                            f'for a preview request')
                     r1 = switch_post_source(fire, _src,
                                             product=_req_key)
                     if not r1.get('ok'):
@@ -2642,6 +2696,18 @@ class FireRoutes:
                         _want_date = _cur_date
                     _want_key = (getattr(fire, 'user_product', '')
                                  or product_key(_want, _want_date))
+                    # Never switch back ONTO a deleted product: the switch
+                    # would build it again. Return to what was loaded.
+                    try:
+                        from ..prepare import (product_tombstone as _pt2,
+                                               product_parts as _pp3)
+                        if _want_key and _pt2(fire, _want_key):
+                            _want_key = (_cur_key if (_cur_key and not
+                                                      _pt2(fire, _cur_key))
+                                         else _req_key)
+                            _want = _pp3(_want_key)[0] or _want
+                    except Exception:
+                        pass
                     if _want_key == _req_key:
                         fire.prebuilding = False
                         sys.stderr.write(
@@ -4126,13 +4192,30 @@ class FireRoutes:
         Sources panel, the selectors, the products endpoint -- so nothing
         can display it or offer it while its files are being removed.
         """
-        out = self._built_products_all(fire_numbe, fire,
-                                       keep_paths=keep_paths)
+        out = self._built_products_all(fire_numbe, fire, keep_paths=True)
         with _SOURCES_DELETING_LOCK:
             gone = set(_SOURCES_DELETING.get(fire_numbe) or ())
-        if not gone:
-            return out
-        return [p for p in out if (p.get('key') or '') not in gone]
+        # A deleted product stays gone from every listing -- including
+        # the "not built yet" placeholder that reuses the same key, which
+        # otherwise put the row straight back -- unless it has genuinely
+        # been rebuilt since (its file is newer than the deletion).
+        try:
+            from ..prepare import product_state_deleted_since as _dead
+        except Exception:
+            _dead = None
+        keep = []
+        for p in out:
+            k = p.get('key') or ''
+            if k in gone:
+                continue
+            if _dead is not None and k and _dead(fire, k,
+                                                 p.get('_path') or ''):
+                continue
+            keep.append(p)
+        if not keep_paths:
+            for p in keep:
+                p.pop('_path', None)
+        return keep
 
     def _built_products_all(self, fire_numbe, fire, keep_paths=False):
         """Every product on disk for this AOI, newest first.
