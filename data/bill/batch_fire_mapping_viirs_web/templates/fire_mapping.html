@@ -5140,7 +5140,9 @@ function _setDownloadButton(state, bytes) {
     if (!a) return;
     if (state === 'ready') {
         a.textContent = `Download (${_fmtMb(bytes)} MB)`;
-        a.href = `/api/fire/${encodeURIComponent(FIRE)}/download`;
+        // The same selection the status answered for, so the file that
+        // downloads is the one whose size the button shows.
+        a.href = `/api/fire/${encodeURIComponent(FIRE)}/download${_dlParam}`;
         a.setAttribute('download', '');
         a.style.opacity = '';
         a.style.pointerEvents = '';
@@ -5148,7 +5150,9 @@ function _setDownloadButton(state, bytes) {
         a.title = 'Download the product archive';
     } else {
         a.textContent = (state === 'building')
-            ? 'Download (preparing ...)' : 'Download';
+            ? ((bytes > 0) ? `Download (~${_fmtMb(bytes)} MB, preparing ...)`
+                           : 'Download (preparing ...)')
+            : 'Download';
         a.removeAttribute('href');
         a.style.opacity = '0.5';
         a.style.pointerEvents = 'none';
@@ -5162,6 +5166,28 @@ function _setDownloadButton(state, bytes) {
 // Ask the server whether the archive is current, and keep asking while
 // it builds. Called after anything that changes what would be in it.
 let _dlPolls = 0;
+// Which products go in: the accepted result's source always, plus any
+// ticked in the Sources panel. The status request and the Download link
+// carry the ticked ones; every status request is numbered and only the
+// newest may touch the button, so a slow answer for an earlier selection
+// can never overwrite a newer one. Ticking boxes only schedules a
+// request (debounced): the button updates when the answer arrives, and
+// nothing in the page waits for it.
+let _dlSeq = 0;
+let _dlParam = '';
+let _dlSelTimer = null;
+function downloadExtraParam() {
+    let keys = [];
+    try { keys = [..._srcSelected].filter(Boolean).sort(); } catch (_) {}
+    return keys.length ? `?extra=${encodeURIComponent(keys.join(','))}` : '';
+}
+function scheduleDownloadStatus(why) {
+    if (_dlSelTimer) clearTimeout(_dlSelTimer);
+    _dlSelTimer = setTimeout(() => {
+        _dlSelTimer = null;
+        refreshDownloadStatus(why || 'selection');
+    }, 350);
+}
 let _dlSince = 0;
 let _dlLastState = '';
 
@@ -6064,9 +6090,12 @@ async function refreshDownloadStatus(why) {
     const t0 = performance.now();
     const tag = why ? ` (${why})` : '';
     try {
+        const param = downloadExtraParam();
+        const mySeq = ++_dlSeq;
         const url =
-            `/api/fire/${encodeURIComponent(FIRE)}/download_status`;
+            `/api/fire/${encodeURIComponent(FIRE)}/download_status${param}`;
         const r = await fetch(url);
+        if (mySeq !== _dlSeq) return;          // a newer selection asked
         const ms = (performance.now() - t0).toFixed(0);
         if (!r.ok) {
             log(`[download] status HTTP ${r.status} after ${ms} ms`
@@ -6076,6 +6105,8 @@ async function refreshDownloadStatus(why) {
             return;
         }
         const j = await r.json();
+        if (mySeq !== _dlSeq) return;
+        _dlParam = param;
         if (j.state !== _dlLastState) {
             log(`[download] state ${_dlLastState || '(none)'} -> `
                 + `${j.state}${tag}, sig=${j.sig || '-'}, `
@@ -6097,7 +6128,7 @@ async function refreshDownloadStatus(why) {
             _dlSince = 0;
             _setDownloadButton('ready', j.bytes);
         } else if (j.state === 'building') {
-            _setDownloadButton('building');
+            _setDownloadButton('building', j.estimate_bytes || 0);
             if (!_dlSince) _dlSince = Date.now();
             _dlPolls += 1;
             const secs = ((Date.now() - _dlSince) / 1000).toFixed(0);
@@ -10987,6 +11018,8 @@ function renderSourcesList(data) {
             if (cb.checked) _srcSelected.add(cb.dataset.srcKey);
             else _srcSelected.delete(cb.dataset.srcKey);
             syncSourcesDeleteButton();
+            // Ticked products join the Download archive.
+            scheduleDownloadStatus('selection');
         });
         // Ticking a box must not also switch the pane.
         cb.addEventListener('click', (ev) => ev.stopPropagation());
@@ -11259,6 +11292,7 @@ async function deleteSelectedSources() {
             _lastSourcesData.sources.filter((e) => !gone.has(e.key));
     }
     try { syncSourcesDeleteButton(); } catch (_) {}
+    try { scheduleDownloadStatus('selection'); } catch (_) {}
     if (leftTo) {
         log(`[sources] left pane: ${leftKey} is being deleted; `
             + `showing ${leftTo}`, 'dim');

@@ -60,7 +60,8 @@ def _to_local(dt_utc: str):
 
 
 def acquisition_datetime(fire, stack_path: str = '',
-                         ref_raster: str = '') -> dict:
+                         ref_raster: str = '', source: str = '',
+                         cap=None) -> dict:
     """Newest acquisition datetime behind this fire's imagery.
 
     Returns ``{'utc', 'local', 'source', 'exact'}``; ``exact`` says
@@ -76,7 +77,11 @@ def acquisition_datetime(fire, stack_path: str = '',
     for the tiles covering this AOI. It may name an acquisition that
     contributed nothing here.
     """
-    src = (getattr(fire, 'post_source', '') or 'l2').lower()
+    # *source*, *stack_path* and *cap* name the product to date. Callers
+    # dating a deliverable pass the product the accepted result was made
+    # FROM; the fire's currently loaded product (the fallback) is merely
+    # whatever the operator is looking at now.
+    src = (source or getattr(fire, 'post_source', '') or 'l2').lower()
 
     if src == 'l2':
         side = ''
@@ -102,11 +107,13 @@ def acquisition_datetime(fire, stack_path: str = '',
         # through to the estimate rather than failing the download.
 
     return _estimate_from_tiles(fire, exact=False, src=src,
-                                ref_raster=ref_raster)
+                                ref_raster=ref_raster, cap=cap,
+                                stack_path=stack_path)
 
 
 def _estimate_from_tiles(fire, exact: bool, src: str,
-                         ref_raster: str = '') -> dict:
+                         ref_raster: str = '', cap=None,
+                         stack_path: str = '') -> dict:
     """Newest acquisition available over this AOI's tiles.
 
     The reference raster is supplied by the caller. Reaching for the
@@ -126,7 +133,12 @@ def _estimate_from_tiles(fire, exact: bool, src: str,
                 ds = None
         tiles = tiles_intersecting_bbox(fire.bbox_native, proj)
         newest = ''
-        cap = (getattr(fire, 'l2_start_date', '') or '')
+        # No acquisition after the product's own date can be in it: the
+        # cap is that date (the MRAP mosaic date, the L2 start date).
+        # The fire's current L2 date is only the fallback -- it says
+        # nothing about an MRAP product, or about another L2 date.
+        cap = (cap if cap is not None
+               else (getattr(fire, 'l2_start_date', '') or ''))
         for t in tiles:
             for _key, acq8, _tok, path in zips_for_tile(t):
                 if cap and acq8 > cap:
@@ -146,9 +158,16 @@ def _estimate_from_tiles(fire, exact: bool, src: str,
     # unknown, so it is reported as 00:00 and flagged inexact -- a dated
     # product name with an approximate time is far more use than every
     # file keeping its undated name.
+    #
+    # The product being dated, when the caller names it: its own date
+    # (*cap*: the L2 start date or MRAP mosaic date), else its stack's
+    # leading date. The loaded product only when neither is given.
     try:
-        stem_name = os.path.basename(getattr(fire, 'crop_bin', '') or '')
-        m = re.match(r'^(\d{8})_', stem_name)
+        m = re.match(r'^(\d{8})$', cap) if isinstance(cap, str) else None
+        stem_name = os.path.basename(
+            stack_path or getattr(fire, 'crop_bin', '') or '')
+        if not m:
+            m = re.match(r'^(\d{8})_', stem_name)
         if not m:
             m = re.match(r'^(\d{8})$',
                          (getattr(fire, 'post_date', '') or '')[:8])
@@ -165,7 +184,8 @@ def _estimate_from_tiles(fire, exact: bool, src: str,
     return {'utc': '', 'local': None, 'source': src, 'exact': False}
 
 
-def fallback_datetime(fire) -> dict:
+def fallback_datetime(fire, stack_path: str = '', date: str = '',
+                      source: str = '') -> dict:
     """Last resort so products are ALWAYS named to the convention.
 
     Uses the post date the stack was built for -- a real acquisition
@@ -173,9 +193,13 @@ def fallback_datetime(fire) -> dict:
     manifest states that the time was unavailable, so no precision is
     implied that is not there.
     """
-    cand = ''
-    m = re.search(r'(\d{8})_stack_',
-                  os.path.basename(getattr(fire, 'crop_bin', '') or ''))
+    # *date* (the product's own date: an L2 start date, an MRAP mosaic
+    # date) or *stack_path* name the product being dated; without them,
+    # the loaded stack -- the behaviour for callers that pass neither.
+    cand = date if re.fullmatch(r'\d{8}', date or '') else ''
+    m = None if cand else re.search(
+        r'(\d{8})_stack_',
+        os.path.basename(stack_path or getattr(fire, 'crop_bin', '') or ''))
     if m:
         cand = m.group(1)
     if not cand:
@@ -184,7 +208,7 @@ def fallback_datetime(fire) -> dict:
         return {'utc': '', 'local': None, 'source': '', 'exact': False}
     return {'utc': cand + 'T000000',
             'local': _to_local(cand + 'T000000'),
-            'source': (getattr(fire, 'post_source', '') or ''),
+            'source': (source or getattr(fire, 'post_source', '') or ''),
             'exact': False, 'time_unknown': True}
 
 
@@ -302,7 +326,7 @@ def describe(rel_path: str) -> str:
 
 
 def build_manifest_pdf(out_path: str, fire_numbe: str, files: list,
-                       acq: dict, stem: str) -> bool:
+                       acq: dict, stem: str, products=None) -> bool:
     """Write the archive contents listing. False if it could not."""
     try:
         from reportlab.lib.pagesizes import letter
@@ -359,6 +383,14 @@ def build_manifest_pdf(out_path: str, fire_numbe: str, files: list,
                 'assembled by the application, which recorded the '
                 'datetime of every contributing acquisition.</i>', body))
     story.append(Spacer(1, 6))
+    if products:
+        from xml.sax.saxutils import escape as _esc
+        story.append(Paragraph('<b>Products in this archive</b>', body))
+        for _ln in _product_lines(products):
+            story.append(Paragraph(
+                _esc(_ln).replace('    ', '&nbsp;&nbsp;&nbsp;&nbsp;'),
+                body))
+        story.append(Spacer(1, 6))
 
     rows = [[Paragraph('File', hdr), Paragraph('What it is', hdr)]]
     for rel in files:
@@ -511,9 +543,62 @@ def _verify_serial_redundant(skipped: list, result_dir: str,
                 f'raster is delivered.\n')
 
 
+def accepted_source(result_dir: str, fire_numbe: str) -> dict:
+    """Which product the accepted result was made from.
+
+    Read from the accepted run's own record (<fire>_params.yaml, written
+    at accept time from workers.result_attribution): ``product`` is the
+    product key, ``stack`` the raster the run consumed. Empty strings
+    when the record predates it.
+    """
+    out = {'product': '', 'stack': ''}
+    path = os.path.join(result_dir, f'{fire_numbe}_params.yaml')
+    try:
+        with open(path, encoding='utf-8') as fh:
+            text = fh.read()
+    except OSError:
+        return out
+    try:
+        import yaml
+        doc = yaml.safe_load(text) or {}
+        f = (doc.get('fire') or {}) if isinstance(doc, dict) else {}
+        out['product'] = str(f.get('source_product') or '')
+        out['stack'] = str(f.get('source_stack') or '')
+        return out
+    except Exception:
+        pass
+    for k, name in (('product', 'source_product'), ('stack', 'source_stack')):
+        m = re.search(r'^\s*' + name + r'\s*:\s*[\'"]?([^\'"\n]*)',
+                      text, re.M)
+        if m:
+            out[k] = m.group(1).strip()
+    return out
+
+
+def _product_lines(products) -> list:
+    """Plain-text lines describing each product in the archive."""
+    out = []
+    for p in (products or []):
+        key = p.get('key') or ''
+        out.append(f"{p.get('label') or key} [{key}] -- "
+                   f"{p.get('role') or ''}")
+        acqs = p.get('acquisitions') or []
+        newest = p.get('newest') or 'unknown'
+        out.append(f"    acquisitions: "
+                   f"{', '.join(acqs) if acqs else 'not recorded'}; newest "
+                   f"{newest}{'' if p.get('exact') else ' (estimate)'}")
+        hints = p.get('hints') or {}
+        if hints:
+            out.append('    hint masks: ' + '; '.join(
+                f'{m} {v}' for m, v in hints.items()))
+        out.append(f"    folder: imagery/{key}/")
+    return out
+
+
 def build_archive(result_dir: str, fire_numbe: str, acq: dict,
                   out_zip: str, log=None, fire=None,
-                  imagery=None) -> dict:
+                  imagery=None, products=None,
+                  extra_entries=None) -> dict:
     """Zip an accepted fire directory as a delivered product set.
 
     Entry-by-entry rather than zipping the folder, so the delivered
@@ -612,6 +697,14 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         if not any(a == arc for _f, a in entries):
             entries.append((pth, arc))
 
+    # Files the caller has already placed: each product's imagery,
+    # acquisition record and hint rasters in its own folder.
+    for pth, arc in (extra_entries or []):
+        if not os.path.isfile(pth):
+            continue
+        if not any(a == arc for _f, a in entries):
+            entries.append((pth, arc))
+
     manifest_name = f'{fire_numbe}_ARCHIVE_CONTENTS.pdf'
     tmp_manifest = os.path.join(
         os.path.dirname(out_zip) or '.',
@@ -620,7 +713,8 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
     have_manifest = False
     try:
         have_manifest = build_manifest_pdf(
-            tmp_manifest, fire_numbe, listed, acq, stem or fire_numbe)
+            tmp_manifest, fire_numbe, listed, acq, stem or fire_numbe,
+            products=products)
     except Exception as exc:
         sys.stderr.write(f'[delivery] manifest failed: {exc}\n')
 
@@ -630,7 +724,7 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         try:
             have_manifest = build_manifest_pdf_simple(
                 tmp_manifest, fire_numbe, listed, acq,
-                stem or fire_numbe)
+                stem or fire_numbe, products=products)
             if have_manifest:
                 sys.stderr.write(
                     '[delivery] manifest written without reportlab\n')
@@ -645,7 +739,8 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
         # library happens to be present" is not a contract.
         have_manifest = _simple_pdf(
             tmp_manifest, f'{fire_numbe} archive contents',
-            _manifest_lines(fire_numbe, listed, acq, stem or fire_numbe))
+            _manifest_lines(fire_numbe, listed, acq, stem or fire_numbe,
+                            products=products))
         if have_manifest:
             sys.stderr.write(
                 '[delivery] manifest written without reportlab\n')
@@ -665,6 +760,11 @@ def build_archive(result_dir: str, fire_numbe: str, acq: dict,
                         f'{(acq or {}).get("utc")} UTC\n')
                     fh.write(f'Exact: {bool((acq or {}).get("exact"))}\n')
                     fh.write(f'Product naming: {stem}.*\n\n')
+                if products:
+                    fh.write('PRODUCTS IN THIS ARCHIVE\n')
+                    for ln in _product_lines(products):
+                        fh.write(ln + '\n')
+                    fh.write('\n')
                 for rel in listed:
                     d = describe(rel)
                     if d:
@@ -835,7 +935,8 @@ def write_simple_pdf(out_path: str, lines: list) -> bool:
 
 
 def build_manifest_pdf_simple(out_path: str, fire_numbe: str,
-                              files: list, acq: dict, stem: str) -> bool:
+                              files: list, acq: dict, stem: str,
+                              products=None) -> bool:
     """The manifest, without reportlab."""
     L = []
     L.append(('ARCHIVE CONTENTS', 'B', 16))
@@ -862,6 +963,12 @@ def build_manifest_pdf_simple(out_path: str, fire_numbe: str,
         for ln in _wrap(note, 92):
             L.append((ln, '', 8.5))
     L.append(('', '', 8))
+    if products:
+        L.append(('PRODUCTS IN THIS ARCHIVE', 'B', 11))
+        L.append(('', '', 4))
+        for _ln in _product_lines(products):
+            L.append((_ln, '', 8.5))
+        L.append(('', '', 8))
     L.append(('FILES', 'B', 11))
     L.append(('', '', 4))
     for rel in files:
@@ -974,7 +1081,7 @@ def _simple_pdf(out_path: str, title: str, lines: list) -> bool:
 
 
 def _manifest_lines(fire_numbe: str, files: list, acq: dict,
-                    stem: str) -> list:
+                    stem: str, products=None) -> list:
     out = [('h1', f'ARCHIVE CONTENTS - {fire_numbe}'), ('p', '')]
     loc = (acq or {}).get('local')
     if loc is not None:
@@ -1001,6 +1108,11 @@ def _manifest_lines(fire_numbe: str, files: list, acq: dict,
                              'newest acquisition available over the '
                              'covering tiles.'))
     out.append(('p', ''))
+    if products:
+        out.append(('h2', 'Products in this archive'))
+        for _ln in _product_lines(products):
+            out.append(('p', _ln))
+        out.append(('p', ''))
     out.append(('h2', 'Files'))
     for rel in files:
         d = describe(rel)
@@ -1023,9 +1135,13 @@ def _manifest_lines(fire_numbe: str, files: list, acq: dict,
 # that goes into it, so it rebuilds exactly when something changed and
 # is reused otherwise.
 
-def download_signature(result_dir: str, imagery=None) -> str:
+def download_signature(result_dir: str, imagery=None,
+                       extra: str = '') -> str:
     import hashlib
     h = hashlib.sha1()
+    # *extra* carries what the file list cannot: which product dates the
+    # deliverables and which files go where in the archive.
+    h.update(f'plan|{extra}|'.encode())
     for root, _dirs, fnames in sorted(os.walk(result_dir)):
         for fn in sorted(fnames):
             if fn.startswith('.') or '.low.' in fn:
@@ -1065,12 +1181,31 @@ def cached_zip_path(output_root: str, fire_numbe: str, sig: str) -> str:
                         f'{fire_numbe}__{sig}.zip')
 
 
-def prune_cache(output_root: str, fire_numbe: str, keep: str = '') -> None:
-    """Drop this fire's older archives; only the current one is useful."""
+def prune_cache(output_root: str, fire_numbe: str, keep: str = '',
+                keep_recent: int = 0) -> None:
+    """Drop this fire's older archives.
+
+    *keep* is always kept, and so are the *keep_recent* newest others:
+    with the Sources checkboxes choosing what goes in, the operator can
+    move between two or three selections, and each move should not
+    rebuild an archive that was just made.
+    """
     import glob as _g
-    for p in _g.glob(os.path.join(cache_dir_for(output_root),
-                                  f'{fire_numbe}__*.zip')):
+    found = _g.glob(os.path.join(cache_dir_for(output_root),
+                                 f'{fire_numbe}__*.zip'))
+    spare = set()
+    if keep_recent > 0:
+        others = [p for p in found if not (
+            keep and os.path.abspath(p) == os.path.abspath(keep))]
+        try:
+            others.sort(key=os.path.getmtime, reverse=True)
+        except OSError:
+            pass
+        spare = {os.path.abspath(p) for p in others[:keep_recent]}
+    for p in found:
         if keep and os.path.abspath(p) == os.path.abspath(keep):
+            continue
+        if os.path.abspath(p) in spare:
             continue
         try:
             os.remove(p)

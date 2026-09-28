@@ -21,6 +21,41 @@ import zipfile
 import sys
 import threading
 
+# Download archives. One background builder per fire works through the
+# NEWEST requested selection (Sources checkboxes change what goes in);
+# each archive is built under its own lock, so the status poll and a
+# Download click never write the same file at once.
+_DL_STATE_LOCK = threading.Lock()
+_DL_WANT = {}            # fire -> (sig, plan, result_dir)
+_DL_RUNNING = set()      # fires with a builder thread
+_DL_SIG_LOCKS = {}       # (fire, sig) -> lock
+
+
+def _dl_sig_lock(fire_numbe, sig):
+    with _DL_STATE_LOCK:
+        lk = _DL_SIG_LOCKS.get((fire_numbe, sig))
+        if lk is None:
+            if len(_DL_SIG_LOCKS) > 256:
+                _DL_SIG_LOCKS.clear()
+            lk = _DL_SIG_LOCKS[(fire_numbe, sig)] = threading.Lock()
+        return lk
+
+
+def _dl_extra_keys(path):
+    """Product keys ticked in the Sources panel, from ?extra=a,b,c."""
+    try:
+        from urllib.parse import urlparse, parse_qs
+        raw = (parse_qs(urlparse(path).query).get('extra') or [''])[0]
+    except Exception:
+        raw = ''
+    out = []
+    for k in (raw or '').split(','):
+        k = k.strip()
+        if re.fullmatch(r'[A-Za-z0-9_-]{1,64}', k) and k not in out:
+            out.append(k)
+    return out[:50]
+
+
 # fire -> product keys whose deletion is still running in the background.
 _SOURCES_DELETING = {}
 _SOURCES_DELETING_LOCK = threading.Lock()
@@ -4638,46 +4673,144 @@ class FireRoutes:
         return out
 
     def _build_download_zip(self, fire, fire_numbe, result_dir, sig,
-                            imagery):
-        """Build the archive into the cache. Returns its path or ''."""
+                            plan):
+        """Build the archive for *plan* into the cache. Its path, or ''."""
         from ..delivery import (acquisition_datetime, build_archive,
                                 cached_zip_path, prune_cache)
+        from ..prepare import product_parts
         target = cached_zip_path(state.output_root, fire_numbe, sig)
-        tmp = target + f'.{os.getpid()}.part'
-        try:
-            ref = (state.rasters_by_year.get(fire.fire_year)
-                   or state.raster_path or '')
-            acq = acquisition_datetime(fire, ref_raster=ref)
-            build_archive(result_dir, fire_numbe, acq, tmp,
-                          log=lambda m: fire.console_log.append(m),
-                          fire=fire, imagery=imagery)
-            os.replace(tmp, target)
-            prune_cache(state.output_root, fire_numbe, keep=target)
-            return target
-        except Exception as exc:
-            sys.stderr.write(
-                f'[download] {fire_numbe}: build failed: '
-                f'{type(exc).__name__}: {exc}\n')
-            traceback.print_exc(file=sys.stderr)
+        with _dl_sig_lock(fire_numbe, sig):
+            if os.path.isfile(target):
+                return target            # built meanwhile by the other path
+            tmp = target + f'.{os.getpid()}.{threading.get_ident()}.part'
             try:
-                fire.console_log.append(
-                    f'  Download preparation failed: '
-                    f'{type(exc).__name__}: {exc}')
-            except Exception:
-                pass
-            for junk in (tmp,):
+                ref = (state.rasters_by_year.get(fire.fire_year)
+                       or state.raster_path or '')
+                # Hint rasters not made yet are made now, here in the
+                # background -- the status answer never waits for them.
+                hint_note = {}
+                for key, mode, stk in plan.get('derive') or []:
+                    try:
+                        from ..prepare import build_redwins_hint_for_fire
+                        _hp, _err = build_redwins_hint_for_fire(
+                            fire, mode, stack_path=stk)
+                        if _err:
+                            hint_note.setdefault(key, {})[mode] = (
+                                f'not available ({_err})')
+                    except Exception as exc:
+                        hint_note.setdefault(key, {})[mode] = (
+                            f'not available ({exc})')
+                entries = list(plan.get('entries') or [])
+                if plan.get('bcws_derive'):
+                    try:
+                        from ..prepare import build_bcws_hint_for_fire
+                        _bp, _berr = build_bcws_hint_for_fire(fire)
+                        if _bp and os.path.isfile(_bp):
+                            for ext in ('.bin', '.hdr'):
+                                entries.append((
+                                    os.path.splitext(_bp)[0] + ext,
+                                    f'hints/bcws_perimeter_hint{ext}'))
+                    except Exception as exc:
+                        sys.stderr.write(f'[download] {fire_numbe}: BCWS '
+                                         f'hint: {exc}\n')
+
+                def _src_cap(key):
+                    try:
+                        _s, _st, _po = product_parts(key)
+                    except Exception:
+                        _s, _st, _po = '', '', ''
+                    return (_s or ''), (_st or _po or '')
+
+                # The deliverables are named from the product the accepted
+                # result was made FROM -- not from whatever is loaded now.
+                a_src, a_cap = _src_cap(plan.get('acc_key') or '')
+                acq = acquisition_datetime(
+                    fire, stack_path=plan.get('acc_stack') or '',
+                    ref_raster=ref, source=a_src, cap=a_cap or None)
+                if not (acq or {}).get('local'):
+                    # No acquisition time on record: the accepted
+                    # product's own date (not the loaded product's).
+                    from ..delivery import fallback_datetime
+                    acq = fallback_datetime(
+                        fire, stack_path=plan.get('acc_stack') or '',
+                        date=a_cap, source=a_src)
+                meta = []
+                for p in plan.get('products') or []:
+                    k = p['key']
+                    p_src, p_cap = _src_cap(k)
+                    m = {'key': k, 'label': p.get('label') or k,
+                         'role': p.get('role') or '', 'acquisitions': [],
+                         'newest': '', 'exact': False, 'hints': {}}
+                    side = os.path.splitext(p.get('stack') or '')[0] + \
+                        '_dates.json'
+                    try:
+                        with open(side, encoding='utf-8') as fh:
+                            dj = json.load(fh) or {}
+                        m['acquisitions'] = sorted({
+                            str(v).split('_')[-1]
+                            for v in (dj.get('sources') or [])})
+                        m['newest'] = dj.get('acq_newest_utc') or ''
+                        m['exact'] = bool(m['newest'])
+                    except (OSError, ValueError):
+                        pass
+                    if not m['newest']:
+                        try:
+                            _a = acquisition_datetime(
+                                fire, stack_path=p.get('stack') or '',
+                                ref_raster=ref, source=p_src,
+                                cap=p_cap or None)
+                            m['newest'] = (_a or {}).get('utc') or ''
+                            m['exact'] = bool((_a or {}).get('exact'))
+                        except Exception:
+                            pass
+                    if not m['acquisitions'] and p_cap:
+                        m['acquisitions'] = [p_cap]
+                    for mode in ('redwins_post', 'redwins_diff'):
+                        f_ = os.path.join(fire.cache_dir, '_redwins',
+                                          f'{mode}_{k}_hint.bin')
+                        m['hints'][mode] = (
+                            'included' if os.path.isfile(f_) else
+                            (hint_note.get(k, {}).get(mode)
+                             or 'not available'))
+                    meta.append(m)
+                if plan.get('acc_note'):
+                    sys.stderr.write(f'[download] {fire_numbe}: '
+                                     f'{plan["acc_note"]}\n')
+                build_archive(result_dir, fire_numbe, acq, tmp,
+                              log=lambda m: fire.console_log.append(m),
+                              fire=fire, imagery=None, products=meta,
+                              extra_entries=entries)
+                os.replace(tmp, target)
+                prune_cache(state.output_root, fire_numbe, keep=target,
+                            keep_recent=2)
+                return target
+            except Exception as exc:
+                sys.stderr.write(
+                    f'[download] {fire_numbe}: build failed: '
+                    f'{type(exc).__name__}: {exc}\n')
+                traceback.print_exc(file=sys.stderr)
                 try:
-                    os.remove(junk)
+                    fire.console_log.append(
+                        f'  Download preparation failed: '
+                        f'{type(exc).__name__}: {exc}')
+                except Exception:
+                    pass
+                try:
+                    os.remove(tmp)
                 except OSError:
                     pass
-            return ''
+                return ''
+
 
     def handle_api_download_status(self, fire_numbe):
-        """Is the archive ready, and how big is it?
+        """Is the archive for the current selection ready, and how big?
 
-        Drives the Download button: it shows the size when ready and is
-        disabled while a build is in flight, so nobody clicks a link
-        that is not there yet.
+        The archive always holds the product the accepted result was made
+        from; products ticked in the Sources panel (?extra=) are added.
+        Answers at once -- the plan is file listings and sizes only -- and
+        leaves any building to one background builder per fire, which
+        always works on the newest selection. So ticking boxes never waits
+        on an archive, and a stale selection is never built twice.
         """
         fire_numbe = unquote(fire_numbe)
         if fire_numbe not in state.fires:
@@ -4690,37 +4823,227 @@ class FireRoutes:
                              'reason': 'no accepted result yet'})
             return
         from ..delivery import download_signature, cached_zip_path
-        imagery = self._download_imagery_list(fire_numbe)
-        sig = download_signature(result_dir, imagery)
+        plan = self._download_plan(fire, fire_numbe, result_dir,
+                                   _dl_extra_keys(self.path))
+        sig = download_signature(result_dir, plan['sig_files'],
+                                 extra=plan['sig_extra'])
         path = cached_zip_path(state.output_root, fire_numbe, sig)
+        info = {'sig': sig, 'estimate_bytes': plan['estimate'],
+                'products': [p['key'] for p in plan['products']],
+                'accepted_product': plan['acc_key'],
+                'ignored': plan['ignored']}
         if os.path.isfile(path):
-            self._send_json({'state': 'ready', 'sig': sig,
-                             'bytes': os.path.getsize(path)})
+            info.update({'state': 'ready', 'bytes': os.path.getsize(path)})
+            self._send_json(info)
             return
-
-        # Not built for this content yet. Build it in the background so
-        # the request returns at once; the client polls.
-        key = f'{fire_numbe}:{sig}'
-        with state.lock:
-            builds = getattr(state, 'download_builds', None)
-            if builds is None:
-                builds = state.download_builds = {}
-            running = builds.get(key)
-        if not running:
-            with state.lock:
-                builds[key] = True
-
-            def _run():
-                try:
-                    self._build_download_zip(
-                        fire, fire_numbe, result_dir, sig, imagery)
-                finally:
-                    with state.lock:
-                        builds.pop(key, None)
-
-            threading.Thread(target=_run, daemon=True,
+        with _DL_STATE_LOCK:
+            _DL_WANT[fire_numbe] = (sig, plan, result_dir)
+            start = fire_numbe not in _DL_RUNNING
+            if start:
+                _DL_RUNNING.add(fire_numbe)
+        if start:
+            threading.Thread(target=self._download_builder_loop,
+                             args=(fire, fire_numbe), daemon=True,
                              name=f'dlzip-{fire_numbe}').start()
-        self._send_json({'state': 'building', 'sig': sig})
+        info['state'] = 'building'
+        self._send_json(info)
+
+    def _download_builder_loop(self, fire, fire_numbe):
+        """Build the newest wanted archive; again if a newer one arrives."""
+        while True:
+            with _DL_STATE_LOCK:
+                want = _DL_WANT.get(fire_numbe)
+                if not want:
+                    _DL_RUNNING.discard(fire_numbe)
+                    return
+            sig, plan, result_dir = want
+            try:
+                self._build_download_zip(fire, fire_numbe, result_dir,
+                                         sig, plan)
+            except Exception as exc:
+                sys.stderr.write(f'[download] {fire_numbe}: builder: '
+                                 f'{type(exc).__name__}: {exc}\n')
+            with _DL_STATE_LOCK:
+                cur = _DL_WANT.get(fire_numbe)
+                if cur is None or cur[0] == sig:
+                    _DL_WANT.pop(fire_numbe, None)
+                    _DL_RUNNING.discard(fire_numbe)
+                    return
+                # A newer selection arrived while building: go again.
+
+    def _download_plan(self, fire, fire_numbe, result_dir, extra_keys):
+        """What the archive holds -- decided without building anything.
+
+        The accepted result's own product always (from its params record;
+        the loaded product only when the record predates it), plus any
+        product ticked in the Sources panel. For each: its stack from the
+        ramdisk or, failing that, the durable store; its acquisition
+        record (L2); and its red-wins hint rasters. The fire-level hints
+        (VIIRS, BCWS perimeters) once. Nothing else of other products.
+        """
+        import glob as _g
+        from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                 sanitize_identifier)
+        from ..delivery import accepted_source
+        from ..prepare import product_key_for_path, product_label
+        try:
+            from ..durable import store_dir
+            _store = store_dir() or ''
+        except Exception:
+            _store = ''
+        safe = sanitize_identifier(fire_numbe)
+        h = aoi_identity_hash(fire_numbe,
+                              getattr(state, 'shared_root', '') or '')
+        pat = re.compile(r'^\d{8}_stack_' + re.escape(safe) + '_'
+                         + re.escape(h) + r'(_l2(_d\d{8})?)?\.bin$')
+        # Every stack of this AOI: ramdisk first, then the durable store
+        # (a product evicted from the ramdisk is still this fire's).
+        found = {}
+        for d in (RAM_DIR, _store):
+            if not d or not os.path.isdir(d):
+                continue
+            for cand in _g.glob(os.path.join(d, f'*_stack_{safe}_{h}*.bin')):
+                if not pat.match(os.path.basename(cand)):
+                    continue
+                if not os.path.isfile(os.path.splitext(cand)[0] + '.hdr'):
+                    continue
+                try:
+                    k = product_key_for_path(cand) or ''
+                    mt = os.path.getmtime(cand)
+                except Exception:
+                    continue
+                if not k:
+                    continue
+                rank = (1 if d == RAM_DIR else 0, mt)
+                if k not in found or rank > found[k][0]:
+                    found[k] = (rank, cand)
+        stacks = {k: v[1] for k, v in found.items()}
+
+        acc = accepted_source(result_dir, fire_numbe)
+        acc_key = acc.get('product') or ''
+        acc_note = ''
+        if not acc_key and acc.get('stack'):
+            acc_key = product_key_for_path(acc['stack']) or ''
+        if not acc_key:
+            acc_key = product_key_for_path(
+                getattr(fire, 'crop_bin', '') or '') or ''
+            acc_note = ('the accepted result does not record its source '
+                        'product; the loaded product was used')
+        acc_stack = stacks.get(acc_key) or ''
+        if not acc_stack and acc.get('stack') and os.path.isfile(acc['stack']):
+            acc_stack = acc['stack']
+
+        # Ticked products: only real, listed, built ones -- never a
+        # deleted product, and never the accepted one twice.
+        try:
+            listed = {p.get('key') for p in
+                      self._built_products(fire_numbe, fire)
+                      if p.get('built') is not False}
+        except Exception:
+            listed = set()
+        chosen, ignored = [], []
+        for k in extra_keys:
+            if k == acc_key:
+                continue
+            if k in listed and k in stacks:
+                chosen.append(k)
+            else:
+                ignored.append(k)
+
+        products = []
+        if acc_key:
+            products.append({'key': acc_key, 'stack': acc_stack,
+                             'role': 'source of the accepted result'})
+        for k in chosen:
+            products.append({'key': k, 'stack': stacks[k],
+                             'role': 'selected in the Sources panel'})
+        for p in products:
+            try:
+                p['label'] = product_label(p['key'])
+            except Exception:
+                p['label'] = p['key']
+
+        entries, sig_files, derive = [], [], []
+        _hdir = os.path.join(fire.cache_dir, '_redwins')
+        for p in products:
+            key, stk = p['key'], p['stack']
+            if not stk:
+                continue
+            base = os.path.splitext(stk)[0]
+            folder = f'imagery/{key}'
+            for ext in ('.bin', '.hdr'):
+                entries.append((base + ext,
+                                f'{folder}/{os.path.basename(base)}{ext}'))
+                sig_files.append(base + ext)
+            side = base + '_dates.json'
+            if not os.path.isfile(side):
+                for d in (RAM_DIR, _store):
+                    alt = os.path.join(d or '', os.path.basename(side))
+                    if d and os.path.isfile(alt):
+                        side = alt
+                        break
+            if os.path.isfile(side):
+                entries.append((side,
+                                f'{folder}/{os.path.basename(side)}'))
+                sig_files.append(side)
+            for mode in ('redwins_post', 'redwins_diff'):
+                hb = os.path.join(_hdir, f'{mode}_{key}_hint')
+                for ext in ('.bin', '.hdr'):
+                    entries.append((hb + ext, f'{folder}/hints/'
+                                              f'{mode}_{key}_hint{ext}'))
+                if not os.path.isfile(hb + '.bin'):
+                    derive.append((key, mode, stk))
+        vb = getattr(fire, 'viirs_bin', '') or ''
+        if vb and os.path.isfile(vb):
+            for ext in ('.bin', '.hdr'):
+                vp = os.path.splitext(vb)[0] + ext
+                entries.append((vp, f'hints/viirs_hint{ext}'))
+                if os.path.isfile(vp):
+                    sig_files.append(vp)
+        bcws = sorted(_g.glob(os.path.join(_hdir,
+                                           'bcws_perimeter_*_hint.bin')),
+                      key=lambda q: os.path.getmtime(q)
+                      if os.path.exists(q) else 0)
+        bcws_derive = False
+        if bcws:
+            for ext in ('.bin', '.hdr'):
+                entries.append((os.path.splitext(bcws[-1])[0] + ext,
+                                f'hints/bcws_perimeter_hint{ext}'))
+        else:
+            try:
+                from ..prepare import available_hint_modes
+                bcws_derive = 'bcws_perimeter' in available_hint_modes(fire)
+            except Exception:
+                bcws_derive = False
+
+        est = 0
+        for root, _d, fns in os.walk(result_dir):
+            for fn in fns:
+                if fn.startswith('.') or '.low.' in fn:
+                    continue
+                try:
+                    est += os.path.getsize(os.path.join(root, fn))
+                except OSError:
+                    pass
+        for pth, _arc in entries:
+            try:
+                est += os.path.getsize(pth)
+            except OSError:
+                pass
+        # The signature: the accepted product (it dates the deliverables),
+        # where every file goes, and the state of the source rasters --
+        # not of the derived hints, so making a missing hint during a
+        # build does not turn into yet another build.
+        sig_extra = ('acc=' + acc_key + '|'
+                     + '|'.join(sorted(arc for _p, arc in entries))
+                     + ('|bcws' if bcws_derive else ''))
+        return {'acc_key': acc_key, 'acc_stack': acc_stack,
+                'acc_note': acc_note, 'products': products,
+                'entries': entries, 'derive': derive,
+                'bcws_derive': bcws_derive, 'sig_files': sig_files,
+                'sig_extra': sig_extra, 'estimate': est,
+                'ignored': ignored}
+
 
     def handle_api_download(self, fire_numbe):
         """Zip the fire's canonical accepted-result directory and stream
@@ -4851,12 +5174,14 @@ class FireRoutes:
         # current contents; if not (a direct link, or a change since the
         # last poll), build it now so the click still works.
         from ..delivery import download_signature, cached_zip_path
-        imagery = self._download_imagery_list(fire_numbe)
-        sig = download_signature(result_dir, imagery)
+        plan = self._download_plan(fire, fire_numbe, result_dir,
+                                   _dl_extra_keys(self.path))
+        sig = download_signature(result_dir, plan['sig_files'],
+                                 extra=plan['sig_extra'])
         tmp_zip = cached_zip_path(state.output_root, fire_numbe, sig)
         if not os.path.isfile(tmp_zip):
             tmp_zip = self._build_download_zip(
-                fire, fire_numbe, result_dir, sig, imagery)
+                fire, fire_numbe, result_dir, sig, plan)
         if not tmp_zip or not os.path.isfile(tmp_zip):
             self._send_json(
                 {'error': 'Could not prepare the archive; see the '
