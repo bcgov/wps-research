@@ -3540,14 +3540,40 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
         _creation_l2_date = l2_reference_date(
             fire, bbox=(crop_xmin, crop_ymin, crop_xmax, crop_ymax))
 
+    # Rebuild the MRAP composite the fire was on, by its NIGHT.
+    #
+    # This runs when the AOI stack is gone -- a cleared /ram after a
+    # reboot -- as well as for a new fire. Without a night, MRAP means
+    # the newest mosaic, so a fire came back on a newer composite than
+    # the one chosen whenever new mosaics had arrived meanwhile. The
+    # operator's product, or failing that the one the old stack path
+    # names, says which night; a new fire has neither and gets the
+    # newest, as before. L2 is already rebuilt by its date (above).
+    _keyed_mrap = ''
+    _keyed_from = ''
     try:
-        stack_info = ensure_aoi_stack(
+        if (getattr(fire, 'post_source', 'l2') or 'l2') == 'mrap':
+            for _cand in ((getattr(fire, 'user_product', '') or ''),
+                          product_key_for_path(
+                              getattr(fire, 'crop_bin', '') or '')):
+                if not _cand or product_tombstone(fire, _cand):
+                    continue
+                _cs, _cstart, _cpost = product_parts(_cand)
+                if _cs == 'mrap' and _cpost:
+                    _keyed_mrap, _keyed_from = _cpost, _cand
+                    break
+    except Exception:
+        _keyed_mrap = ''
+
+    def _build_stack(mrap_date):
+        return ensure_aoi_stack(
             fire_numbe,
             (crop_xmin, crop_ymin, crop_xmax, crop_ymax),
             progress_cb=_stack_progress, force=True,
             instance_key=getattr(state, 'shared_root', '') or '',
             post_source=getattr(fire, 'post_source', 'l2') or 'l2',
             ref_raster=ref_raster,
+            mrap_date=mrap_date,
             # Date the L2 product by the DATA it contains.
             #
             # An empty start date produced <prefix>_l2.bin, whose key
@@ -3558,6 +3584,20 @@ def _prepare_fire_sync(fire_numbe: str, padding: float | None = None):
             # file <prefix>_l2_d<acq>.bin and the listed date the one
             # the imagery actually came from.
             l2_start_date=_creation_l2_date)
+
+    try:
+        try:
+            stack_info = _build_stack(_keyed_mrap)
+        except AoiStackError as _kexc:
+            if not _keyed_mrap:
+                raise
+            # That night's mosaic is no longer available. Build the
+            # newest, as before, rather than failing the fire.
+            sys.stderr.write(
+                f'[prepare] {fire_numbe}: could not rebuild '
+                f'{_keyed_from} ({_kexc}); building the newest MRAP '
+                f'composite instead\n')
+            stack_info = _build_stack('')
     except AoiStackError as exc:
         _set_fire_status(fire, FireStatus.ERROR,
                          f'AOI stack build failed: {exc}')

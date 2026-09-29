@@ -1781,14 +1781,31 @@ async function prepareFire(padding) {
 
     try {
         const _tPrep = performance.now();
-        const r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: body,
-        });
-        perfMark('POST /prepare  headers received',
-                 `(${(performance.now() - _tPrep).toFixed(0)} ms round trip)`);
-        const data = await r.json();
+        // "preparing" means another request is preparing this fire right
+        // now -- typically just after a server restart. That reply holds
+        // none of the fire's state, and carrying on with it left the page
+        // empty and, since nothing had been restored, unable to save
+        // anything for the rest of the visit: every choice made on it was
+        // lost. Wait for the preparation, then use the real reply.
+        let r, data;
+        for (let _wait = 0; ; _wait++) {
+            r = await fetch(`/api/fire/${encodeURIComponent(FIRE)}/prepare`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+                body: body,
+            });
+            if (_wait === 0) {
+                perfMark('POST /prepare  headers received',
+                         `(${(performance.now() - _tPrep).toFixed(0)} ms round trip)`);
+            }
+            data = await r.json();
+            if (data.status !== 'preparing') break;
+            if (_wait % 15 === 0) {
+                log('[prepare] the server is still preparing this fire; '
+                    + 'waiting for it', 'dim');
+            }
+            await new Promise((res) => setTimeout(res, 2000));
+        }
         perfMark('POST /prepare  body parsed',
                  `status=${r.status} ready=${data.status || '?'}`);
 
@@ -1892,6 +1909,20 @@ async function prepareFire(padding) {
         rightL2Date = currentL2Date;
         leftProduct = data.user_product_key || data.product_key || '';
         rightProduct = leftProduct;
+        // The server can be loaded on a different stack from the product
+        // chosen for this fire. The selector shows the choice; the server
+        // is switched to it as well, or Map Fire and Download would use
+        // the other product. Harmless when the difference is a background
+        // render that is about to switch back: the request waits for it.
+        if (data.user_product_key && data.product_key
+                && data.user_product_key !== data.product_key) {
+            log(`[source] the server is loaded on ${data.product_key}; `
+                + `switching it to ${data.user_product_key}, the product `
+                + `chosen for this fire`, 'dim');
+            _serverProductSync = informServerOfProduct(
+                data.user_product_key, data.product_key,
+                data.user_product_key);
+        }
         try { refreshSourceSelectors(data.products); } catch (_) {}
         try { installSourceSelectGuard(); } catch (_) {}
         try { startProductWatch(); } catch (_) {}
@@ -1910,7 +1941,34 @@ async function prepareFire(padding) {
         // Saving starts here, now that the saved state is on the page.
         // Not on a "preparing" reply: it carries no state, and saving
         // from it would overwrite the fire's with defaults.
-        if (data.status !== 'preparing') _uiStateApplied = true;
+        if (data.status !== 'preparing') {
+            _uiStateApplied = true;
+            // The page as just restored counts as saved, for every
+            // setting the server holds: saves from here post only what
+            // changes. A stand-in shown while restoring -- a source not
+            // built at the moment, a view no longer offered -- is
+            // therefore displayed but never written over the operator's
+            // choice. Settings the server has no value for yet are left
+            // out of the baseline, so the first save records them.
+            try {
+                const _now = collectUiState();
+                const _held = data.ui_state || {};
+                const _base = {};
+                for (const k of Object.keys(_now)) {
+                    if (Object.prototype.hasOwnProperty.call(_held, k)) {
+                        _base[k] = _now[k];
+                    }
+                }
+                _uiSavedJson = {};
+                markUiSaved(_base);
+                // A remembered run that is known to be gone is cleared
+                // by the first save, like any real change.
+                if (_staleSavedRun) {
+                    delete _uiSavedJson.selected_run;
+                    _staleSavedRun = false;
+                }
+            } catch (_) { _uiSavedJson = {}; }
+        }
         if (data.scaling && data.scaling.method) {
             _scaling = data.scaling;
             const sb = document.getElementById('btn-custom-scaling');
@@ -4017,6 +4075,48 @@ let _serialRunIdsAtLoad = null;
 // flicker in the single pane (see beginSinglePeek). Until then the
 // right pane follows the left, as before.
 let _rightStateKnown = false;
+// The right pane's remembered source when it is not built at the moment
+// (after a cleared /ram, say). The pane shows the left pane's source
+// meanwhile (_rightFallbackKey); this key is what it goes back to as
+// soon as it is built again, and what stays saved: the choice is kept
+// by key, never replaced by the stand-in.
+let _rightWantedKey = '';
+let _rightFallbackKey = '';
+// A remembered Results selection whose run is known to be gone, so the
+// first save clears it (see the save baseline in prepareFire).
+let _staleSavedRun = false;
+
+// The saved state as this page last knew it, as JSON per setting.
+//
+// Saving used to post EVERY setting, from whichever tab saved. Another
+// open tab of the fire -- or one left open from earlier -- therefore
+// wrote its own older values back whenever it saved or was hidden, so a
+// Results selection made in one tab could be replaced by another tab's,
+// and a restart then restored that. A save now posts only the settings
+// this page changed since it restored or last saved them; the server
+// merges them in, so a page cannot overwrite what it never touched.
+let _uiSavedJson = null;
+
+function _uiJson(v) {
+    return JSON.stringify(v === undefined ? null : v);
+}
+
+// The settings in st that differ from what was last saved.
+function uiStateDelta(st) {
+    const out = {};
+    for (const k of Object.keys(st)) {
+        if (!_uiSavedJson || _uiSavedJson[k] !== _uiJson(st[k])) {
+            out[k] = st[k];
+        }
+    }
+    return out;
+}
+
+// Record st as saved: the baseline the next delta is measured against.
+function markUiSaved(st) {
+    if (!_uiSavedJson) _uiSavedJson = {};
+    for (const k of Object.keys(st)) _uiSavedJson[k] = _uiJson(st[k]);
+}
 
 function collectUiState() {
     const v = (id) => {
@@ -4084,15 +4184,7 @@ function collectUiState() {
 // once; keepalive lets it finish after the page has gone.
 window.addEventListener('pagehide', () => {
     if (!_uiSaveTimer || _uiRestoring || !_uiStateApplied) return;
-    clearTimeout(_uiSaveTimer);
-    _uiSaveTimer = null;
-    try {
-        fetch(`/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
-            method: 'POST', keepalive: true,
-            headers: {'Content-Type': 'application/json',
-                      'X-Requested-With': 'fetch'},
-            body: JSON.stringify({ui_state: collectUiState()})});
-    } catch (_) { /* nothing to be done while leaving */ }
+    flushUiState();
 });
 
 function saveUiState() {
@@ -4102,21 +4194,30 @@ function saveUiState() {
     // Debounced: typing in a number box fires per keystroke, and one
     // request each would be pointless traffic.
     _uiSaveTimer = setTimeout(async () => {
+        // Fired: nothing is pending any more. Left set, the leave-page
+        // handlers took every earlier save as still pending.
+        _uiSaveTimer = null;
         try {
-            const _st = collectUiState();
-            await fetch(
+            const _d = uiStateDelta(collectUiState());
+            const _keys = Object.keys(_d);
+            if (!_keys.length) return;           // nothing changed
+            const _r = await fetch(
                 `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json',
                               'X-Requested-With': 'fetch'},
-                    body: JSON.stringify({ui_state: _st})});
-            log(`[ui] saved: split=${_st.split} `
-                + `left=${_st.left_key}/${_st.left_view} `
-                + `right=${_st.right_key}/${_st.right_view} `
-                + `run=${_st.selected_run} `
-                + `overlays=${_st.overlays} panel=${_st.panel_collapsed
-            ? 'collapsed' : 'open'}`, 'dim');
-        } catch (_) { /* a lost GUI preference is not worth a dialog */ }
+                    body: JSON.stringify({ui_state: _d})});
+            if (!_r.ok) throw new Error(`HTTP ${_r.status}`);
+            markUiSaved(_d);
+            log('[ui] saved '
+                + _keys.map((k) => ((_d[k] !== null
+                                     && typeof _d[k] === 'object')
+                                    ? k : `${k}=${_d[k]}`)).join(' '),
+                'dim');
+        } catch (_) {
+            // A lost GUI preference is not worth a dialog. Not marked as
+            // saved, so the next save sends it again.
+        }
     }, 800);
 }
 
@@ -4132,7 +4233,13 @@ function flushUiState() {
     if (!_uiStateApplied) return;  // nothing restored yet to protect
     if (_uiSaveTimer) { clearTimeout(_uiSaveTimer); _uiSaveTimer = null; }
     try {
-        const body = JSON.stringify({ui_state: collectUiState()});
+        // Only what this page changed and has not saved yet. A tab that
+        // is merely hidden or closed used to send its whole state, which
+        // is how an old tab overwrote a newer choice made in another.
+        const _d = uiStateDelta(collectUiState());
+        if (!Object.keys(_d).length) return;
+        markUiSaved(_d);
+        const body = JSON.stringify({ui_state: _d});
         const url = `/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`;
         fetch(url, {
             method: 'POST',
@@ -4187,8 +4294,13 @@ function applySavedUiState(ui, kgcParams) {
         // straight away rather than showing the newest one first. Only
         // a run that still exists: a new sweep can have replaced them
         // all, and asking for a missing run would leave the pane empty.
+        //
+        // An EMPTY list proves nothing: the server can hand back the
+        // runs later (recovered from disk when the Results list loads),
+        // and dropping the selection on it lost it for good. It is kept
+        // until the full Results list says the run is gone.
         if (Number.isInteger(ui.selected_run) && ui.selected_run >= 0) {
-            if (!_serialRunIdsAtLoad
+            if (!_serialRunIdsAtLoad || !_serialRunIdsAtLoad.length
                     || _serialRunIdsAtLoad.includes(ui.selected_run)) {
                 selectedRun = ui.selected_run;
                 try { markSelectedSerialCard(); } catch (_) {}
@@ -4196,6 +4308,7 @@ function applySavedUiState(ui, kgcParams) {
                 log(`[ui] saved Results selection (run `
                     + `${ui.selected_run}) no longer exists; showing `
                     + `the newest result`, 'dim');
+                _staleSavedRun = true;
             }
         }
         // LEFT pane: the SERVER is authoritative.
@@ -4231,8 +4344,24 @@ function applySavedUiState(ui, kgcParams) {
             const rkey = rightProductKey();
             if (_products.length
                 && !_products.some((q) => q.key === rkey)) {
-                log(`[ui] saved right-pane product ${rkey} no longer `
-                    + `exists; using the left pane's`, 'dim');
+                if (/^(mrap|l2)_(p|d)\d{8}$/.test(rkey)
+                        && (ui.right_known === true || ui.split === true)) {
+                    // Not built at the moment is not the same as gone:
+                    // keep the key, show the left pane's source until it
+                    // is built again, then go back to it
+                    // (adoptRightWantedIfBuilt). It stays saved as the
+                    // right pane's source, because the stand-in is part
+                    // of the restored page, not a change.
+                    _rightWantedKey = rkey;
+                    _rightFallbackKey = currentProductKey();
+                    log(`[ui] the right pane's ${rkey} is not built at `
+                        + `the moment; showing the left pane's source `
+                        + `until it is, and keeping ${rkey} as the right `
+                        + `pane's source`, 'dim');
+                } else {
+                    log(`[ui] saved right-pane product ${rkey} no longer `
+                        + `exists; using the left pane's`, 'dim');
+                }
                 rightPostSource = currentPostSource;
                 rightL2Date = currentL2Date;
                 rightProduct = currentProductKey();
@@ -5724,9 +5853,17 @@ function setSourceSelectValue(sel, key) {
     if (!has(want)) {
         // A bare source ('l2') means "whichever product of that source
         // is loaded" -- resolve it against what is offered.
+        //
+        // A DATED key is never resolved that way. Mapping
+        // 'mrap_p20260803' to the first MRAP in the list picked the
+        // newest one, so a selection moved to a composite nobody chose
+        // -- after a restart that built new composites, it did exactly
+        // that. Missing means missing: the branch below logs it and
+        // resyncs the list, rather than substituting another date.
         const src = parseProductKey(want).source;
+        const dated = /^(mrap|l2)_(p|d)\d{8}$/.test(want);
         const match = _products.find((q) => q.key === want)
-            || _products.find((q) => q.source === src);
+            || (dated ? null : _products.find((q) => q.source === src));
         want = (match && has(match.key)) ? match.key : '';
     }
     if (!want) {
@@ -6170,6 +6307,8 @@ async function checkForNewProducts(why) {
         const had = before ? before.split(',') : [];
         _products = j.products;
         rebuildSourceSelectors();
+        // A remembered right-pane source that has just been built again.
+        try { adoptRightWantedIfBuilt(); } catch (_) {}
         const added = j.products.map((p) => p.key)
             .filter((k) => had.indexOf(k) < 0);
         log(`[products] list changed${why ? ' (' + why + ')' : ''}: `
@@ -6275,6 +6414,36 @@ function refreshSourceSelectors(products) {
         + _products.map((p) => p.key).join(', ')
         + ` | left=${currentProductKey()} right=${rightProductKey()}`,
         'dim');
+    try { adoptRightWantedIfBuilt(); } catch (_) {}
+}
+
+// The right pane's remembered source is built again: go back to it --
+// unless the operator has chosen another right-pane source meanwhile,
+// which is theirs. Split closed, only the remembered state moves (and
+// flicker in the single pane follows it); split open, it is applied
+// exactly as a choice from the selector would be.
+function adoptRightWantedIfBuilt() {
+    const want = _rightWantedKey;
+    if (!want) return;
+    if (!(_products || []).some((q) => q && q.key === want
+                                    && q.built !== false)) {
+        return;
+    }
+    _rightWantedKey = '';
+    if (rightProduct !== _rightFallbackKey) return;
+    log(`[ui] the right pane's ${want} is built again; showing it`, 'dim');
+    const rs = document.getElementById('post-source-select-right');
+    if (splitActive) {
+        setSourceSelectValue(rs, want);
+        if (rs && rs.value === want) onRightPostSourceChange();
+        return;
+    }
+    const p = parseProductKey(want);
+    rightProduct = want;
+    rightPostSource = p.source;
+    rightL2Date = p.date || '';
+    setSourceSelectValue(rs, want);
+    try { schedulePeekPrefetch(); } catch (_) {}
 }
 
 function parseProductKey(key) {
@@ -9319,6 +9488,9 @@ async function onRightPostSourceChange() {
     rightPostSource = src;
     rightL2Date = _rsel.date;
     rightProduct = _rkey;
+    // A right-pane source chosen now replaces any remembered one that
+    // was waiting to be built.
+    _rightWantedKey = '';
     if (shouldBlankOnSwitch('right', rightView || 'post', _rkey)) blankPane('right');
     try { invalidateEraseBuffers('source changed'); } catch (_) {}
     // Same treatment as the left: grey both selectors while this runs,
@@ -11040,6 +11212,20 @@ async function restoreFireState() {
                 const p = galleryRunParams.get(selectedRun);
                 if (p) applyParamsToForm(p);
             }
+        } else if (Array.isArray(data.serial_results)
+                   && selectedRun !== null) {
+            // The server listed no runs at all: there is nothing to
+            // show, so a remembered selection is cleared -- and saved as
+            // cleared, since a later sweep reuses run numbers. Only on a
+            // real list: an error reply without one proves nothing.
+            selectedRun = null;
+            for (const p of ['left', 'right']) {
+                const v = (p === 'left') ? leftView : rightView;
+                if (v && RUN_VIEWS.has(v) && (p === 'left' || splitActive)) {
+                    loadPaneImage(p, v);
+                }
+            }
+            setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
         }
     } catch {}
 }
@@ -11939,7 +12125,11 @@ async function deleteSelectedSources() {
         return order.find(usable) || '';
     };
     const leftKey = currentProductKey();
-    const rightKey = splitActive ? rightProductKey() : '';
+    // The right pane counts while it is hidden too, once split has been
+    // used: its source is remembered, and restoring a deleted one on the
+    // next visit would ask for a product that is gone.
+    const rightKey = (splitActive || _rightStateKnown)
+        ? rightProductKey() : '';
     const leftTo = gone.has(leftKey) ? nextFor(leftKey) : '';
     const rightTo = (rightKey && gone.has(rightKey)) ? nextFor(rightKey) : '';
 
@@ -11968,7 +12158,17 @@ async function deleteSelectedSources() {
         try {
             const rs = document.getElementById('post-source-select-right');
             setSourceSelectValue(rs, rightTo);
-            if (rs && rs.value === rightTo) onRightPostSourceChange();
+            if (splitActive) {
+                if (rs && rs.value === rightTo) onRightPostSourceChange();
+            } else {
+                // Hidden: move the remembered source, nothing to redraw.
+                const _p = parseProductKey(rightTo);
+                rightProduct = rightTo;
+                rightPostSource = _p.source;
+                rightL2Date = _p.date || '';
+                _rightWantedKey = '';
+                setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
+            }
         } catch (_) {}
     }
     try {

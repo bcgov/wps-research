@@ -2894,7 +2894,16 @@ class FireRoutes:
                     try:
                         from ..prepare import (product_tombstone as _pt2,
                                                product_parts as _pp3)
-                        if _want_key and _pt2(fire, _want_key):
+                        # Nor onto one that is not built: the operator's
+                        # choice is kept while its product is missing
+                        # (see _chosen_product_key), and switching to it
+                        # here would rebuild it as a side effect of a
+                        # preview request.
+                        if _want_key and (
+                                _pt2(fire, _want_key)
+                                or (_want_key not in ('mrap', 'l2')
+                                    and not stack_path_for_product(
+                                        fire, _want_key))):
                             _want_key = (_cur_key if (_cur_key and not
                                                       _pt2(fire, _cur_key))
                                          else _req_key)
@@ -4349,14 +4358,37 @@ class FireRoutes:
         keys = {p.get('key') for p in (products or [])}
         if want in keys:
             return want
-        sys.stderr.write(
-            f'[products] {fire.fire_numbe}: remembered product '
-            f'{want!r} no longer exists; using {loaded!r}\n')
-        # Keep the fire's record honest so the next read agrees.
+        # Not built at the moment is not the same as gone.
+        #
+        # This replaced the operator's choice whenever the product was
+        # missing from the list. After a cleared /ram only the product
+        # being rebuilt exists at first, so the remembered key was
+        # overwritten by whatever got built -- after a restart, often a
+        # NEWER composite -- and the selection had moved for good. A
+        # choice is now forgotten only when that product was deleted;
+        # otherwise the loaded product is shown for now and the choice
+        # is kept for when it exists again.
         try:
-            fire.user_product = loaded
+            from ..prepare import product_tombstone
+            _deleted = bool(product_tombstone(fire, want))
         except Exception:
-            pass
+            _deleted = True
+        if _deleted:
+            sys.stderr.write(
+                f'[products] {fire.fire_numbe}: remembered product '
+                f'{want!r} was deleted; using {loaded!r}\n')
+            # Keep the fire's record honest so the next read agrees.
+            try:
+                fire.user_product = loaded
+            except Exception:
+                pass
+        elif getattr(fire, '_noted_unbuilt', '') != want:
+            # Once per product, not on every poll of the product list.
+            fire._noted_unbuilt = want
+            sys.stderr.write(
+                f'[products] {fire.fire_numbe}: remembered product '
+                f'{want!r} is not built at the moment; showing '
+                f'{loaded!r} and keeping {want!r} as the choice\n')
         return loaded
 
     def _loaded_product_key(self, fire) -> str:
