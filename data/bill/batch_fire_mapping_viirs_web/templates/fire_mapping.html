@@ -8992,7 +8992,11 @@ function syncRightViewOptions() {
     const want = rightView || '';
     b.innerHTML = a.innerHTML;
     if (want && b.querySelector(`option[value="${want}"]`)) b.value = want;
-    b.disabled = a.disabled;
+    // Usable whenever it has something to choose. Copying the LEFT
+    // selector's disabled state (it is disabled until its views load, and
+    // during some operations) left the right one greyed out for good,
+    // since nothing re-synced it when the left came back.
+    b.disabled = !b.options.length;
     syncRightPaneControls();
     // The GIF button is only meaningful with two panes. display (not
     // visibility) so it does not reserve toolbar width when hidden.
@@ -10143,8 +10147,7 @@ function showSerialGallery(results, settingsUsed) {
 
     const titleEl = document.getElementById('serial-gallery-title');
     if (titleEl) {
-        titleEl.textContent = (nSettings > 1 || newRuns.length > 1)
-            ? 'Serial Results' : 'Results';
+        titleEl.textContent = 'Results';
     }
 
     // Find best run for green "(best)" badge (global across all settings).
@@ -10383,7 +10386,7 @@ function renderSerialCard(r, opts) {
 
     div.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px">
-            <img src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${_previewStamp}"
+            <img loading="lazy" decoding="async" fetchpriority="low" src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${_previewStamp}"
                  style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
                  data-run-id="${r.run_id}" data-retries="0"
                  onclick="viewSerialRun(${r.run_id})"
