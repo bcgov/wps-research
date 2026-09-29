@@ -1614,9 +1614,21 @@ def ensure_aoi_stack(*args, **kwargs) -> dict:
     quiet), and a finished build clears its "building" note.
     """
     _ensure_tls.row = ('', '')
+    _ensure_tls.l2_tmp = ''
     try:
         info = _ensure_aoi_stack_impl(*args, **kwargs)
     except Exception as exc:
+        # Whatever failed -- the L2 composite, the grid check, the stack
+        # write -- the L2 buffer this build created goes with it, rather
+        # than staying on the ramdisk as <stack>.bin.post.bin for good.
+        _lt = getattr(_ensure_tls, 'l2_tmp', '') or ''
+        if _lt:
+            for _junk in (_lt, _hdr_for(_lt), _lt + '.aux.xml'):
+                try:
+                    if os.path.isfile(_junk):
+                        os.remove(_junk)
+                except OSError:
+                    pass
         ident, key = getattr(_ensure_tls, 'row', ('', ''))
         if ident and key:
             try:
@@ -1871,6 +1883,7 @@ def _ensure_aoi_stack_impl(identifier: str, bbox_native, progress_cb=None,
             from .l2_recent import build_l2_recent_post, L2RecentError
             ref = ref_raster or post_bin
             l2_tmp = f'{out_bin}.post.bin'
+            _ensure_tls.l2_tmp = l2_tmp
             try:
                 l2_info = build_l2_recent_post(
                     (xmin, ymin, xmax, ymax), ref, l2_tmp,
@@ -1975,15 +1988,31 @@ def _ensure_aoi_stack_impl(identifier: str, bbox_native, progress_cb=None,
                                     os.path.basename(_ref))
                         except Exception:
                             pass
-                        for _ext in ('.bin', '.hdr', '_dates.json'):
-                            _victim = os.path.splitext(_ref)[0] + _ext
-                            try:
-                                if os.path.isfile(_victim):
-                                    os.remove(_victim)
-                            except OSError as _rexc:
-                                sys.stderr.write(
-                                    f'[aoi_stack] could not remove '
-                                    f'{_victim}: {_rexc}\n')
+                        # The retired stack goes completely: its overlay
+                        # sidecar too, and its twin in the durable store
+                        # (the same file, so on the same wrong grid).
+                        # Left there, a copy of a retired product was a
+                        # record it could come back from.
+                        _vstems = [os.path.splitext(_ref)[0]]
+                        try:
+                            from .durable import store_dir as _sdir
+                            _sd = _sdir() or ''
+                            if _sd:
+                                _vstems.append(os.path.join(
+                                    _sd, os.path.basename(_vstems[0])))
+                        except Exception:
+                            pass
+                        for _vs in _vstems:
+                            for _ext in ('.bin', '.hdr', '_dates.json',
+                                         '_overlays.json'):
+                                _victim = _vs + _ext
+                                try:
+                                    if os.path.isfile(_victim):
+                                        os.remove(_victim)
+                                except OSError as _rexc:
+                                    sys.stderr.write(
+                                        f'[aoi_stack] could not remove '
+                                        f'{_victim}: {_rexc}\n')
                 elif _refs:
                     sys.stderr.write(
                         f'[aoi_stack] grid verified identical across '
@@ -2022,11 +2051,25 @@ def _ensure_aoi_stack_impl(identifier: str, bbox_native, progress_cb=None,
                     f'[aoi_stack] could not relocate date sidecar: '
                     f'{exc}\n')
 
-        info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
-                               post_bin=post_bin, post_date=post_date,
-                               progress_cb=progress_cb,
-                               post_override=override,
-                               post_tag=post_tag)
+        try:
+            info = build_aoi_stack(out_bin, xmin, ymin, xmax, ymax,
+                                   post_bin=post_bin, post_date=post_date,
+                                   progress_cb=progress_cb,
+                                   post_override=override,
+                                   post_tag=post_tag)
+        except Exception:
+            # A failed build removes its L2 buffer too. It used to be
+            # removed only on success, so every failed build left a
+            # stack-sized orphan (<stack>.bin.post.bin) on the ramdisk.
+            if post_source == 'l2':
+                for junk in (override, _hdr_for(override or ''),
+                             (override or '') + '.aux.xml'):
+                    if junk:
+                        try:
+                            os.remove(junk)
+                        except OSError:
+                            pass
+            raise
         if post_source == 'l2':
             # The temporary post buffer has been consumed into the
             # stack; on a tmpfs it is worth reclaiming immediately

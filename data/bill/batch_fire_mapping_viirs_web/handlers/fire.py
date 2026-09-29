@@ -935,8 +935,23 @@ class FireRoutes:
                            self._built_products(fire_numbe, fire)
                            if p2.get('key')
                            and p2.get('built') is not False}
-            unbuilt_refused = [k for k in keys if k not in _built_keys]
-            keys = [k for k in keys if k in _built_keys]
+            # Also a product that is not in the normal listing but has
+            # files on disk or a withheld/retired row: an off-grid stack,
+            # the leftovers of a build that failed. Those rows used to be
+            # refused as "not built", so they came straight back. Still
+            # refused: a key with nothing on disk (a placeholder) and one
+            # that is being built right now.
+            from ..prepare import (product_states_for_fire,
+                                   ACTIVE_PRODUCT_STATES)
+            _notes = product_states_for_fire(fire_numbe) or {}
+            _on_disk = set(self._product_artifacts(fire_numbe, fire))
+            _noted = {k for k, n in _notes.items()
+                      if n.get('state') in ('withheld', 'retired')}
+            _busy = {k for k, n in _notes.items()
+                     if n.get('state') in ACTIVE_PRODUCT_STATES}
+            _deletable = _built_keys | ((_on_disk | _noted) - _busy)
+            unbuilt_refused = [k for k in keys if k not in _deletable]
+            keys = [k for k in keys if k in _deletable]
         except Exception as exc:
             sys.stderr.write(
                 f'[sources] {fire_numbe}: product scan failed before '
@@ -1075,39 +1090,19 @@ class FireRoutes:
                         sys.stderr.write(f'[sources] remove {path}: {exc}\n')
 
                 store = store_dir()
+                # Every file of each product, found now (after the switch
+                # above): the stack under every leading date it was built
+                # with, in the ramdisk AND the durable store, with all its
+                # sidecars, orphaned build buffers, temp and partial files
+                # and clustering scratch. Deleting only the one path the
+                # product resolved to left its other files behind to come
+                # back as rows. A live build lock is left alone.
+                _arts = self._product_artifacts(fire_numbe, fire)
                 for key in keys:
-                    # The stack and its sidecars, wherever they live.
-                    path = stack_path_for_product(fire, key)
-                    stems = []
-                    if path:
-                        stems.append(os.path.splitext(path)[0])
-                        if store:
-                            stems.append(os.path.join(
-                                store,
-                                os.path.splitext(os.path.basename(path))[0]))
-                    for stem in stems:
-                        for sfx in ('.bin', '.hdr', '.bin.hdr',
-                                    '_dates.json', '_overlays.json',
-                                    # The post-fire buffer this product was
-                                    # composited from, and its header.
-                                    '.bin.post.bin', '.bin.post.hdr',
-                                    '.bin.post.bin.hdr', '.post.bin',
-                                    '.post.hdr'):
-                            _rm(stem + sfx)
-                        # Everything else derived from this stack: the band
-                        # subset the clustering reads, its KGC graph files, and
-                        # any partial copy left by an interrupted restore.
-                        #
-                        # Left behind, these are ghosts: the band subset keeps
-                        # the product's name on the ramdisk, the graph files are
-                        # gigabytes each, and a '.part' copy can be completed by
-                        # a later restore and bring the product back.
-                        for junk in _g.glob(stem + '_nob8*') \
-                                + _g.glob(stem + '*.kgc*') \
-                                + _g.glob(stem + '*.part') \
-                                + _g.glob(stem + '*.tmp*') \
-                                + _g.glob(stem + '_selected*'):
-                            _rm(junk)
+                    for f in sorted(_arts.get(key) or []):
+                        if f.endswith('.lock'):
+                            continue
+                        _rm(f)
                     # Previews, hints and the coverage sidecar for this product.
                     _rm(os.path.join(fire.cache_dir, f'previews_{key}'))
                     for h in _g.glob(os.path.join(fire.cache_dir, '_redwins',
@@ -1133,8 +1128,16 @@ class FireRoutes:
                     except Exception as exc:
                         sys.stderr.write(
                             f'[sources] results for {key}: {exc}\n')
+                    # Its status notes go too: a withheld/retired note is
+                    # what put a row back under the raw product name.
+                    try:
+                        from ..prepare import clear_product_state
+                        clear_product_state(fire_numbe, key)
+                    except Exception:
+                        pass
                     sys.stderr.write(
-                        f'[sources] {fire_numbe}: deleted {key}\n')
+                        f'[sources] {fire_numbe}: deleted {key} '
+                        f'({len(_arts.get(key) or [])} file(s) on disk)\n')
 
                 # The manifest loses exactly those paths.
                 try:
@@ -1142,9 +1145,17 @@ class FireRoutes:
                     man = _mload(fire)
                     gone = set(os.path.abspath(p2) for p2 in removed)
                     before = len(man.get('entries') or [])
-                    man['entries'] = [e for e in (man.get('entries') or [])
-                                      if os.path.abspath(e.get('path') or '')
-                                      not in gone]
+                    # Every entry of a deleted product, not only the paths
+                    # removed just now: an entry for another of its files
+                    # (another leading date) is a record that could offer
+                    # it again.
+                    from ..prepare import product_key_for_path as _pkp
+                    _dk = set(keys)
+                    man['entries'] = [
+                        e for e in (man.get('entries') or [])
+                        if os.path.abspath(e.get('path') or '') not in gone
+                        and (e.get('key') or _pkp(e.get('path') or ''))
+                        not in _dk]
                     _msave(fire, man)
                     sys.stderr.write(
                         '[sources] %s: manifest %d -> %d entries\n'
@@ -1359,6 +1370,13 @@ class FireRoutes:
                 try:
                     from ..prepare import product_state_note
                     _note = product_state_note(fire_numbe, key)
+                    # A LISTED product is on this AOI's grid, so a
+                    # withheld/retired note under its key is about some
+                    # other file of that key (an old copy under another
+                    # date) -- it must not relabel this good product.
+                    if _note and _note.get('state') in ('withheld',
+                                                        'retired'):
+                        _note = None
                 except Exception:
                     _note = None
 
@@ -1479,10 +1497,23 @@ class FireRoutes:
                         continue
                     if _n.get('state') not in ('withheld', 'retired'):
                         continue
+                    # A product the operator deleted is gone: no row.
+                    try:
+                        from ..prepare import product_tombstone as _pt
+                        if _pt(fire, _k):
+                            continue
+                    except Exception:
+                        pass
                     _s2, _st2, _p2 = product_parts(_k)
+                    try:
+                        from ..prepare import product_label as _plb
+                        _lbl = _plb(_k) or _k
+                    except Exception:
+                        _lbl = _k
                     out.append({
                         'key': _k,
-                        'label': _k,
+                        # Named like every other row, not by its raw key.
+                        'label': _lbl,
                         'source': _s2,
                         'date': _st2 or _p2 or '',
                         'ram_mb': None,
@@ -4249,6 +4280,56 @@ class FireRoutes:
         except Exception:
             return os.path.isfile(
                 os.path.splitext(bin_path or '')[0] + '.hdr')
+
+    def _product_artifacts(self, fire_numbe, fire):
+        """Every file on disk belonging to each product of this AOI.
+
+        ``{product key: [paths]}`` over the ramdisk and the durable store.
+        A file belongs to a product when its name, with any suffix
+        removed, is that product's stack name
+        ``<date>_stack_<name>_<hash>[_l2[_d<start>]]`` -- which catches
+        the stack under EVERY leading date it was ever built with, its
+        headers and sidecars, the L2 buffer of a build that never
+        finished, temp and partial files, and the clustering scratch cut
+        from it. The name is matched to the end of the stack part, so a
+        product never claims a neighbour's files: MRAP
+        ``20260923_stack_F_h`` does not own
+        ``20260923_stack_F_h_l2_d20260908...``.
+        """
+        import glob as _g
+        from ..prepare import product_key_for_path
+        from ..aoi_stack import (RAM_DIR, aoi_identity_hash,
+                                 sanitize_identifier)
+        cb = getattr(fire, 'crop_bin', '') or ''
+        ram = os.path.dirname(cb) or RAM_DIR
+        m = re.match(r'^\d{8}_stack_(?P<safe>.+?)_(?P<h>[0-9a-fA-F]{6,})'
+                     r'(_l2(_d\d{8})?)?\.bin$', os.path.basename(cb))
+        if m:
+            safe, h = m.group('safe'), m.group('h')
+        else:
+            safe = sanitize_identifier(fire_numbe)
+            h = aoi_identity_hash(fire_numbe,
+                                  getattr(state, 'shared_root', '') or '')
+        stem_re = re.compile(
+            r'^(?P<stem>\d{8}_stack_' + re.escape(safe) + '_' + re.escape(h)
+            + r'(?:_l2(?:_d\d{8})?)?)(?P<rest>[._].*)$')
+        try:
+            from ..durable import store_dir
+            store = store_dir() or ''
+        except Exception:
+            store = ''
+        out = {}
+        for d in (ram, store):
+            if not d or not os.path.isdir(d):
+                continue
+            for f in _g.glob(os.path.join(d, f'*_stack_{safe}_{h}*')):
+                mm = stem_re.match(os.path.basename(f))
+                if not mm or not os.path.isfile(f):
+                    continue
+                k = product_key_for_path(mm.group('stem') + '.bin')
+                if k:
+                    out.setdefault(k, []).append(f)
+        return out
 
     def _built_products(self, fire_numbe, fire, keep_paths=False):
         """Every product of this fire, minus any being deleted.
