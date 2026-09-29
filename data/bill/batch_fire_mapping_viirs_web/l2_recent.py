@@ -520,7 +520,7 @@ def _polygonize_date_mask(mask, date_str: str, simplify_px: float = 1.5):
 
 def write_date_polygons(out_json: str, date_map, date_list,
                         xsize: int, ysize: int,
-                        date_sats=None,
+                        date_sats=None, tile_dates=None,
                         acq_times=None) -> dict:
     """Build and persist the per-date coverage polygons."""
     date_sats = date_sats or {}
@@ -551,6 +551,12 @@ def write_date_polygons(out_json: str, date_map, date_list,
         reverse=True)
     payload = {'width': xsize, 'height': ysize, 'dates': entries,
                'sources': sources,
+               # Every (tile, date) this composite took pixels from --
+               # exactly the Sentinel-2 products its cloud cover is about.
+               'acquisitions': [{'tile': t, 'date': d} for t, d in
+                                sorted({(str(t), str(d))
+                                        for t, d in (tile_dates or [])
+                                        if t and d})],
                # Newest acquisition datetime that actually went into
                # this composite, UTC, YYYYMMDDTHHMMSS as it appears in
                # the source file name. Used to date the delivered
@@ -964,7 +970,7 @@ def build_l2_recent_post(bbox_native, ref_raster: str, out_bin: str,
     poly_payload = write_date_polygons(
         dates_json, date_map, date_list, xsize, ysize,
         date_sats={k: sorted(v) for k, v in date_sats.items()},
-        acq_times=sorted(acq_datetimes))
+        acq_times=sorted(acq_datetimes), tile_dates=used)
     # Deliberately does NOT print the path: this sidecar is written
     # beside the temporary post buffer and relocated next to the stack
     # by the caller, so printing it here shows a filename that no

@@ -1291,6 +1291,7 @@ class FireRoutes:
 
             out = []
             l2_days = []
+            _l2_paths = {}
             for p in prods:
                 key = p.get('key') or ''
                 if not key:
@@ -1322,6 +1323,8 @@ class FireRoutes:
                 # preview rendering as if it were finished.
                 if not path and not unbuilt:
                     path = stack_path_for_product(fire, key)
+                if src == 'l2' and path:
+                    _l2_paths[key] = path
                 ram_mb = _mb(path) if path else None
                 ssd_mb = None
                 if store and path:
@@ -1541,6 +1544,34 @@ class FireRoutes:
 
             # Cloud cover for the L2 days, from the shared store.
             cover, cc_pending = {}, False
+            # An L2 source's cloud figure is its own day's when that day is
+            # one of its acquisitions (or it has no acquisition record) --
+            # unchanged. When its day is NOT an acquisition day -- the
+            # nightly "latest" composite is named for the night it was
+            # built -- that day never gets a figure in the store, so the
+            # row stayed blank and the panel polled for it indefinitely.
+            # Such a source now gets the pixel-weighted mean over the
+            # acquisitions it is actually made of (its _dates.json).
+            _acq = {k: self._l2_acquisitions(fire, pth)
+                    for k, pth in _l2_paths.items()}
+            _acq_tiles = {k: self._l2_acquisition_tiles(fire, pth)
+                          for k, pth in _l2_paths.items()}
+            # An L2 source's cloud cover is that of the acquisitions it is
+            # made of: every date with its pixel count (its _dates.json)
+            # and, for sources built from now on, the exact tiles each date
+            # came from. The figure per (tile, date) comes from the cloud
+            # store; any not yet stored is fetched from the AWS archive --
+            # the product's metadata only, per tile and date. The source's
+            # own date (a "latest" composite is named for the night it was
+            # built) is never used in place of its acquisitions.
+            #
+            # "Pending" is the store's own notion (pending_days): a pair
+            # the archive answered "no product" for is settled, so it is
+            # not fetched again on every poll -- that loop kept rows
+            # waiting, and the panel polling, for ever.
+            _cov = {}                 # (tiles, date) -> percent
+            _pend = {}                # tiles -> dates being looked up
+            _aoi = ()
             if l2_days:
                 try:
                     from .. import cloud_cover as _cc
@@ -1557,32 +1588,70 @@ class FireRoutes:
                             ds = None
                     except Exception:
                         crs = ''
-                    tiles = sorted(set(
-                        tiles_intersecting_bbox(fire.bbox_native, crs)))
-                    if tiles:
-                        root = os.path.join(state.output_root,
-                                            '.cloud_cover')
-                        days = sorted(set(l2_days), reverse=True)
-                        cov = _cc.cached_coverage(root, tiles, days)
-                        cover = {d: v[0] for d, v in cov.items()}
-                        missing = [d for d in days if d not in cover]
-                        key = _cc.key_for(tiles)
-                        if missing and not _cc.is_fetching(key):
-                            _cc.fetch_in_background(root, tiles,
-                                                    missing, key)
-                        cc_pending = bool(missing)
+                    _aoi = tuple(sorted({_cc.canon_tile(t) for t in
+                                         tiles_intersecting_bbox(
+                                             fire.bbox_native, crs) if t}))
+                    root = os.path.join(state.output_root, '.cloud_cover')
+                    groups = {}
+                    for e in out:
+                        if e['source'] != 'l2':
+                            continue
+                        acqs = _acq.get(e['key']) or []
+                        tby = _acq_tiles.get(e['key']) or {}
+                        if acqs:
+                            for d, _n in acqs:
+                                ts = tuple(sorted(tby.get(d) or _aoi))
+                                groups.setdefault(ts, set()).add(d)
+                        elif re.fullmatch(r'\d{8}', e.get('date') or ''):
+                            # No acquisition record (not expected for an
+                            # L2 source): its own day, as before.
+                            groups.setdefault(_aoi, set()).add(e['date'])
+                    for ts, ds in groups.items():
+                        if not ts:
+                            continue
+                        dl = sorted(ds, reverse=True)
+                        for d, v in _cc.cached_coverage(
+                                root, list(ts), dl).items():
+                            _cov[(ts, d)] = v[0]
+                        todo = _cc.pending_days(root, list(ts), dl)
+                        if todo:
+                            _k = _cc.key_for(list(ts))
+                            if not _cc.is_fetching(_k):
+                                _cc.fetch_in_background(root, list(ts),
+                                                        todo, _k)
+                            _pend[ts] = set(todo)
                 except Exception as exc:
                     sys.stderr.write(
                         f'[sources] cloud cover unavailable: {exc}\n')
-
             for e in out:
-                if e['source'] == 'l2' and e['date'] in cover:
-                    e['cloud'] = cover[e['date']]
-                else:
-                    # MRAP composites are cloud-free by construction,
-                    # so a figure would be meaningless rather than
-                    # merely missing.
-                    e['cloud'] = None
+                val, basis = None, ''
+                if e['source'] == 'l2':
+                    acqs = _acq.get(e['key']) or []
+                    tby = _acq_tiles.get(e['key']) or {}
+                    if acqs:
+                        num = den = 0.0
+                        waiting = False
+                        for d, n in acqs:
+                            ts = tuple(sorted(tby.get(d) or _aoi))
+                            if (ts, d) in _cov:
+                                num += _cov[(ts, d)] * n
+                                den += n
+                            elif d in _pend.get(ts, ()):
+                                waiting = True
+                        if waiting:
+                            cc_pending = True       # whole figure, not part
+                        elif den > 0:
+                            val, basis = num / den, 'acquisitions'
+                    else:
+                        _d = e.get('date') or ''
+                        if (_aoi, _d) in _cov:
+                            val, basis = _cov[(_aoi, _d)], 'day'
+                        elif _d in _pend.get(_aoi, ()):
+                            cc_pending = True
+                # MRAP composites are cloud-free by construction: None.
+                e['cloud'] = val
+                if basis:
+                    e['cloud_basis'] = basis
             self._send_json({'sources': out,
                              'preparing': (getattr(fire, 'status', None)
                                            == FireStatus.PREPARING),
@@ -4295,6 +4364,69 @@ class FireRoutes:
         except Exception:
             return os.path.isfile(
                 os.path.splitext(bin_path or '')[0] + '.hdr')
+
+    def _l2_acquisition_tiles(self, fire, stack_path):
+        """{date: [tiles]} an L2 composite took pixels from, as recorded
+        at build time ('acquisitions' in its _dates.json). {} for a source
+        built before that was recorded."""
+        name = os.path.basename(os.path.splitext(stack_path)[0]) + '_dates.json'
+        dirs = [os.path.dirname(stack_path),
+                os.path.dirname(getattr(fire, 'crop_bin', '') or '')]
+        try:
+            from ..durable import store_dir
+            dirs.append(store_dir() or '')
+        except Exception:
+            pass
+        for d in dirs:
+            p = os.path.join(d, name) if d else ''
+            if not p or not os.path.isfile(p):
+                continue
+            try:
+                from ..cloud_cover import canon_tile
+                with open(p, encoding='utf-8') as fh:
+                    ents = (json.load(fh) or {}).get('acquisitions') or []
+                out = {}
+                for en in ents:
+                    day, tile = str(en.get('date') or ''), str(en.get('tile') or '')
+                    if re.fullmatch(r'\d{8}', day) and tile:
+                        out.setdefault(day, set()).add(canon_tile(tile))
+                return {k: sorted(v) for k, v in out.items()}
+            except (OSError, ValueError, TypeError, AttributeError):
+                return {}
+        return {}
+
+    def _l2_acquisitions(self, fire, stack_path):
+        """[(day, pixels)] an L2 composite is made of, from its _dates.json.
+
+        Next to the stack, else on the ramdisk or in the durable store
+        (a source's sidecar can stay behind when its stack moves). []
+        when it has no record.
+        """
+        name = os.path.basename(os.path.splitext(stack_path)[0]) + '_dates.json'
+        dirs = [os.path.dirname(stack_path),
+                os.path.dirname(getattr(fire, 'crop_bin', '') or '')]
+        try:
+            from ..durable import store_dir
+            dirs.append(store_dir() or '')
+        except Exception:
+            pass
+        for d in dirs:
+            p = os.path.join(d, name) if d else ''
+            if not p or not os.path.isfile(p):
+                continue
+            try:
+                with open(p, encoding='utf-8') as fh:
+                    ents = (json.load(fh) or {}).get('dates') or []
+                out = []
+                for en in ents:
+                    day = str(en.get('date') or '')
+                    n = int(en.get('pixels') or 0)
+                    if re.fullmatch(r'\d{8}', day) and n > 0:
+                        out.append((day, n))
+                return out
+            except (OSError, ValueError, TypeError, AttributeError):
+                return []
+        return []
 
     def _product_artifacts(self, fire_numbe, fire):
         """Every file on disk belonging to each product of this AOI.
