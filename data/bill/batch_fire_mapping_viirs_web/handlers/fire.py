@@ -1354,6 +1354,20 @@ class FireRoutes:
                 if not have_prev and _view_alt:
                     # The layered route: post-fire image AND the mask.
                     have_prev = _has(_view_alt) and _has('post.png')
+                if not have_prev and _view_alt and _has('post.png'):
+                    # A hint mask recorded as impossible for this source
+                    # (no pixel matched, no VIIRS data) is settled, not
+                    # pending: without this the row said "queued" for
+                    # ever in the Hint mask view and was re-queued on
+                    # every poll.
+                    try:
+                        from ..prepare import hint_mask_problem
+                        _mode = _view_alt[len('hintmask_'):-len('.png')]
+                        _pr = hint_mask_problem(pdir, _mode)
+                        if _pr and _pr[1]:
+                            have_prev = True
+                    except Exception:
+                        pass
                 ready = bool(path and os.path.isfile(path)
                              and have_prev)
                 # Say what is actually true of THIS product, and put

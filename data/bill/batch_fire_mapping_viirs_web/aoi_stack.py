@@ -1602,6 +1602,50 @@ def stack_covers_bbox(path: str, bbox_native, slack_px: float = 1.5):
         ds = None
 
 
+def _existing_product_stack(identifier, instance_key, ram_dir, key,
+                            bbox_native, log_cb=None) -> str:
+    """A valid stack of product *key* already on this AOI's grid, or ''.
+
+    Looked for by PRODUCT, under any leading date: first on the ramdisk,
+    then in the durable store (restored if found there). A built source
+    must not depend on the files it was made from -- a province-wide
+    MRAP mosaic deleted to save space, or a newer mosaic changing the
+    date a dated L2 build would be NAMED with, used to make an existing
+    source fail or get built a second time.
+    """
+    import glob as _g
+    from .prepare import product_key_for_path
+    safe = sanitize_identifier(identifier)
+    h = aoi_identity_hash(identifier, instance_key or '')
+    pat = re.compile(r'^\d{8}_stack_' + re.escape(safe) + '_' + re.escape(h)
+                     + r'(_l2(_d\d{8})?)?\.bin$')
+
+    def _ok(p):
+        return bool(pat.match(os.path.basename(p))
+                    and product_key_for_path(p) == key
+                    and stack_is_valid(p)
+                    and stack_grid_is_canonical(p, bbox_native) is not False)
+
+    found = [p for p in _g.glob(os.path.join(ram_dir, f'*_stack_{safe}_{h}*.bin'))
+             if _ok(p)]
+    if not found:
+        try:
+            from .durable import store_dir, restore_stack
+            sd = store_dir() or ''
+            cands = [q for q in _g.glob(os.path.join(sd, f'*_stack_{safe}_{h}*.bin'))
+                     if pat.match(os.path.basename(q))
+                     and product_key_for_path(q) == key] if sd else []
+            for sp in sorted(cands, key=os.path.getmtime, reverse=True):
+                dst = os.path.join(ram_dir, os.path.basename(sp))
+                if restore_stack(dst, log=log_cb) and _ok(dst):
+                    found = [dst]
+                    break
+        except Exception as exc:
+            sys.stderr.write(f'[aoi_stack] {identifier}: durable lookup for '
+                             f'{key}: {exc}\n')
+    return max(found, key=os.path.getmtime) if found else ''
+
+
 import threading as _threading
 _ensure_tls = _threading.local()
 
@@ -1680,8 +1724,19 @@ def _ensure_aoi_stack_impl(identifier: str, bbox_native, progress_cb=None,
     # Without this the builder always took the newest one, so an
     # earlier day's MRAP composite could not be produced at all -- the
     # imagery was on disk, but nothing could clip it to an AOI.
+    # An existing stack of the requested product is reused BEFORE any
+    # source file is looked up: a built source stands on its own. Only a
+    # (re)build needs the mosaic, and only then is its absence an error.
+    _reuse = ''
+    if not force:
+        _want = (f'mrap_p{mrap_date}' if (post_source == 'mrap' and mrap_date)
+                 else (f'l2_d{l2_start_date}'
+                       if (post_source == 'l2' and l2_start_date) else ''))
+        if _want:
+            _reuse = _existing_product_stack(identifier, instance_key, ram_dir,
+                                             _want, bbox_native, log_cb)
     post_date, post_bin = (None, None)
-    if mrap_date:
+    if mrap_date and not _reuse:
         post_date, post_bin = find_mrap_for_date(mrap_date)
         if not post_bin:
             raise AoiStackError(
@@ -1690,13 +1745,17 @@ def _ensure_aoi_stack_impl(identifier: str, bbox_native, progress_cb=None,
         sys.stderr.write(
             '[aoi_stack] %s: MRAP %s -> %s\n'
             % (identifier, mrap_date, os.path.basename(post_bin)))
-    if not post_bin:
+    if not post_bin and not _reuse:
         post_date, post_bin = find_latest_mrap()
+    if _reuse:
+        post_date = os.path.basename(_reuse)[:8]
     out_bin = aoi_stack_path(identifier, post_date, ram_dir=ram_dir,
                              l2_date=(l2_start_date
                                       if post_source == 'l2' else ''),
                              instance_key=instance_key,
                              post_source=post_source)
+    if _reuse:
+        out_bin = _reuse
 
     def _describe(rebuilt: bool) -> dict:
         ds = gdal.Open(out_bin, gdal.GA_ReadOnly)
