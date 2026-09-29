@@ -257,8 +257,12 @@ class FireListRoutes:
             # then jumped to two. The server has the fire in hand here;
             # saying so up front costs nothing and the layout is right
             # from the first paint.
-            'split_at_load': json.dumps(bool(
-                (getattr(fire, 'ui_state', None) or {}).get('split'))),
+            # true / false as saved, or null when never chosen -- so the
+            # page can tell "unsplit on purpose" from "no preference".
+            'split_at_load': json.dumps(
+                (getattr(fire, 'ui_state', None) or {}).get('split')
+                if isinstance((getattr(fire, 'ui_state', None)
+                               or {}).get('split'), bool) else None),
             'padding': str(state.padding),
             'sample_rate': str(state.sample_rate),
             'min_samples': str(state.min_samples),

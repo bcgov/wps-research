@@ -332,7 +332,7 @@
         <div class="image-viewer-container" id="image-viewer-container">
             <div class="image-area pane-active" id="image-area" onclick="setActivePane('left')" data-pane="left">
                 <span class="pane-subtitle" id="subtitle-left"></span>
-                <span class="loading" id="loading-msg">Preparing fire data...</span>
+                <span class="loading" id="loading-msg"></span>
                 <img id="main-img" style="display:none" alt="Fire view">
             <!-- Hint mask layer. Same box and same transform as
                  the image above, so it lines up exactly; shown
@@ -825,6 +825,11 @@
 const FIRE = {{{ fire_numbe_json }}};
 // Whether this fire was left in split mode, known before any request.
 const SPLIT_AT_LOAD = {{{ split_at_load }}};
+// The operator's split choice: as saved (true/false), null when never
+// made, updated by every click of Split. The automatic split for a new
+// classification result must never override an explicit "unsplit" --
+// it used to, on every visit to a fire that had a result.
+let _splitPref = SPLIT_AT_LOAD;
 // Lay the panes out AT ONCE, before any imagery is requested.
 //
 // The split used to be applied when /prepare came back, so a fire
@@ -1724,8 +1729,11 @@ function optimisticFirstPaint() {
 async function prepareFire(padding) {
     const loadMsg = document.getElementById('loading-msg');
     const img = document.getElementById('main-img');
+    // No text over the pane while the fire is prepared: it stays empty
+    // (grey) and the Sources list -- loaded first -- shows what is being
+    // prepared on the source's own row. Errors still appear here.
     loadMsg.style.display = 'block';
-    loadMsg.textContent = 'Preparing fire data...';
+    loadMsg.textContent = '';
     img.style.display = 'none';
 
     const body = padding != null ? JSON.stringify({padding}) : '{}';
@@ -1975,7 +1983,7 @@ async function prepareFire(padding) {
         updateSubtitle('left', leftView);
 
         // Auto-open split if ML classification is available
-        if (!splitActive && rightView === 'result') {
+        if (!splitActive && rightView === 'result' && _splitPref !== false) {
             toggleSplit();
         } else if (splitActive) {
             loadPaneImage('right', rightView);
@@ -4034,6 +4042,22 @@ function collectUiState() {
         },
     };
 }
+
+// A choice made just before leaving the page (the save waits 800 ms)
+// used to be lost with the page. Leaving now sends any pending save at
+// once; keepalive lets it finish after the page has gone.
+window.addEventListener('pagehide', () => {
+    if (!_uiSaveTimer || _uiRestoring) return;
+    clearTimeout(_uiSaveTimer);
+    _uiSaveTimer = null;
+    try {
+        fetch(`/api/fire/${encodeURIComponent(FIRE)}/exclude_b8`, {
+            method: 'POST', keepalive: true,
+            headers: {'Content-Type': 'application/json',
+                      'X-Requested-With': 'fetch'},
+            body: JSON.stringify({ui_state: collectUiState()})});
+    } catch (_) { /* nothing to be done while leaving */ }
+});
 
 function saveUiState() {
     if (_uiRestoring) return;      // do not echo back what we restored
@@ -8648,18 +8672,9 @@ async function loadPaneImage(pane, viewKey) {
                 const { img: _bi } = getPaneElements(pane);
                 if (_bi) _bi.style.visibility = 'hidden';
             } catch (_) {}
-            if (pane === 'left' && !paneProductIsBuilt(pane)) {
-                loadMsg.style.display = 'block';
-                const _lbl = productLabel(
-                    _products.find((q) => q.key === paneProductKey(pane))
-                    || parseProductKey(paneProductKey(pane)));
-                loadMsg.textContent =
-                    `Preparing ${_lbl} \u2014 `
-                    + `"${getViewLabel(viewKey)}" is being generated `
-                    + `(attempt ${tries + 1} of 5) ...`;
-            } else if (pane === 'left') {
-                loadMsg.style.display = 'none';
-            }
+            // The pane stays empty (grey) while this source is made; its
+            // row in the Sources list says so. No text over the pane.
+            if (pane === 'left') loadMsg.style.display = 'none';
             log(`[pane] ${pane}: ${getViewLabel(viewKey)} not ready `
                 + `yet (${err.message}); retrying in ${waitMs} ms`,
                 'dim');
@@ -11448,6 +11463,7 @@ function toggleSplit(manual) {
 
     const openingManually = manual === true && !splitActive;
     splitActive = !splitActive;
+    if (manual === true) _splitPref = splitActive;
     syncRightPaneControls();
     const container = document.getElementById('image-viewer-container');
     const leftArea = document.getElementById('image-area');
@@ -11627,7 +11643,13 @@ try {
     }
 } catch (_) { /* a fresh browser has no saved state */ }
 
-prepareFire(null);
+// The Sources list first, then imagery: the list is the authority on
+// each source's state, so it is on screen before any picture is tried.
+// (At most 2.5 s, so a slow listing never holds the page up.)
+Promise.race([Promise.resolve().then(refreshSourcesPanel),
+              new Promise((r) => setTimeout(r, 2500))])
+    .catch(() => {})
+    .then(() => prepareFire(null));
 loadNotes();
 // Start the unified state poller (handles all live updates)
 setTimeout(pollFireState, 3000);
