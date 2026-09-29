@@ -7247,6 +7247,25 @@ function beginFlicker(pane) {
                 sx: st.scale, px: st.panX, py: st.panY, active: true};
 
     myImg.src = otherImg.src;
+    // Flicker shows what the OTHER pane shows: its imagery AND its hint
+    // mask overlay when it has one (and no mask when it has none). Only
+    // the base image used to be swapped, so a "Hint mask" pane flickered
+    // to bare imagery, and this pane's own mask stayed on top of the
+    // other pane's picture. Restored exactly in endFlicker().
+    try {
+        const m = paneMaskEl(pane), om = paneMaskEl(other);
+        if (m) {
+            _flicker.mask = {src: m.getAttribute('src') || '',
+                             display: m.style.display,
+                             obj: m.dataset.obj || ''};
+            if (om && om.style.display !== 'none' && om.getAttribute('src')) {
+                m.src = om.src;
+                m.style.display = '';
+            } else {
+                m.style.display = 'none';
+            }
+        }
+    } catch (_) { /* the mask is optional; the imagery still flickers */ }
 
     // Scale correction, WITHOUT consulting any georeferencing.
     //
@@ -7281,6 +7300,7 @@ function beginFlicker(pane) {
 
     const sub = document.getElementById(
         pane === 'right' ? 'subtitle-right' : 'subtitle-left');
+    try { syncPaneMask(pane); } catch (_) {}
     if (sub) sub.style.opacity = '0.6';
 }
 
@@ -7304,6 +7324,25 @@ function endFlicker() {
                 `translate(${st.panX}px, ${st.panY}px) scale(${st.scale})`;
         }
     }
+    // This pane's own mask back. If its own mask finished loading during
+    // the flicker, that newer mask is what it gets, not the stale one.
+    try {
+        const m = paneMaskEl(pane);
+        if (m && _f.mask) {
+            const obj = m.dataset.obj || '';
+            if (obj && obj !== _f.mask.obj) {
+                m.src = obj;
+                m.style.display = '';
+            } else if (_f.mask.src) {
+                m.src = _f.mask.src;
+                m.style.display = _f.mask.display;
+            } else {
+                m.removeAttribute('src');
+                m.style.display = _f.mask.display;
+            }
+            syncPaneMask(pane);
+        }
+    } catch (_) { /* the mask is optional */ }
 }
 
 // Georeferencing for each displayable raster, keyed 'crop' and by run
