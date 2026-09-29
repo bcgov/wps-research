@@ -197,6 +197,9 @@ class BaseHandler:
         (re.compile(
             r'^/api/fire/(?P<fire_numbe>[^/]+)/serial/(?P<run_id>[0-9]+)/image$'),
          'handle_api_serial_image'),
+        (re.compile(
+            r'^/api/fire/(?P<fire_numbe>[^/]+)/ml_mask$'),
+         'handle_api_ml_mask'),
         (re.compile(r'^/api/report$'), 'handle_api_report'),
         (re.compile(r'^/api/fires/hidden$'), 'handle_api_fires_hidden'),
         (re.compile(r'^/api/years$'), 'handle_api_years'),

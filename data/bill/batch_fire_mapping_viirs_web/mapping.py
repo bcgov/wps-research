@@ -236,6 +236,121 @@ def ensure_overlay_current(fire, out_name: str, clf_path: str,
         return False
 
 
+_ML_MASK_LOCKS = {}
+_ML_MASK_GUARD = threading.Lock()
+
+
+def _ml_mask_lock(key: str) -> threading.Lock:
+    """One lock per layer file, so two requests do not both render it."""
+    with _ML_MASK_GUARD:
+        lk = _ML_MASK_LOCKS.get(key)
+        if lk is None:
+            lk = _ML_MASK_LOCKS[key] = threading.Lock()
+        return lk
+
+
+def _png_size(path: str) -> list:
+    """[width, height] from a PNG's header, or [0, 0]."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(24)
+        if len(head) == 24 and head[:8] == b'\x89PNG\r\n\x1a\n':
+            return [int.from_bytes(head[16:20], 'big'),
+                    int.from_bytes(head[20:24], 'big')]
+    except OSError:
+        pass
+    return [0, 0]
+
+
+def ensure_ml_mask(fire, name: str, clf_path: str,
+                   colour=(0.9, 0.1, 0.0)):
+    """The classification *clf_path* as a transparent layer, kept current.
+
+    The page composes "ML classification" per pane: that pane's own
+    post-fire imagery with this layer over it, so the imagery follows the
+    pane's source selector. The layer depends only on the classification
+    and the AOI grid -- not on any product -- so there is one file per
+    classification, in <cache>/ml_masks/, remade only when the raster,
+    the grid or the preview size changes (recorded beside it in
+    <name>.json). Rendered by _overlay_mask_on_post like every overlay,
+    so it lines up exactly as the server's composites do.
+
+    Returns (path, '') when current, or ('', reason): 'not ready' while
+    the AOI grid or the post-fire preview it is sized against is missing
+    (worth retrying), 'render failed' otherwise.
+    """
+    try:
+        if not clf_path or not os.path.isfile(clf_path):
+            return '', 'render failed'
+        if (not fire.cache_dir or not fire.crop_bin
+                or not os.path.isfile(fire.crop_bin)):
+            return '', 'not ready'
+        live = os.path.join(fire.cache_dir, 'previews')
+        post_png = os.path.join(live, 'post.png')
+        if not os.path.isfile(post_png):
+            return '', 'not ready'
+        ds = gdal.Open(fire.crop_bin, gdal.GA_ReadOnly)
+        if ds is None:
+            return '', 'not ready'
+        grid = {'gt': [float(v) for v in ds.GetGeoTransform()],
+                'rw': int(ds.RasterXSize), 'rh': int(ds.RasterYSize)}
+        ds = None
+        st = os.stat(clf_path)
+        want = {'src': os.path.abspath(clf_path),
+                'src_mtime_ns': int(st.st_mtime_ns),
+                'src_size': int(st.st_size),
+                'grid': grid,
+                'dims': _png_size(post_png),
+                'colour': [float(c) for c in colour]}
+        out_dir = os.path.join(fire.cache_dir, 'ml_masks')
+        png = os.path.join(out_dir, f'{name}.png')
+        meta = os.path.join(out_dir, f'{name}.json')
+
+        def _current():
+            try:
+                with open(meta, encoding='utf-8') as f:
+                    have = json.load(f)
+            except (OSError, ValueError):
+                return False
+            return have == want and os.path.isfile(png)
+
+        if _current():
+            return png, ''
+        with _ml_mask_lock(f'{os.path.abspath(out_dir)}:{name}'):
+            if _current():
+                return png, ''
+            os.makedirs(out_dir, exist_ok=True)
+            try:
+                before = os.stat(png).st_mtime_ns
+            except OSError:
+                before = None
+            _overlay_mask_on_post(fire, clf_path, name, colour,
+                                  preview_dir=live, mask_only=True,
+                                  out_dir=out_dir)
+            try:
+                after = os.stat(png).st_mtime_ns
+            except OSError:
+                after = None
+            if after is None or after == before:
+                sys.stderr.write(
+                    f'[ml_mask] {fire.fire_numbe}: the {name} layer was '
+                    f'not written (see the [overlay] lines above)\n')
+                return '', 'render failed'
+            tmp = f'{meta}.{os.getpid()}.{threading.get_ident()}.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(want, f)
+            os.replace(tmp, meta)
+            sys.stderr.write(
+                f'[ml_mask] {fire.fire_numbe}: {name} layer made from '
+                f'{os.path.basename(clf_path)}\n')
+            return png, ''
+    except Exception as exc:
+        sys.stderr.write(
+            f'[ml_mask] {getattr(fire, "fire_numbe", "?")}: {name}: '
+            f'{type(exc).__name__}: {exc}\n')
+        return '', 'render failed'
+
+
 def rerender_run_overlays(fire, log=None) -> int:
     """Re-render every run overlay onto the CURRENT crop grid.
 
@@ -518,7 +633,8 @@ def record_base_preview_geo(cache_dir: str, crop_bin: str) -> None:
 def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
                           out_name: str, color: tuple,
                           preview_dir: str = '',
-                          mask_only: bool = False):
+                          mask_only: bool = False,
+                          out_dir: str = ''):
     """Overlay a binary raster on the post-fire preview.
 
     *color* is (r, g, b) floats 0-1 for the tint.
@@ -708,15 +824,21 @@ def _overlay_mask_on_post(fire: 'FireInfo', raster_path: str,
             rgba[mask, 1] = g
             rgba[mask, 2] = b
             rgba[mask, 3] = 0.7
-            out_path = os.path.join(_pdir, f'{out_name}.png')
+            # out_dir: written somewhere other than the previews it was
+            # sized against -- the ML classification layer, one file per
+            # classification for every product (see ensure_ml_mask).
+            out_path = os.path.join(out_dir or _pdir, f'{out_name}.png')
             # Rendered outside the directory, committed under the
             # fire's preview lock (see preview_fs).
             from .preview_fs import scratch_path, commit
             _tmp = scratch_path(out_path, '.tmp.png')
             imsave(_tmp, np.clip(rgba, 0, 1))
             commit(_tmp, out_path, who='hint mask')
-            record_preview_geo(fire.cache_dir, fire.crop_bin,
-                               out_name, out_path)
+            # Not a preview in previews/, so no entry in its geo.json: an
+            # entry there would describe a file that is not in it.
+            if not out_dir:
+                record_preview_geo(fire.cache_dir, fire.crop_bin,
+                                   out_name, out_path)
             return
 
         result = post[:, :, :3].copy()

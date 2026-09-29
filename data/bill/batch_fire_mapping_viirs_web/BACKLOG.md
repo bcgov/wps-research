@@ -142,6 +142,22 @@ Notes:
 - Relevant to the new BCWS perimeter hint: an official perimeter
   includes ground already burned AND ground still burning.
 
+### 9. A separate ML classification for each pane in split view
+Let each split pane show its own classification, so two Results runs can
+be compared side by side and flickered, each over its own pane's imagery.
+
+Notes:
+- Today one Results selection sets "ML classification" in both panes.
+  Each pane's source selector already chooses the imagery underneath:
+  the classification is laid over that pane's own post-fire source.
+- Needed: a selection per pane (e.g. a Results click applies to the
+  active pane), both selections saved with the fire and restored, a
+  per-pane marker in the Results list, and the eraser editing the run
+  shown in the pane being drawn on.
+- "ML Classification — before brushing" is still drawn by the server
+  over the left pane's imagery, and ignores the Results selection; move
+  it onto the same per-pane layer at the same time.
+
 ---
 
 ## 2. Decisions awaiting input

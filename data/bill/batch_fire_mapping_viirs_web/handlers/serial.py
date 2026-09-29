@@ -225,6 +225,43 @@ def _serial_low_proxy(overlay_path: str):
         return None
 
 
+def _ml_mask_raster(fire, fire_numbe: str, run: str) -> str:
+    """The classification raster "ML classification" shows.
+
+    With a Results run: that run's raster -- the path its record holds
+    first (the one the eraser edits and re-renders from), then the
+    conventional name. Without one: the raster the eraser edits when
+    nothing is selected -- the newest run's -- falling back to the fire's
+    canonical classification, as the result preview does.
+    """
+    try:
+        if run:
+            recorded = ''
+            for r in list(getattr(fire, 'serial_results', None) or []):
+                if str(r.get('run_id')) == str(run):
+                    recorded = r.get('classified') or ''
+                    break
+            if recorded and os.path.isfile(recorded):
+                return recorded
+            conv = os.path.join(
+                fire.cache_dir,
+                f'{fire_numbe}_serial_{run}_classified.bin')
+            return conv if os.path.isfile(conv) else ''
+        from ..erase import active_classified
+        clf = active_classified(fire)
+        if clf and os.path.isfile(clf):
+            return clf
+        from ..state import find_classified
+        return find_classified(
+            fire, [fire.cache_dir,
+                   os.path.dirname(fire.crop_bin or '')]) or ''
+    except Exception as exc:
+        sys.stderr.write(
+            f'[ml_mask] {fire_numbe}: could not find the classification '
+            f'for run {run or "(newest)"}: {exc}\n')
+        return ''
+
+
 class SerialRoutes:
     """Serial-mapping (parameter-search) routes."""
 
@@ -681,6 +718,45 @@ class SerialRoutes:
             f'[serial_image] overlay missing for fire={fire_numbe} '
             f'run={run_id}: {overlay_path}\n')
         self._send_json({'error': 'Overlay not found'}, 404)
+
+    def handle_api_ml_mask(self, fire_numbe):
+        """The "ML classification" layer: a transparent RGBA PNG.
+
+        The page lays it over whichever product a pane shows, so the
+        imagery under the classification follows that pane's source
+        selector -- the right pane's included -- instead of being baked
+        in from the product the fire is loaded on. ?run=<id> names a
+        Results run; without it, the newest run, which is what the view
+        shows with nothing selected and what the eraser then edits.
+
+        404: no classification to show. 409: the AOI grid or post-fire
+        preview it is sized against is not there yet, so retry. 500: it
+        could not be made; the page then uses the server's composite.
+        """
+        fire_numbe = unquote(fire_numbe)
+        if fire_numbe not in state.fires:
+            self._send_json({'error': 'Fire not found'}, 404)
+            return
+        fire = state.fires[fire_numbe]
+        qs = parse_qs(urlparse(self.path).query)
+        run = (qs.get('run', [''])[0] or '').strip()
+        if run and not re.fullmatch(r'[0-9]+', run):
+            self._send_json({'error': 'bad run id'}, 400)
+            return
+        clf = _ml_mask_raster(fire, fire_numbe, run)
+        if not clf:
+            self._send_json(
+                {'error': 'no classification', 'run': run}, 404)
+            return
+        from ..mapping import ensure_ml_mask
+        png, why = ensure_ml_mask(
+            fire, f'serial_{run}' if run else 'result', clf)
+        if not png:
+            self._send_json(
+                {'error': why or 'render failed', 'run': run},
+                409 if why == 'not ready' else 500)
+            return
+        self._send_file(png, 'image/png', revalidate=True)
 
     def handle_api_serial_accept(self, fire_numbe, run_id):
         fire_numbe = unquote(fire_numbe)

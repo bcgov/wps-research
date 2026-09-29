@@ -1434,9 +1434,14 @@ async function onPostSourceChange() {
     currentPostSource = parts.source;
     currentL2Date = parts.date || '';
     _switchEpoch += 1;
-    if (!splitActive) {
+    if (!splitActive && !_rightStateKnown) {
         // Not comparing: keep the right pane aligned so entering split
         // shows the same imagery on both sides.
+        //
+        // Only until split view has been used on this fire. After that
+        // the right pane keeps its own source while hidden, so it comes
+        // back as it was left -- and flicker in the single pane shows
+        // it -- rather than being dragged along with the left.
         rightProduct = key;
         rightPostSource = parts.source;
         rightL2Date = parts.date || '';
@@ -4005,6 +4010,13 @@ let _uiStateApplied = false;
 // Results selection can be checked before any pane asks for it. null
 // when the server did not say.
 let _serialRunIdsAtLoad = null;
+// Whether the right pane has been set up for this fire: split view has
+// been opened at least once. From then on the right pane's source and
+// view are remembered while it is hidden -- closing split no longer
+// resets them -- saved with the fire, and shown by press-and-hold
+// flicker in the single pane (see beginSinglePeek). Until then the
+// right pane follows the left, as before.
+let _rightStateKnown = false;
 
 function collectUiState() {
     const v = (id) => {
@@ -4027,6 +4039,9 @@ function collectUiState() {
         // not merely the same source.
         left_key: concreteProductKey(currentProductKey()),
         right_key: concreteProductKey(rightProductKey()),
+        // The right pane has been set up (split opened at least once),
+        // so right_key and right_view are a choice, not a default.
+        right_known: !!_rightStateKnown,
         split: !!splitActive,
         // The selected Results card: the run "ML classification"
         // shows. null = none selected, i.e. the newest result.
@@ -4223,6 +4238,11 @@ function applySavedUiState(ui, kgcParams) {
                 rightProduct = currentProductKey();
             }
         } catch (_) {}
+        // The remembered right pane. A fire saved in split view before
+        // right_known existed had its right pane set up, so it counts.
+        if (ui.right_known === true || ui.split === true) {
+            _rightStateKnown = true;
+        }
         if (typeof ui.overlays === 'boolean') overlaysVisible = ui.overlays;
         if (typeof ui.panel_collapsed === 'boolean'
                 && ui.panel_collapsed !== _panelCollapsed) {
@@ -5403,7 +5423,11 @@ async function warmAllProducts(views) {
     _warmAllRunning = true;
     const t0 = performance.now();
     // The view being looked at first, then the rest.
-    const wanted = views || [leftView || 'post', 'pre', 'diff1'];
+    // "ML classification" is composed in the page over each product's
+    // post-fire imagery (see mlCompositeObjectURL), so for it the
+    // picture worth having ready is 'post'.
+    const lead = (!leftView || leftView === 'result') ? 'post' : leftView;
+    const wanted = views || [lead, 'pre', 'diff1'];
     const built = _products.filter((q) => q && q.key && q.built !== false);
     const jobs = [];
     for (const p of built) {
@@ -7261,7 +7285,9 @@ let _flickerGeoOverride = null;
 const _geoByUrl = new Map();
 
 function beginFlicker(pane) {
-    if (!splitActive) return;                 // needs two views
+    // Without split view, the other view is the right pane as it was
+    // last set up -- remembered while hidden (see beginSinglePeek).
+    if (!splitActive) { beginSinglePeek(pane); return; }
     const other = pane === 'left' ? 'right' : 'left';
     const myView = pane === 'left' ? leftView : rightView;
     const otherView = pane === 'left' ? rightView : leftView;
@@ -7361,6 +7387,10 @@ function endFlicker() {
     const sub = document.getElementById(
         pane === 'right' ? 'subtitle-right' : 'subtitle-left');
     if (sub) sub.style.opacity = '';
+    // A single-pane peek named the right pane here; put the label back.
+    if (sub && _f.single && typeof _f.subText === 'string') {
+        sub.textContent = _f.subText;
+    }
     if (active && restoreSrc) {
         // Straight swap back, and restore the SAVED transform exactly.
         // No recomputation, so repeated peeks cannot accumulate drift.
@@ -7392,6 +7422,158 @@ function endFlicker() {
             syncPaneMask(pane);
         }
     } catch (_) { /* the mask is optional */ }
+}
+
+// ---- Flicker without split view -------------------------------------
+//
+// Once split view has been used on this fire, the right pane's source and
+// view are remembered while it is hidden (_rightStateKnown). Press and
+// hold on the single pane then peeks at that view, exactly as it peeks
+// at the other pane in split view: same trigger, same release, same
+// cancel on drag.
+//
+// Split flicker swaps in the other pane's already-decoded <img>. With no
+// right pane on screen, its picture is prepared ahead of time in the
+// caches the panes use (prefetchPeek), and the peek is the same straight
+// src swap once it is ready. A press before then starts the preparation
+// and does nothing else, rather than stalling the pointer.
+let _peek = null;          // {sig, src, mask}: the prepared picture
+let _peekBusy = '';        // signature being prepared
+
+// Identity of the right pane's picture as things stand, or '' when there
+// is nothing to peek at. Everything that changes the picture is in it:
+// view, product, stamps, the Results run and the hint mode.
+function peekSig() {
+    if (splitActive || !_rightStateKnown || !rightView) return '';
+    const key = rightProductKey();
+    if (!(_products || []).some((q) => q && q.key === key
+                                    && q.built !== false)) {
+        return '';
+    }
+    const parts = [rightView, key, previewUrlFor(rightView, 'right')];
+    if (rightView === 'hint' && _useHintMask) {
+        parts.push(hintMaskUrlFor('right'));
+    }
+    if (rightView === 'result' && _useMlMask) parts.push(mlMaskUrl());
+    return parts.join('|');
+}
+
+// Still held by the preview cache (not evicted or purged since).
+function peekCached(pk) {
+    if (!pk || !pk.src) return false;
+    for (const u of _previewBlobs.values()) {
+        if (u === pk.src) return true;
+    }
+    return false;
+}
+
+// The object URL a pane would display for a view -- through the same
+// caches and the same composition as loadPaneImage -- without touching
+// the pane.
+async function resolvePaneObjectURL(pane, viewKey) {
+    const url = previewUrlFor(viewKey, pane);
+    const ck = cacheKeyFor(viewKey, pane);
+    if (ck) return getPreviewObjectURL(ck, url, false);
+    if (viewKey === 'result' && _useMlMask) {
+        return mlLayerObjectURL(pane, url);
+    }
+    return getPreviewObjectURL(`run:${url}`, url, false);
+}
+
+async function prefetchPeek() {
+    const sig = peekSig();
+    if (!sig || _peekBusy === sig) return;
+    if (_peek && _peek.sig === sig && peekCached(_peek)) return;
+    _peekBusy = sig;
+    const view = rightView;
+    let mask = '';
+    try {
+        const src = await resolvePaneObjectURL('right', view);
+        if (view === 'hint' && _useHintMask) {
+            const r = await fetch(hintMaskUrlFor('right'),
+                                  {headers: {'X-Requested-With': 'fetch'}});
+            if (!r.ok) throw new Error(`hint mask HTTP ${r.status}`);
+            mask = URL.createObjectURL(await r.blob());
+        }
+        // Decoded now, so the swap on a press is immediate.
+        const probe = new Image();
+        probe.decoding = 'async';
+        probe.src = src;
+        await probe.decode();
+        if (peekSig() !== sig) return;          // changed meanwhile
+        const old = _peek;
+        _peek = {sig, src, mask};
+        mask = '';
+        if (old && old.mask && !(_flicker && _flicker.single)) {
+            try { URL.revokeObjectURL(old.mask); } catch (_) {}
+        }
+    } catch (err) {
+        log(`[flicker] right pane's view not ready yet: ${err.message}`,
+            'dim');
+    } finally {
+        if (mask) { try { URL.revokeObjectURL(mask); } catch (_) {} }
+        if (_peekBusy === sig) _peekBusy = '';
+    }
+}
+
+// After the single pane settles, and when split view is closed.
+function schedulePeekPrefetch() {
+    if (splitActive || !_rightStateKnown) return;
+    setTimeout(() => { prefetchPeek().catch(() => {}); }, 0);
+}
+
+function beginSinglePeek(pane) {
+    if (pane !== 'left' || splitActive || !_rightStateKnown) return;
+    const sig = peekSig();
+    if (!sig) return;
+    // Same view of the same product: nothing to compare, as in split.
+    if (rightView === leftView && rightProductKey() === currentProductKey()) {
+        return;
+    }
+    const pk = _peek;
+    if (!pk || pk.sig !== sig || !peekCached(pk)) {
+        prefetchPeek();
+        log('[flicker] preparing the right pane\'s view; press again in '
+            + 'a moment', 'dim');
+        return;
+    }
+    const { img: myImg } = getPaneElements('left');
+    if (!myImg || !myImg.src) return;
+    const st = paneState.left;
+    // The EXACT transform is saved, as in split flicker, so release is a
+    // byte-for-byte revert. No scale correction: the image box keeps the
+    // pane's size, so a picture of the same ground at another pixel size
+    // is drawn over the same ground.
+    _flicker = {pane: 'left', restoreSrc: myImg.src, restoreView: leftView,
+                sx: st.scale, px: st.panX, py: st.panY, active: true,
+                single: true};
+    myImg.src = pk.src;
+    try {
+        const m = paneMaskEl('left');
+        if (m) {
+            _flicker.mask = {src: m.getAttribute('src') || '',
+                             display: m.style.display,
+                             obj: m.dataset.obj || ''};
+            if (pk.mask) {
+                m.src = pk.mask;
+                m.style.display = '';
+            } else {
+                m.style.display = 'none';
+            }
+        }
+    } catch (_) { /* the mask is optional; the imagery still flickers */ }
+    // The right pane is not on screen, so say what is being shown.
+    const sub = document.getElementById('subtitle-left');
+    if (sub) {
+        _flicker.subText = sub.textContent;
+        const key = rightProductKey();
+        const p = (_products || []).find((q) => q && q.key === key)
+            || parseProductKey(key);
+        sub.textContent = `Right pane: ${getViewLabel(rightView)}`
+            + ` \u2014 ${productLabel(p)}`;
+        sub.style.opacity = '0.6';
+    }
+    try { syncPaneMask('left'); } catch (_) {}
 }
 
 // Georeferencing for each displayable raster, keyed 'crop' and by run
@@ -8159,7 +8341,7 @@ function updateSubtitle(pane, viewKey) {
     // it is now a normal state rather than a bug.
     let label = getViewLabel(viewKey);
     if (splitActive && currentPostSource !== rightPostSource
-            && ['pre', 'post', 'diff1', 'diff2', 'diff3', 'hint']
+            && ['pre', 'post', 'diff1', 'diff2', 'diff3', 'hint', 'result']
                 .includes(viewKey)) {
         const src = (pane === 'left') ? currentPostSource
                                       : rightPostSource;
@@ -8215,6 +8397,131 @@ function hintMaskUrlFor(pane) {
     return `/api/fire/${encodeURIComponent(FIRE)}/preview/hintmask`
         + `?src=${src}${dpart}&hint=${encodeURIComponent(mode)}`
         + `&t=${previewStamp(pane)}`;
+}
+
+// ---- "ML classification": the Results layer over each pane's imagery --
+//
+// The server supplied this view as ONE composite: the classification
+// drawn onto the post-fire imagery of the product the fire is loaded on
+// -- the left pane's -- and re-rendered for every run after each
+// left-pane source switch. The right pane asked for that same picture
+// whatever its own source was, so stepping its sources changed the
+// vector overlays (drawn per product in the page) but never the imagery
+// under the mask.
+//
+// Now the page composes it per pane, the way the hint mask works: the
+// pane's OWN post-fire imagery -- whatever its source selector names --
+// with the classification chosen in Results laid over it as a
+// transparent layer. Both panes work the same way. The layer carries the
+// server's colour and 0.7 weight, so it looks as the composite did.
+//
+// Composed into one image rather than stacked as a second element, so
+// everything that reads the pane's <img> -- the eraser's working canvas,
+// flicker, the GIF export -- sees exactly what is on screen.
+let _useMlMask = true;
+
+function mlMaskUrl() {
+    const run = (typeof selectedRun === 'number') ? selectedRun : '';
+    // Stable between classification changes: the server revalidates it
+    // (ETag), and bumpPreviewStamp() -- called after every run, erase,
+    // revert and rebrush -- moves it on.
+    return `/api/fire/${encodeURIComponent(FIRE)}/ml_mask`
+        + `?run=${run}&t=${_forceStamp || 0}`;
+}
+
+// ':result' in both keys, so the purges that follow a run, an erase or a
+// rebrush (they drop keys containing ':result') drop these as well.
+function mlMaskKey() {
+    const run = (typeof selectedRun === 'number') ? selectedRun : 'newest';
+    return `mlmask:result:${run}:${_forceStamp || 0}`;
+}
+
+function httpStatusOf(err) {
+    const m = /HTTP (\d{3})/.exec((err && err.message) || '');
+    return m ? Number(m[1]) : 0;
+}
+
+async function mlCompositeObjectURL(pane) {
+    const baseKey = cacheKeyFor('post', pane);
+    const baseUrl = previewUrlFor('post', pane);
+    const maskKey = mlMaskKey();
+    const maskUrl = mlMaskUrl();
+    const compKey = `mlcomp:result:${maskKey}|${baseKey}`;
+    if (_previewBlobs.has(compKey)) {
+        // Most recently used goes to the back, as in getPreviewObjectURL.
+        const u = _previewBlobs.get(compKey);
+        _previewBlobs.delete(compKey);
+        _previewBlobs.set(compKey, u);
+        return u;
+    }
+    const pending = _previewInflight.get(compKey);
+    if (pending) return pending;
+    const p = (async () => {
+        const baseP = getPreviewObjectURL(baseKey, baseUrl, true)
+            .catch((err) => { err.mlBase = true; throw err; });
+        const maskP = getPreviewObjectURL(maskKey, maskUrl, false)
+            .catch((err) => {
+                const e = new Error(`classification layer: ${err.message}`);
+                e.mlMask = true;
+                e.status = httpStatusOf(err);
+                throw e;
+            });
+        const [bu, mu] = await Promise.all([baseP, maskP]);
+        try {
+            const bi = new Image();
+            bi.decoding = 'async';
+            bi.src = bu;
+            const mi = new Image();
+            mi.decoding = 'async';
+            mi.src = mu;
+            await Promise.all([bi.decode(), mi.decode()]);
+            const w = bi.naturalWidth, h = bi.naturalHeight;
+            if (!(w > 0 && h > 0)) throw new Error('the imagery has no size');
+            const cv = document.createElement('canvas');
+            cv.width = w;
+            cv.height = h;
+            const ctx = cv.getContext('2d');
+            ctx.drawImage(bi, 0, 0, w, h);
+            // Same AOI grid, so the layer covers the imagery exactly;
+            // drawing it at the imagery's size absorbs any difference in
+            // preview downsampling.
+            ctx.drawImage(mi, 0, 0, w, h);
+            const blob = await new Promise(
+                (res) => cv.toBlob(res, 'image/png'));
+            if (!blob) throw new Error('the canvas produced no image');
+            const obj = URL.createObjectURL(blob);
+            _previewBlobs.set(compKey, obj);
+            _previewBlobBytes.set(compKey, blob.size);
+            enforcePreviewCacheBudget(compKey);
+            // It IS the pane's product's imagery, on that imagery's grid,
+            // so the provenance check and split sync treat it as such.
+            _productByUrl.set(obj, _productByUrl.get(bu) || '');
+            if (_geoByUrl.has(bu)) _geoByUrl.set(obj, _geoByUrl.get(bu));
+            return obj;
+        } catch (err) {
+            err.mlCompose = true;
+            throw err;
+        }
+    })().finally(() => _previewInflight.delete(compKey));
+    _previewInflight.set(compKey, p);
+    return p;
+}
+
+// The composed view -- or, when the layer cannot be had, the server's own
+// composite, which is what this view showed before. Imagery that is not
+// ready yet (the pane's post-fire picture, or a layer the server is still
+// making: 409) goes to the pane's usual retries instead.
+async function mlLayerObjectURL(pane, legacyUrl) {
+    try {
+        return await mlCompositeObjectURL(pane);
+    } catch (err) {
+        if (!err || err.mlBase || (err.mlMask && err.status === 409)) {
+            throw err;
+        }
+        log(`[ml] ${pane} pane: ${err.message}; showing the server's `
+            + `composite instead`, 'dim');
+        return getPreviewObjectURL(`run:${legacyUrl}`, legacyUrl, true);
+    }
 }
 
 function previewUrlFor(viewKey, pane) {
@@ -8627,6 +8934,9 @@ async function loadPaneImage(pane, viewKey) {
         _paneLoadsInFlight = Math.max(0, _paneLoadsInFlight - 1);
         if (_paneLoadsInFlight === 0) {
             try { releaseSerialThumbs(false); } catch (_) {}
+            // The panes settled: have the remembered right-pane view
+            // ready for press-and-hold flicker in the single pane.
+            try { schedulePeekPrefetch(); } catch (_) {}
         }
     }
 }
@@ -8763,7 +9073,12 @@ async function _loadPaneImageNow(pane, viewKey) {
             // the same path with a per-request key so the geo travels
             // with the bytes; the key includes the URL's timestamp, so
             // nothing is cached longer than intended.
-            srcUrl = await getPreviewObjectURL(`run:${url}`, url, true);
+            // "ML classification" is composed here over this pane's own
+            // imagery (see mlCompositeObjectURL); the server's composite
+            // is the fallback.
+            srcUrl = (viewKey === 'result' && _useMlMask)
+                ? await mlLayerObjectURL(pane, url)
+                : await getPreviewObjectURL(`run:${url}`, url, true);
         }
     } catch (err) {
         if (stale()) return;
@@ -11689,6 +12004,8 @@ function toggleSplit(manual) {
     setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
 
     const openingManually = manual === true && !splitActive;
+    // Read BEFORE this call marks the right pane as set up (below).
+    const rightWasKnown = _rightStateKnown;
     splitActive = !splitActive;
     if (manual === true) _splitPref = splitActive;
     syncRightPaneControls();
@@ -11700,8 +12017,9 @@ function toggleSplit(manual) {
     if (splitActive) {
         container.classList.add('split');
         rightArea.style.display = '';
-        if (openingManually) {
-            // Open on the SAME source the left pane is showing.
+        if (openingManually && !rightWasKnown) {
+            // First time on this fire: open on the SAME product the left
+            // pane is showing.
             //
             // This used to default to the opposite source, which
             // contradicted the comment on the selector and, during a
@@ -11709,12 +12027,39 @@ function toggleSplit(manual) {
             // using. Starting identical is predictable: the usual first
             // move is changing the VIEW (result vs post), and switching
             // the source is one click away when that is what is wanted.
+            // All three product fields, so they cannot disagree.
             rightPostSource = currentPostSource;
+            rightL2Date = currentL2Date;
+            rightProduct = currentProductKey();
             rightView = 'post';
-            const rs = document.getElementById(
-                'post-source-select-right');
-            if (rs) rs.value = rightPostSource;
+        } else if (openingManually) {
+            // Split has been used on this fire before: come back to what
+            // the right pane was showing, since its source and view are
+            // remembered while it is hidden. Only what still exists: a
+            // deleted source falls back to the left pane's, and a view
+            // this fire no longer offers to post-fire.
+            const _vs = document.getElementById('view-select');
+            const _offered = new Set(
+                _vs ? [..._vs.options].map((o) => o.value) : []);
+            if (!rightView || !_offered.has(rightView)) rightView = 'post';
+            const _rk = rightProductKey();
+            if ((_products || []).length
+                    && !_products.some((q) => q && q.key === _rk)) {
+                log(`[ui] the right pane's ${_rk} no longer exists; `
+                    + `opening it on the left pane's source`, 'dim');
+                rightPostSource = currentPostSource;
+                rightL2Date = currentL2Date;
+                rightProduct = currentProductKey();
+            }
         }
+        if (openingManually) {
+            setSourceSelectValue(
+                document.getElementById('post-source-select-right'),
+                rightProductKey());
+        }
+        // Split view has now been used on this fire: from here on the
+        // right pane keeps its own state while hidden.
+        _rightStateKnown = true;
         syncRightViewOptions();
         btnSplit.style.background = '#0066cc';
         btnSplit.style.color = '#fff';
@@ -11736,13 +12081,12 @@ function toggleSplit(manual) {
         }, 50);
     } else {
         container.classList.remove('split');
-        // Leaving split: the surviving pane is the left one, so the
-        // right pane's independent source is no longer meaningful.
-        // Reset it to the left's, or re-entering split would silently
-        // start on whatever was chosen last time.
-        rightPostSource = currentPostSource;
-        rightL2Date = currentL2Date;
-        rightProduct = currentProductKey();
+        // Leaving split KEEPS the right pane's source and view.
+        //
+        // They used to be reset to the left's here, so re-entering split
+        // always started over. They are now remembered while hidden:
+        // saved with the fire, restored when split is next opened, and
+        // shown by press-and-hold flicker in the single pane.
         setSourceSelectValue(
             document.getElementById('post-source-select-right'),
             rightProductKey());
@@ -11766,6 +12110,8 @@ function toggleSplit(manual) {
         // Update dropdown to reflect the surviving view
         const sel = document.getElementById('view-select');
         if (sel.querySelector(`option[value="${leftView}"]`)) sel.value = leftView;
+        // The right pane's view, made ready for flicker in the single pane.
+        schedulePeekPrefetch();
     }
 
     // Draw the overlays for whichever panes are now showing.
