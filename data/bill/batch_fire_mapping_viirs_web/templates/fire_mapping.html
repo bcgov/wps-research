@@ -7645,6 +7645,8 @@ function syncOtherPane(pane) {
             oImg.style.transform =
                 `translate(${os.panX}px, ${os.panY}px) `
                 + `scale(${os.scale})`;
+            // The other pane's hint mask moves with its image (see syncPaneMask).
+            try { syncPaneMask(pane === 'left' ? 'right' : 'left'); } catch (_) {}
             try { drawOverlayLayer(other); } catch (_) {}
             if (window._syncPathLast !== 'geo') {
                 window._syncPathLast = 'geo';
@@ -7700,6 +7702,8 @@ function syncOtherPane(pane) {
         os.scale = s.scale; os.panX = s.panX; os.panY = s.panY;
         oImg.style.transform =
             `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+        // The other pane's hint mask moves with its image (see syncPaneMask).
+        try { syncPaneMask(pane === 'left' ? 'right' : 'left'); } catch (_) {}
         try { drawOverlayLayer(other); } catch (_) {}
         return;
     }
@@ -7731,6 +7735,8 @@ function syncOtherPane(pane) {
                     oImg.style.transform =
                         `translate(${os.panX}px, ${os.panY}px) `
                         + `scale(${os.scale})`;
+                    // The other pane's hint mask moves with its image (see syncPaneMask).
+                    try { syncPaneMask(pane === 'left' ? 'right' : 'left'); } catch (_) {}
                     return;
                 }
             }
@@ -7752,6 +7758,8 @@ function syncOtherPane(pane) {
     }
     oImg.style.transform =
         `translate(${os.panX}px, ${os.panY}px) scale(${os.scale})`;
+    // The other pane's hint mask moves with its image (see syncPaneMask).
+    try { syncPaneMask(pane === 'left' ? 'right' : 'left'); } catch (_) {}
     // This sets the transform directly rather than going through
     // updateTransformForPane, so the other pane's overlay has to be
     // repainted here too -- otherwise its labels and perimeter would
