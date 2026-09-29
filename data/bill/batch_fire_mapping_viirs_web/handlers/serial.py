@@ -172,6 +172,59 @@ def _auto_accept_first_result(fire) -> None:
                          f'{type(exc).__name__}: {exc}\n')
 
 
+def _serial_low_proxy(overlay_path: str):
+    """A run overlay's small proxy, for its Results thumbnail.
+
+    ``serial_<id>.low.jpg`` beside the overlay: the convention the stack
+    previews already use for ``<view>.low.jpg``, so accept, delivery and
+    a new sweep's clean-up already handle it. Made on first request and
+    remade whenever the overlay is newer (a re-render into a new grid, a
+    rebrush), so a thumbnail never outlives its overlay. Returns None
+    when it cannot be made; the caller then serves the overlay itself.
+    """
+    low = os.path.splitext(overlay_path)[0] + '.low.jpg'
+    try:
+        if (os.path.isfile(low) and os.path.getmtime(low)
+                >= os.path.getmtime(overlay_path)):
+            return low
+    except OSError:
+        pass
+    try:
+        from ..preview import LOW_PROXY_DIM, _write_low_proxy
+        ds = gdal.Open(overlay_path, gdal.GA_ReadOnly)
+        if ds is None:
+            return None
+        w, h, nb = ds.RasterXSize, ds.RasterYSize, ds.RasterCount
+        f = max(1.0, max(w, h) / float(LOW_PROXY_DIM))
+        sw, sh = max(1, int(round(w / f))), max(1, int(round(h / f)))
+        deep = ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
+        planes = []
+        for i in range(min(nb, 4)):
+            a = ds.GetRasterBand(i + 1).ReadAsArray(
+                buf_xsize=sw, buf_ysize=sh).astype(np.float32)
+            planes.append(a / 257.0 if deep else a)
+        ds = None
+        if not planes:
+            return None
+        # RGB(A) or grey(+alpha). JPEG has no alpha, so any transparency
+        # is laid over white, the card's own background.
+        colour = planes[:3] if nb >= 3 else [planes[0]] * 3
+        alpha = planes[3] if nb >= 4 else (planes[1] if nb == 2 else None)
+        rgb = np.dstack(colour)
+        if alpha is not None:
+            k = np.clip(alpha / 255.0, 0.0, 1.0)[..., None]
+            rgb = rgb * k + 255.0 * (1.0 - k)
+        rgb = np.clip(np.rint(rgb), 0, 255).astype(np.uint8)
+        _write_low_proxy(rgb, overlay_path)
+        return low if os.path.isfile(low) else None
+    except Exception as exc:
+        sys.stderr.write(
+            f'[results] thumbnail proxy for '
+            f'{os.path.basename(overlay_path)} failed ({exc}); serving '
+            f'the full overlay\n')
+        return None
+
+
 class SerialRoutes:
     """Serial-mapping (parameter-search) routes."""
 
@@ -517,6 +570,25 @@ class SerialRoutes:
         overlay_path = os.path.join(
             fire.cache_dir, 'previews', f'serial_{run_id}.png')
 
+        # Results thumbnails (?thumb=1): served from what is on disk.
+        #
+        # No grid check and no re-render -- keeping a run current is the
+        # pane view's job (this URL without thumb=). The gallery asks
+        # for every run at once, and each check could become a render
+        # competing with the image the operator is waiting for. A card
+        # is 80x60 px, so it gets the run's small proxy rather than the
+        # full-resolution overlay. A run with no overlay at all falls
+        # through and has it made once, below.
+        _thumb = (qs.get('thumb', [''])[0] or '') in ('1', 'true', 'yes')
+        if _thumb and os.path.isfile(overlay_path):
+            _low = _serial_low_proxy(overlay_path)
+            if _low:
+                self._send_file(_low, 'image/jpeg', revalidate=True)
+            else:
+                self._send_file(overlay_path, 'image/png',
+                                cache_seconds=86400)
+            return
+
         # Re-render into the current AOI grid when the crop has moved
         # under it, so this run lines up with the post-fire preview
         # exactly rather than relying on extent bookkeeping.
@@ -576,6 +648,16 @@ class SerialRoutes:
                                f'serial_{run_id}')
                 except Exception:
                     pass
+        if _thumb and os.path.isfile(overlay_path):
+            # Made just now for a run that had none; the card still gets
+            # the small proxy.
+            _low = _serial_low_proxy(overlay_path)
+            if _low:
+                self._send_file(_low, 'image/jpeg', revalidate=True)
+            else:
+                self._send_file(overlay_path, 'image/png',
+                                cache_seconds=86400)
+            return
         if os.path.isfile(overlay_path):
             # Ship this run's georeferencing with the image so split
             # sync uses the extent the run was actually mapped at.

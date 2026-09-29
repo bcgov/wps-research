@@ -1895,11 +1895,17 @@ async function prepareFire(padding) {
         // The first tick clears itself if nothing is queued, and says
         // nothing, because it never saw a batch running.
         try { startBuildWatch(); } catch (_) {}
+        _serialRunIdsAtLoad = Array.isArray(data.serial_run_ids)
+            ? data.serial_run_ids.map(Number) : null;
         try { applySavedUiState(data.ui_state, data.kgc_params); }
         catch (err) {
             log(`[ui] could not restore the saved view: ${err.message}`,
                 'dim');
         }
+        // Saving starts here, now that the saved state is on the page.
+        // Not on a "preparing" reply: it carries no state, and saving
+        // from it would overwrite the fire's with defaults.
+        if (data.status !== 'preparing') _uiStateApplied = true;
         if (data.scaling && data.scaling.method) {
             _scaling = data.scaling;
             const sb = document.getElementById('btn-custom-scaling');
@@ -3988,6 +3994,17 @@ function updateTransformForPane(pane) {
 // half-finished eraser stroke deliberately are not.
 let _uiSaveTimer = null;
 let _uiRestoring = false;
+// False until this fire's saved state has been applied to the page.
+// Anything that saved before then -- split opening on first paint, the
+// first pane loads, switching browser tabs -- posted the page's blank
+// starting values (no views, no products) and the server merged them
+// over the saved ones. A slow open, e.g. after a server restart or a
+// /ram clear, therefore lost both panes' views and sources.
+let _uiStateApplied = false;
+// Run ids the server listed when this fire was opened, so a remembered
+// Results selection can be checked before any pane asks for it. null
+// when the server did not say.
+let _serialRunIdsAtLoad = null;
 
 function collectUiState() {
     const v = (id) => {
@@ -4011,6 +4028,9 @@ function collectUiState() {
         left_key: concreteProductKey(currentProductKey()),
         right_key: concreteProductKey(rightProductKey()),
         split: !!splitActive,
+        // The selected Results card: the run "ML classification"
+        // shows. null = none selected, i.e. the newest result.
+        selected_run: (typeof selectedRun === 'number') ? selectedRun : null,
         overlays: !!overlaysVisible,
         panel_collapsed: !!_panelCollapsed,
         sources_collapsed: !!_sourcesCollapsed,
@@ -4048,7 +4068,7 @@ function collectUiState() {
 // used to be lost with the page. Leaving now sends any pending save at
 // once; keepalive lets it finish after the page has gone.
 window.addEventListener('pagehide', () => {
-    if (!_uiSaveTimer || _uiRestoring) return;
+    if (!_uiSaveTimer || _uiRestoring || !_uiStateApplied) return;
     clearTimeout(_uiSaveTimer);
     _uiSaveTimer = null;
     try {
@@ -4062,6 +4082,7 @@ window.addEventListener('pagehide', () => {
 
 function saveUiState() {
     if (_uiRestoring) return;      // do not echo back what we restored
+    if (!_uiStateApplied) return;  // not restored yet: see _uiStateApplied
     if (_uiSaveTimer) clearTimeout(_uiSaveTimer);
     // Debounced: typing in a number box fires per keystroke, and one
     // request each would be pointless traffic.
@@ -4077,6 +4098,7 @@ function saveUiState() {
             log(`[ui] saved: split=${_st.split} `
                 + `left=${_st.left_key}/${_st.left_view} `
                 + `right=${_st.right_key}/${_st.right_view} `
+                + `run=${_st.selected_run} `
                 + `overlays=${_st.overlays} panel=${_st.panel_collapsed
             ? 'collapsed' : 'open'}`, 'dim');
         } catch (_) { /* a lost GUI preference is not worth a dialog */ }
@@ -4092,6 +4114,7 @@ function saveUiState() {
 // outlive the page.
 function flushUiState() {
     if (_uiRestoring) return;
+    if (!_uiStateApplied) return;  // nothing restored yet to protect
     if (_uiSaveTimer) { clearTimeout(_uiSaveTimer); _uiSaveTimer = null; }
     try {
         const body = JSON.stringify({ui_state: collectUiState()});
@@ -4115,11 +4138,15 @@ document.addEventListener('visibilitychange', () => {
 // Put the page back the way this fire was left: parameter boxes,
 // selectors, split, and the view and source of BOTH panes.
 function applySavedUiState(ui, kgcParams) {
+    // The caller's defaults for this fire, for any saved view that no
+    // longer exists (see below).
+    const _defaultLeft = leftView, _defaultRight = rightView;
     restoreUiState(ui, kgcParams);          // parameter boxes
     if (!ui) return;
     log(`[ui] restoring: split=${ui.split} `
         + `left=${ui.left_key}/${ui.left_view} `
         + `right=${ui.right_key}/${ui.right_view} `
+        + `run=${ui.selected_run} `
         + `overlays=${ui.overlays}`, 'dim');
     _uiRestoring = true;
     try {
@@ -4130,9 +4157,31 @@ function applySavedUiState(ui, kgcParams) {
         // Only restore a view that still exists for this fire: a saved
         // "result" is meaningless if the fire has since been re-prepared
         // and has no result yet.
-        if (ui.left_view && views.has(ui.left_view)) leftView = ui.left_view;
-        if (ui.right_view && views.has(ui.right_view)) {
-            rightView = ui.right_view;
+        //
+        // restoreUiState() above has already copied the saved views in
+        // without this check, so a view that is gone would have stuck:
+        // a blank selector, and a pane asking for a missing layer.
+        // Anything not offered goes back to the default.
+        leftView = (ui.left_view && views.has(ui.left_view))
+            ? ui.left_view : _defaultLeft;
+        rightView = (ui.right_view && views.has(ui.right_view))
+            ? ui.right_view : _defaultRight;
+
+        // The Results selection: which run "ML classification" shows.
+        // Set BEFORE the panes load below, so a pane asks for this run
+        // straight away rather than showing the newest one first. Only
+        // a run that still exists: a new sweep can have replaced them
+        // all, and asking for a missing run would leave the pane empty.
+        if (Number.isInteger(ui.selected_run) && ui.selected_run >= 0) {
+            if (!_serialRunIdsAtLoad
+                    || _serialRunIdsAtLoad.includes(ui.selected_run)) {
+                selectedRun = ui.selected_run;
+                try { markSelectedSerialCard(); } catch (_) {}
+            } else {
+                log(`[ui] saved Results selection (run `
+                    + `${ui.selected_run}) no longer exists; showing `
+                    + `the newest result`, 'dim');
+            }
         }
         // LEFT pane: the SERVER is authoritative.
         //
@@ -8565,7 +8614,24 @@ function layerStatusPaint() {
 }
 
 
+// Pane loads in flight, so the Results thumbnails can wait for them
+// (see releaseSerialThumbs).
+let _paneLoadsInFlight = 0;
+
 async function loadPaneImage(pane, viewKey) {
+    if (!viewKey) return;
+    _paneLoadsInFlight += 1;
+    try {
+        return await _loadPaneImageNow(pane, viewKey);
+    } finally {
+        _paneLoadsInFlight = Math.max(0, _paneLoadsInFlight - 1);
+        if (_paneLoadsInFlight === 0) {
+            try { releaseSerialThumbs(false); } catch (_) {}
+        }
+    }
+}
+
+async function _loadPaneImageNow(pane, viewKey) {
     if (!viewKey) return;
     const { img } = getPaneElements(pane);
     const loadMsg = document.getElementById('loading-msg');
@@ -9766,6 +9832,15 @@ async function pollFireState() {
 
                 // Post-fire on the left, the new ML classification on
                 // the right, in split view.
+                //
+                // "The new ML classification" means no run selected:
+                // with one, the pane shows that run instead, and as the
+                // selection is now remembered across visits, an older
+                // run would have stayed on screen after Map Fire.
+                if (selectedRun !== null) {
+                    selectedRun = null;
+                    try { resetSerialCardStyles(); } catch (_) {}
+                }
                 leftView = 'post';
                 rightView = 'result';
                 if (!splitActive) {
@@ -10194,6 +10269,19 @@ function showSerialGallery(results, settingsUsed) {
     const desiredIds = new Set();
     for (const r of previous) desiredIds.add(r.run_id);
     for (const r of newRuns) desiredIds.add(r.run_id);
+    // A selected run that has gone (a new sweep replaced the list) must
+    // not stay selected: "ML classification" would ask for it and show
+    // nothing, and the next visit would restore it.
+    if (selectedRun !== null && !desiredIds.has(selectedRun)) {
+        selectedRun = null;
+        for (const p of ['left', 'right']) {
+            const v = (p === 'left') ? leftView : rightView;
+            if (v && RUN_VIEWS.has(v) && (p === 'left' || splitActive)) {
+                loadPaneImage(p, v);
+            }
+        }
+        setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
+    }
     for (const card of Array.from(
             items.querySelectorAll('.serial-run-card'))) {
         const m = card.id.match(/^serial-card-(\d+)$/);
@@ -10300,6 +10388,8 @@ function showSerialGallery(results, settingsUsed) {
 
     items.dataset.sig = sig;
     items.dataset.bestRunId = bestRunId !== null ? String(bestRunId) : '';
+    // New cards' images wait for the panes; see releaseSerialThumbs.
+    releaseSerialThumbs(false);
 }
 
 // Serial thumbnail retry. The overlay PNG is written by the worker just
@@ -10310,6 +10400,48 @@ function showSerialGallery(results, settingsUsed) {
 // the card is then memoized by statSig and not re-rendered. Retry with
 // a short backoff before giving up so the thumbnail self-heals without
 // a page reload.
+// Results thumbnails come AFTER the panes.
+//
+// A pane showing "ML classification" and the Results cards use the same
+// run-image endpoint, and loading the cards alongside the panes made the
+// selected run's red mask wait for the gallery. A card's image is now
+// requested only once no pane is loading -- or after a ceiling, so a
+// stalled pane cannot hold the gallery back for good.
+//
+// thumb=1 asks for the run's small proxy as it is on disk: no
+// re-render, and tens of kB instead of the full-resolution overlay.
+const SERIAL_THUMB_CEILING_MS = 8000;
+let _serialThumbTimer = null;
+
+function serialThumbUrl(runId, stamp) {
+    return `/api/fire/${encodeURIComponent(FIRE)}/serial/${runId}`
+        + `/image?t=${stamp}&thumb=1`;
+}
+
+function releaseSerialThumbs(force) {
+    const waiting = document.querySelectorAll(
+        '#serial-gallery-items img[data-src]');
+    if (!waiting.length) return;
+    if (!force && _paneLoadsInFlight > 0) {
+        if (!_serialThumbTimer) {
+            _serialThumbTimer = setTimeout(() => {
+                _serialThumbTimer = null;
+                releaseSerialThumbs(true);
+            }, SERIAL_THUMB_CEILING_MS);
+        }
+        return;
+    }
+    if (_serialThumbTimer) {
+        clearTimeout(_serialThumbTimer);
+        _serialThumbTimer = null;
+    }
+    waiting.forEach((img) => {
+        const u = img.dataset.src;
+        img.removeAttribute('data-src');
+        if (u) img.src = u;
+    });
+}
+
 function onSerialThumbError(img) {
     const max = 8;
     const retries = Number(img.dataset.retries || 0);
@@ -10322,8 +10454,7 @@ function onSerialThumbError(img) {
     const runId = img.dataset.runId;
     setTimeout(() => {
         if (!img.isConnected) return;
-        img.src = '/api/fire/' + encodeURIComponent(FIRE)
-            + '/serial/' + runId + '/image?t=' + Date.now();
+        img.src = serialThumbUrl(runId, Date.now());
     }, delay);
 }
 
@@ -10386,7 +10517,7 @@ function renderSerialCard(r, opts) {
 
     div.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px">
-            <img loading="lazy" decoding="async" fetchpriority="low" src="/api/fire/${encodeURIComponent(FIRE)}/serial/${r.run_id}/image?t=${_previewStamp}"
+            <img loading="lazy" decoding="async" fetchpriority="low" data-src="${serialThumbUrl(r.run_id, _previewStamp)}"
                  style="width:80px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;image-rendering:pixelated"
                  data-run-id="${r.run_id}" data-retries="0"
                  onclick="viewSerialRun(${r.run_id})"
@@ -10417,8 +10548,8 @@ function renderSerialCard(r, opts) {
     return div;
 }
 
-function viewSerialRun(runId) {
-    // Restore default styling for every card
+// Default styling for every Results card: nothing selected.
+function resetSerialCardStyles() {
     document.querySelectorAll('.serial-run-card').forEach(el => {
         if (el.id === 'serial-card-0') {
             el.style.borderColor = '#8b6914';
@@ -10428,6 +10559,25 @@ function viewSerialRun(runId) {
             el.style.background = '#fff';
         }
     });
+}
+
+// Highlight the selected Results card, whatever rendered the cards.
+// showSerialGallery() only restyles when its list changed, so a
+// selection restored after the cards were drawn needs this.
+function markSelectedSerialCard() {
+    resetSerialCardStyles();
+    if (selectedRun === null) return;
+    const card = document.getElementById('serial-card-' + selectedRun);
+    if (!card) return;
+    const si = Number(card.dataset.settingIdx || 0);
+    const colors = settingColors(si, galleryNSettings);
+    card.style.borderColor = colors.selBorder;
+    card.style.background = colors.selBg;
+}
+
+function viewSerialRun(runId) {
+    // Restore default styling for every card
+    resetSerialCardStyles();
     const card = document.getElementById('serial-card-' + runId);
     if (card) {
         const si = Number(card.dataset.settingIdx || 0);
@@ -10446,6 +10596,9 @@ function viewSerialRun(runId) {
 
     // Set selected run and reload current view for the active pane
     selectedRun = runId;
+    // Saved with the fire, so it is still selected -- and still what
+    // "ML classification" shows -- when the fire is opened again.
+    setTimeout(() => { try { saveUiState(); } catch (_) {} }, 0);
     const currentView = activePane === 'left' ? leftView : rightView;
     if (currentView) {
         loadPaneImage(activePane, currentView);
@@ -10563,6 +10716,15 @@ async function restoreFireState() {
         if (serialResults.length > 0) {
             showSerialGallery(serialResults, data.settings_used || []);
             lastSerialCount = serialResults.length;
+            // A remembered selection comes back as if its card had just
+            // been clicked: highlighted, and -- with "Sync params on
+            // click" on -- its settings in the panel, applied after
+            // last_params above, exactly as a click would.
+            try { markSelectedSerialCard(); } catch (_) {}
+            if (selectedRun !== null && isSyncParamsOn()) {
+                const p = galleryRunParams.get(selectedRun);
+                if (p) applyParamsToForm(p);
+            }
         }
     } catch {}
 }

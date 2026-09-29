@@ -289,6 +289,14 @@ class FireRoutes:
             f'(status={fire.status.value}, '
             f'views={len(fire.available_views)})\n')
         sys.stderr.flush()
+        # The runs in the Results list, so the page can check a
+        # remembered selection before its first pane asks for it.
+        with state.lock:
+            _run_ids = [r.get('run_id')
+                        for r in (getattr(fire, 'serial_results', None)
+                                  or [])
+                        if isinstance(r, dict)
+                        and r.get('run_id') is not None]
         self._send_json({
             'status': fire.status.value,
             'views': fire.available_views,
@@ -326,6 +334,25 @@ class FireRoutes:
             'has_brush_comparison': has_brush,
             'previously_accepted': fire.previously_accepted,
             'ml_area_ha': fire.ml_area_ha,
+            # Everything the page restores when a fire is re-opened:
+            # split view, both panes' views and products, the Results
+            # selection, the parameter boxes and the band checkboxes.
+            # The page reads all of it from THIS reply. It had been added
+            # to /diagnose instead, so every visit opened at defaults.
+            'ui_state': dict(getattr(fire, 'ui_state', None) or {}),
+            'kgc_params': dict(getattr(fire, 'kgc_params', None) or {}),
+            'scaling': dict(getattr(fire, 'scaling', None) or {}),
+            'band_override': list(
+                getattr(fire, 'band_override', None) or []),
+            'exclude_b8': bool(getattr(fire, 'exclude_b8', True)),
+            'exclude_pre_fire': bool(
+                getattr(fire, 'exclude_pre_fire', True)),
+            'exclude_diff': bool(getattr(fire, 'exclude_diff', True)),
+            'diff_only': bool(getattr(fire, 'diff_only', False)),
+            'clip_to_bcws': bool(getattr(fire, 'clip_to_bcws', False)),
+            'restrict_hint_bcws': bool(
+                getattr(fire, 'restrict_hint_bcws', False)),
+            'serial_run_ids': _run_ids,
         })
 
     def handle_api_hint_mode(self, fire_numbe):
