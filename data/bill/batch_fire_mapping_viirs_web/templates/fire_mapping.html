@@ -3863,10 +3863,11 @@ function paintOverlayVectors(ctx, unit, sizeMul, ov) {
         if (!nm || !ring || !ring.length) return;
         let sx = 0, sy = 0;
         for (const p of ring) { sx += p[0]; sy += p[1]; }
-        drawLabel(nm, sx / ring.length, sy / ring.length);
+        drawLabel(bcwsLabel(nm, b), sx / ring.length, sy / ring.length);
     });
     (b.points || []).forEach((p, i) => {
-        drawLabel((b.point_fire_nums || [])[i], p[0] + half + 2, p[1]);
+        drawLabel(bcwsLabel((b.point_fire_nums || [])[i], b),
+                  p[0] + half + 2, p[1]);
     });
 }
 
@@ -6432,6 +6433,20 @@ function imageToScreen(pane, x, y) {
     return [x * s.scale + s.panX, y * s.scale + s.panY];
 }
 
+// The BCWS retrieval time right after a fire number: "K51490 2026-09-28
+// 12:30". A cut made before these times were recorded shows the time it
+// was cut, as an upper bound: "K51490 \u22642026-09-14 22:31".
+function bcwsStampText(b) {
+    const t = (b && (b.retrieved_at || b.retrieved_before)) || '';
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(t);
+    if (!m) return '';
+    return (b.retrieved_at ? '' : '\u2264') + `${m[1]} ${m[2]}`;
+}
+function bcwsLabel(nm, b) {
+    const st = bcwsStampText(b);
+    return (nm && st) ? `${nm} ${st}` : nm;
+}
+
 function drawPaneLabels(pane) {
     const c = getLayerCanvas(pane);
     const { area, img } = getPaneElements(pane);
@@ -6500,7 +6515,7 @@ function drawPaneLabels(pane) {
     for (const [nm, x, y] of fires) {
         const [sx, sy] = imageToScreen(pane, x * kx, y * ky);
         if (sx < -80 || sy < -20 || sx > w + 80 || sy > h + 20) continue;
-        plate(nm, sx, sy, '#ffffff', '#000000');
+        plate(bcwsLabel(nm, b), sx, sy, '#ffffff', '#000000');
     }
 }
 

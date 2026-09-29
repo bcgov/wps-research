@@ -236,9 +236,12 @@ def _bcws_px(state, gt, proj, w, h) -> dict:
         pts.append([cx, cy])
         pt_nums.append(src_ptnums[i] if i < len(src_ptnums) else '')
 
+    # When this BCWS data was retrieved (bcws.refresh_bcws_overlay stamps
+    # every download), so the labels can say which snapshot a cut shows.
     return {'polygons': polys, 'points': pts,
             'polygon_fire_nums': poly_nums,
-            'point_fire_nums': pt_nums}
+            'point_fire_nums': pt_nums,
+            'retrieved_at': str(data.get('updated_at') or '')}
 
 
 def overlay_cache_path(crop_bin: str) -> str:
@@ -317,6 +320,18 @@ def build_fire_overlays(state, fire, force: bool = False,
                   and all(abs(float(a) - float(b)) < 1e-6
                           for a, b in zip(c_gt, gt)))
             if ok:
+                # A cut made before retrieval times were recorded: its BCWS
+                # data was retrieved no later than the cut itself, so that
+                # is what it reports (the cut is not changed or rewritten).
+                try:
+                    _b = cached.get('bcws')
+                    if isinstance(_b, dict) and not _b.get('retrieved_at'):
+                        import datetime as _dt
+                        _b['retrieved_before'] = _dt.datetime.fromtimestamp(
+                            os.path.getmtime(cache)).isoformat(
+                                timespec='seconds')
+                except Exception:
+                    pass
                 return cached
             sys.stderr.write(
                 f'[fire_overlays] {os.path.basename(cache)}: built for '
