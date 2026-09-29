@@ -1443,7 +1443,7 @@ async function onPostSourceChange() {
 
     const label = productLabel(_products.find((q) => q.key === key)
                                || parts);
-    if (!productReadyToPlot(key)) blankPane('left');
+    if (shouldBlankOnSwitch('left', leftView, key)) blankPane('left');
     layerBusyBegin(`Loading ${label}`, key);
 
     (async () => {
@@ -2132,6 +2132,28 @@ function productReadyToPlot(key) {
     } catch (_) {}
     const p = (_products || []).find((q) => q.key === key);
     return !!(p && p.built !== false);
+}
+
+// Blank the pane on a source switch unless the new source's picture is
+// already in this tab's memory. "Ready on the server" was not enough: the
+// picture still had to be fetched and decoded, and the pane only swaps
+// once the new one has decoded -- so the previous source's imagery stayed
+// on screen, under a Sources row that had already moved on. Now the pane
+// is empty until the new source's own picture (low-res first) arrives.
+// Views that are not a per-source picture keep the server-ready test.
+function paneImageInMemory(pane, viewKey) {
+    try {
+        const ck = cacheKeyFor(viewKey, pane);
+        if (ck) return _previewBlobs.has(ck);
+    } catch (_) {}
+    return null;                       // not a cached view: cannot tell
+}
+
+function shouldBlankOnSwitch(pane, viewKey, key) {
+    const mem = paneImageInMemory(pane, viewKey);
+    if (mem === true) return false;
+    if (mem === false) return true;
+    return !productReadyToPlot(key);
 }
 
 // The empty dark-grey pane: the previous product's imagery must not stay
@@ -8839,7 +8861,7 @@ async function onRightPostSourceChange() {
     rightPostSource = src;
     rightL2Date = _rsel.date;
     rightProduct = _rkey;
-    if (!productReadyToPlot(_rkey)) blankPane('right');
+    if (shouldBlankOnSwitch('right', rightView || 'post', _rkey)) blankPane('right');
     try { invalidateEraseBuffers('source changed'); } catch (_) {}
     // Same treatment as the left: grey both selectors while this runs,
     // because both read the per-source preview stash.
