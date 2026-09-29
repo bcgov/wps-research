@@ -869,10 +869,39 @@ class BaseHandler:
         self.wfile.write(body)
 
     def _send_file(self, filepath, media_type=None, cache_seconds=None,
-                   extra_headers=None):
+                   extra_headers=None, revalidate=False):
         if not os.path.isfile(filepath):
             self.send_error(404)
             return
+        # revalidate: the browser keeps the file but checks it on each
+        # use, by a checksum of the file (its size and modification
+        # time) -- an unchanged preview costs a tiny "304 not modified",
+        # a re-rendered one is always fetched fresh. "immutable for a
+        # day" kept a re-rendered preview stale for up to a day, because
+        # its URL is keyed on the stack, not on the picture.
+        etag = None
+        if revalidate:
+            try:
+                _st = os.stat(filepath)
+                etag = f'"{_st.st_size:x}-{_st.st_mtime_ns:x}"'
+            except OSError:
+                etag = None
+            _inm = ''
+            try:
+                _inm = self.headers.get('If-None-Match') or ''
+            except Exception:
+                _inm = ''
+            if etag and etag in [t.strip() for t in _inm.split(',')]:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.send_header('Cache-Control', 'private, no-cache')
+                for _k, _v in (extra_headers or {}).items():
+                    try:
+                        self.send_header(_k, _v)
+                    except Exception:
+                        pass
+                self.end_headers()
+                return
         if media_type is None:
             media_type = (mimetypes.guess_type(filepath)[0]
                           or 'application/octet-stream')
@@ -881,7 +910,10 @@ class BaseHandler:
         self.send_response(200)
         self.send_header('Content-Type', media_type)
         self.send_header('Content-Length', str(len(data)))
-        if cache_seconds is not None:
+        if revalidate and etag:
+            self.send_header('ETag', etag)
+            self.send_header('Cache-Control', 'private, no-cache')
+        elif cache_seconds is not None:
             # Safe to cache aggressively when the URL is itself
             # content-keyed (the caller's query string changes
             # whenever the underlying file does) -- "immutable" tells

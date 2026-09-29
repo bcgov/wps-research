@@ -2899,7 +2899,7 @@ class FireRoutes:
                                 else 'the hint mask is still being made')},
                     409)
                 return
-            self._send_file(_mp, 'image/png', cache_seconds=86400,
+            self._send_file(_mp, 'image/png', cache_seconds=86400, revalidate=True,
                             extra_headers={'X-Product': _req_key or ''})
             return
 
@@ -3097,6 +3097,7 @@ class FireRoutes:
                     _lhdrs = {}
                 _lhdrs['X-Preview-Format'] = 'low'
                 self._send_file(_low, 'image/jpeg', cache_seconds=86400,
+                                revalidate=True,
                                 extra_headers=_lhdrs)
                 return
             # No proxy (older fire, or generation failed): fall through
@@ -3251,7 +3252,7 @@ class FireRoutes:
                 return
 
         self._send_file(serve_path, serve_type, cache_seconds=86400,
-                        extra_headers=_hdrs)
+                        extra_headers=_hdrs, revalidate=True)
 
     def handle_api_comparison(self, fire_numbe):
         fire_numbe = unquote(fire_numbe)

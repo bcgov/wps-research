@@ -1213,37 +1213,96 @@ function enqueueWarm(key, url) {
     _warmQueue.push({key, url});
 }
 
+// ---- Prefetch what stepping will show next -------------------------------
+//
+// The key and URL a pane will use for a product once it is showing it,
+// built from the product itself (the same format as cacheKeyFor and
+// previewUrlFor), so a prefetched picture is found by that pane.
+function productStampFor(key) {
+    if (_forceStamp) return _forceStamp;
+    const p = (_products || []).find((q) => q && q.key === key);
+    return (p && Number(p.stamp)) || _previewStamp;
+}
+
+function cacheKeyForProduct(viewKey, key) {
+    const parts = parseProductKey(key);
+    return `${parts.source}:${key}:${viewKey}:${productStampFor(key)}`;
+}
+
+function previewUrlForProduct(viewKey, key) {
+    const parts = parseProductKey(key);
+    const dpart = (parts.source === 'l2'
+        ? `&l2=${parts.date || 'latest'}` : '')
+        + `&prod=${encodeURIComponent(key)}`;
+    // nobuild: a prefetch takes what is ready and never makes the server
+    // build or switch; the server's own queue renders the rest.
+    return `/api/fire/${encodeURIComponent(FIRE)}/preview/${viewKey}`
+        + `?src=${parts.source}${dpart}&t=${productStampFor(key)}&nobuild=1`;
+}
+
+// After a pane shows a product: that product's other views, then the same
+// view of the products one and two steps either side -- so forward/back
+// finds the next picture already in memory.
+function warmAround(pane, viewKey) {
+    try {
+        const sel = document.getElementById(
+            pane === 'right' ? 'post-source-select-right'
+                             : 'post-source-select');
+        if (!sel || !sel.options.length) return;
+        const keys = [...sel.options].map((o) => o.value);
+        const cur = keys.indexOf(sel.value);
+        if (cur < 0) return;
+        const built = (k) => (_products || []).some(
+            (q) => q && q.key === k && q.built !== false);
+        const views = ['post', 'pre', 'diff1'];
+        const v0 = views.includes(viewKey) ? viewKey : 'post';
+        if (built(keys[cur])) {
+            for (const v of views) {
+                if (v !== v0) {
+                    enqueueWarm(cacheKeyForProduct(v, keys[cur]),
+                                previewUrlForProduct(v, keys[cur]));
+                }
+            }
+        }
+        for (const d of [1, -1, 2, -2]) {
+            const k = keys[(cur + d + keys.length) % keys.length];
+            if (!k || k === keys[cur] || !built(k)) continue;
+            enqueueWarm(cacheKeyForProduct(v0, k), previewUrlForProduct(v0, k));
+        }
+        // Only what is near the current product: older entries were for
+        // products already stepped past.
+        if (_warmQueue.length > 12) _warmQueue.splice(0, _warmQueue.length - 12);
+        drainWarmQueue();
+    } catch (_) { /* a prefetch is an optimisation, never required */ }
+}
+
 async function drainWarmQueue() {
     if (_warmRunning) return;
     _warmRunning = true;
     try {
-        while (_warmQueue.length) {
-            const {key, url} = _warmQueue.shift();
-            if (_previewBlobs.has(key)) continue;
-            try {
-                await getPreviewObjectURL(key, url, false);
-            } catch (_) { /* skip and continue */ }
-        }
+        // Three at a time: one after another left the next picture
+        // waiting behind every earlier one.
+        const worker = async () => {
+            while (_warmQueue.length) {
+                const {key, url} = _warmQueue.shift();
+                if (_previewBlobs.has(key)) continue;
+                try {
+                    await getPreviewObjectURL(key, url, false);
+                } catch (_) { /* not ready yet, or gone: skip */ }
+            }
+        };
+        await Promise.all([worker(), worker(), worker()]);
     } finally {
         _warmRunning = false;
     }
 }
 
 function warmSourceCache(src) {
-    // Hint is handled by warmHintCache (it varies by mode as well as
-    // by source); here only the plain stack-derived views.
-    // Key AND url must both carry the L2 date, exactly as cacheKeyFor
-    // and previewUrlFor do. A warm entry under a date-less key is read
-    // by nobody; a warm entry fetched from a date-less URL is the wrong
-    // composite. Getting one right and not the other is worse than
-    // getting both wrong, because it caches a mismatch.
-    const _dp = (src === 'l2') ? `:${currentL2Date || 'latest'}` : '';
-    const _dq = (src === 'l2') ? `&l2=${currentL2Date || 'latest'}` : '';
-    for (const v of ['post', 'diff1', 'pre']) {
-        enqueueWarm(`${src}${_dp}:${v}:${_previewStamp}`,
-            `/api/fire/${encodeURIComponent(FIRE)}/preview/${v}`
-            + `?src=${src}${_dq}&t=${_previewStamp}`);
-    }
+    // Superseded by warmAround(): this warmed the server's CURRENT
+    // product under keys no pane ever asks for (they lacked the product
+    // key and used the page-load stamp), so every picture it fetched was
+    // downloaded and never shown.
+    warmAround('left', leftView);
 }
 
 // Blank the pane while a new hint mask loads. Without this the old
@@ -1263,13 +1322,9 @@ function clearHintPane(pane) {
 // Pull every hint mask (both modes) for a source into the cache, so
 // toggling hint modes is instant rather than a round-trip each time.
 function warmHintCache(src) {
-    const _hp = (src === 'l2') ? `:${currentL2Date || 'latest'}` : '';
-    const _hq = (src === 'l2') ? `&l2=${currentL2Date || 'latest'}` : '';
-    for (const mode of ['redwins_post', 'redwins_diff', 'viirs']) {
-        enqueueWarm(`${src}${_hp}:hint:${mode}:${_previewStamp}`,
-            `/api/fire/${encodeURIComponent(FIRE)}/preview/hint`
-            + `?src=${src}${_hq}&hint=${mode}&t=${_previewStamp}`);
-    }
+    // Nothing to warm: its keys could never match a pane's (see
+    // warmSourceCache), and hint masks are made ahead of time on the
+    // server and fetched per product when "Hint mask" is shown.
 }
 
 function clearPreviewCache() {
@@ -1402,8 +1457,7 @@ async function onPostSourceChange() {
             await loadFireOverlays();
             loadFireGeo();
             loadDatePlot().then(loadNextCoverage).catch(loadNextCoverage);
-            warmSourceCache(parts.source);
-            warmHintCache(parts.source);
+            warmAround('left', leftView);
         } catch (err) {
             log(`[source] could not display ${label}: ${err.message}`,
                 'error');
@@ -1412,7 +1466,7 @@ async function onPostSourceChange() {
         }
         // Tell the server which product to classify and export from.
         // Background: nothing on screen waits for it.
-        informServerOfProduct(key, previous, label);
+        _serverProductSync = informServerOfProduct(key, previous, label);
     })();
 }
 
@@ -1422,8 +1476,35 @@ async function onPostSourceChange() {
 // selector: the operator's choice stands, and a failure is reported
 // rather than silently undone.
 let _serverProductSeq = 0;
+// The newest product sync, and a way to cut its settle wait short.
+let _serverProductSync = Promise.resolve();
+let _serverProductKick = null;
+
+// Before anything the server does with "the loaded product" (Map Fire):
+// send a switch still waiting out its settle delay now, and wait for the
+// server to confirm it -- at most 15 s, so a busy server cannot hang the
+// button. Without this, Map Fire straight after stepping could run on the
+// product just stepped away from.
+async function flushServerProduct() {
+    try { if (_serverProductKick) _serverProductKick(); } catch (_) {}
+    try {
+        await Promise.race([_serverProductSync,
+                            new Promise((r) => setTimeout(r, 15000))]);
+    } catch (_) {}
+}
 async function informServerOfProduct(key, previous, label) {
     const seq = ++_serverProductSeq;
+    // One server switch per SETTLED choice, not one per step. The pane
+    // shows any product by its key without the server switching (previews
+    // are served per product), so stepping through five products used to
+    // run five full switches -- repointing, restoring preview folders,
+    // and the rows re-entering "restoring"/"repointing" each time. Now
+    // the switch waits until stepping stops for a moment.
+    await new Promise((res) => {
+        _serverProductKick = res;
+        setTimeout(res, 600);
+    });
+    if (seq !== _serverProductSeq) return;      // stepped on meanwhile
     const parts = parseProductKey(key);
     try {
         for (;;) {
@@ -8768,6 +8849,7 @@ async function onRightPostSourceChange() {
                    rightProductKey());
     try {
         await loadPaneImage('right', rightView || 'post');
+        warmAround('right', rightView || 'post');
         // Overlays for the RIGHT pane's product.
         //
         // Overlay coordinates are per stack, so a right pane showing a
@@ -9080,6 +9162,7 @@ async function cancelMapping() {
 // Body: {mode: 'primary'|'all', settings?: [...]}
 // -----------------------------------------------------------------------
 async function startSerialRun(body) {
+    await flushServerProduct();
     if (isMapping) return;
     isMapping = true;
     serverLineCount = 0;
@@ -9349,6 +9432,7 @@ async function startKgcMapping() {
     const btn = document.getElementById('btn-map-kgc');
     if (btn) { btn.disabled = true; btn.textContent = 'Running KGC ...'; }
     try {
+        await flushServerProduct();
         const r = await fetch(
             `/api/fire/${encodeURIComponent(FIRE)}/kgc_map`, {
                 method: 'POST',
@@ -9395,6 +9479,7 @@ async function startKgcMapping() {
 }
 
 async function startMapping() {
+    await flushServerProduct();
     // A mapping run re-prepares the crop (padding sweeps change its
     // dimensions), which regenerates every preview server-side. Drop
     // the cached blobs so the panes cannot show pre-sweep imagery.
