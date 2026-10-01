@@ -2,12 +2,13 @@
 
 The two top-level entry points are:
 
-* ``_batch_map_worker`` — drives a list of fires sequentially, delegating
+* ``_batch_map_worker`` — drives a list of fires sequentially: with KGC
+  by default (``_batch_kgc_fire``), or, for method 'hdbscan', delegating
   each to ``_serial_map_worker``. Spawned by ``handle_api_batch_map``.
 * ``_serial_map_worker`` — runs N recommended settings × K HDBSCAN
   replicates for a single fire, with per-setting t-SNE+RF caching.
   Spawned by ``handle_api_serial_map`` and called inline by the batch
-  worker.
+  worker when its method is 'hdbscan'.
 
 Decomposed phase helpers (in call order):
   ``_serial_setup`` → ``_serial_snapshot_run0`` → ``_serial_run_replicate``
@@ -113,8 +114,14 @@ def init(app_state, helpers):
 
 
 def _batch_map_worker(fire_numbes: list[str],
-                      session_hash: str | None = None):
-    """Process fires sequentially, delegating each to ``_serial_map_worker``.
+                      session_hash: str | None = None,
+                      method: str = 'kgc'):
+    """Process fires sequentially.
+
+    *method* 'kgc' (the default) maps each fire with KGC, exactly as the
+    fire page's Map Fire does with "hdbscan" unticked: see
+    ``_batch_kgc_fire``. 'hdbscan' keeps the deprecated pipeline,
+    delegating each fire to ``_serial_map_worker`` as described below.
 
     This mirrors what the fire page's "Map Fire with settings" button
     does: a full N recommended settings × K replicates sweep per fire,
@@ -140,10 +147,14 @@ def _batch_map_worker(fire_numbes: list[str],
             'completed': 0,
             'current_fire': '',
             'errors': [],
+            # Read by the cancel handler: an in-flight KGC run is
+            # stopped differently from an in-flight sweep.
+            'method': method,
         }
 
     sys.stderr.write(
-        f'[batch] Starting batch: {len(fire_numbes)} fire(s)\n')
+        f'[batch] Starting batch: {len(fire_numbes)} fire(s), '
+        f'method={method}\n')
     sys.stderr.flush()
 
     k_runs = max(1, min(10, int(state.k_runs_per_setting)))
@@ -158,6 +169,38 @@ def _batch_map_worker(fire_numbes: list[str],
         fire = state.fires.get(fire_numbe)
         if not fire or fire.status in (
                 FireStatus.ACCEPTED, FireStatus.MAPPING):
+            with state.lock:
+                state.batch_status['completed'] += 1
+            continue
+
+        if method == 'kgc':
+            with state.lock:
+                state.batch_status['current_fire'] = fire_numbe
+            sys.stderr.write(f'[batch] [{fire_numbe}] Starting KGC\n')
+            sys.stderr.flush()
+            try:
+                _batch_kgc_fire(fire_numbe)
+            except Exception as exc:
+                # _batch_kgc_fire records its own failures; this is
+                # only a backstop so one fire can never stop the batch.
+                _set_fire_status(fire, FireStatus.ERROR, str(exc))
+                sys.stderr.write(
+                    f'[batch] [{fire_numbe}] EXCEPTION:\n'
+                    f'{traceback.format_exc()}\n')
+                sys.stderr.flush()
+            fire = state.fires.get(fire_numbe)
+            if fire and fire.status == FireStatus.ERROR:
+                with state.lock:
+                    state.batch_status['errors'].append(fire_numbe)
+                sys.stderr.write(
+                    f'[batch] [{fire_numbe}] FAILED '
+                    f'({fire.error_msg or "see fire console"})\n')
+            elif fire and fire.status == FireStatus.MAPPED:
+                sys.stderr.write(
+                    f'[batch] [{fire_numbe}] MAPPED '
+                    f'(agreement={fire.agreement_pct}%, '
+                    f'{len(fire.serial_results)} run(s) in gallery)\n')
+            sys.stderr.flush()
             with state.lock:
                 state.batch_status['completed'] += 1
             continue
@@ -241,6 +284,129 @@ def _batch_map_worker(fire_numbes: list[str],
         f'{completed - n_errors}/{total} fires mapped successfully'
         + (f' ({n_errors} error(s))' if n_errors else '') + '.',
         action={'url': '/', 'label': 'Open fire list'})
+
+
+def _batch_kgc_fire(fire_numbe: str) -> None:
+    """Map one fire with KGC for a batch.
+
+    The same run as the fire page's Map Fire with "hdbscan" unticked
+    (``handle_api_kgc_map``, handlers/serial.py): the same state primed
+    before it, the same ``run_kgc`` call, the same automatic Accept of a
+    fire's only result, the same failure handling. Two inputs differ
+    because no page is involved:
+
+      * parameters -- the fire's saved KGC parameters (``kgc_params``:
+        what last ran, or what its page last saved), else the defaults;
+      * source -- the fire's loaded one (``post_source``), which is
+        also what the page's handler falls back to.
+
+    Previous Results are KEPT: the run is added to the gallery, as on
+    the fire page. A fire whose AOI stack or hint is missing is prepared
+    first, by the same test the deprecated sweep uses. Failures are
+    recorded on the fire (status ERROR), not raised, so the batch moves
+    on to the next fire.
+    """
+    fire = state.fires.get(fire_numbe)
+    if fire is None:
+        return
+    with state.lock:
+        # Someone may have started on this fire since the batch looked:
+        # never run over a preparation or mapping already in progress.
+        busy = (fire.status.value if fire.status in (
+            FireStatus.PREPARING, FireStatus.MAPPING,
+            FireStatus.ACCEPTED) else '')
+        if not busy:
+            fire.console_log.clear()
+            fire.error_msg = ''
+    if busy:
+        sys.stderr.write(
+            f'[batch] [{fire_numbe}] SKIPPED: the fire is {busy}\n')
+        sys.stderr.flush()
+        return
+
+    # Same test, same calls as the deprecated sweep (_serial_map_worker).
+    needs_prepare = (
+        not fire.cache_dir
+        or not os.path.isdir(fire.cache_dir)
+        or not fire.crop_bin
+        or not os.path.isfile(fire.crop_bin)
+        or not fire.hint_bin
+        or not os.path.isfile(fire.hint_bin)
+    )
+    if not needs_prepare:
+        try:
+            from .prepare import ensure_fire_stack_present
+            ensure_fire_stack_present(fire)
+        except Exception as exc:
+            fire.console_log.append(
+                f'  AOI stack regeneration failed: {exc}')
+            needs_prepare = True
+    if needs_prepare:
+        fire.console_log.append(
+            '  Rebuilding the AOI stack (missing or stale cache), then '
+            'regenerating previews and the hint ...')
+        _prepare_fire_sync(fire_numbe, 0.0)
+        fire = state.fires.get(fire_numbe)
+        if fire is None or fire.status != FireStatus.READY:
+            # ERROR is reported by the batch loop; anything else means
+            # the preparation did not finish, so there is nothing to map.
+            return
+    # Cancelled while it was being prepared: leave it prepared, unmapped.
+    if _batch_cancel.is_set():
+        return
+
+    params = dict(getattr(fire, 'kgc_params', None) or {})
+    src = getattr(fire, 'post_source', 'l2') or 'l2'
+    with state.lock:
+        fire.status = FireStatus.MAPPING
+        fire.error_msg = ''
+        fire.kgc_cancel = False
+        # Seeded as the page's handler does, so the fire list shows the
+        # KGC stages from the start rather than a bare "mapping".
+        fire.progress = {
+            'stage': 'kgc_build',
+            'stage_idx': 1,
+            'total_stages': 6,
+            'detail': 'starting KGC',
+            'kind': 'kgc',
+            'updated_at': time.time(),
+            'started_at': time.time(),
+            'last_change_at': time.time(),
+            'method': 'kgc',
+        }
+    try:
+        _save_fire_state()
+    except Exception:
+        pass
+    try:
+        from .kgc import run_kgc, set_kgc_progress
+        from .handlers.serial import _auto_accept_first_result
+        _prog = (lambda stage, detail, frac:
+                 set_kgc_progress(fire, stage, detail, frac))
+        run_kgc(fire, params, source=src, progress=_prog)
+        _auto_accept_first_result(fire)
+        try:
+            _save_fire_state()
+        except Exception:
+            pass
+    except Exception as exc:
+        sys.stderr.write(
+            f'[kgc] {fire_numbe} failed: '
+            f'{type(exc).__name__}: {exc}\n'
+            f'{traceback.format_exc()}\n')
+        msg = str(exc).strip() or type(exc).__name__
+        with state.lock:
+            fire.status = FireStatus.ERROR
+            fire.error_msg = f'KGC failed: {msg}'
+            fire.progress = {}
+        try:
+            fire.console_log.append(f'ERROR: KGC failed: {msg}')
+        except Exception:
+            pass
+        try:
+            _save_fire_state()
+        except Exception:
+            pass
 
 
 def _jitter_hdbscan(base: int, run_idx: int, step: int) -> int:

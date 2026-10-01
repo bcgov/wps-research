@@ -142,6 +142,10 @@
 <div class="batch-bar" id="batch-bar" style="display:none">
     <span id="selected-count">0 selected</span>
     <button class="btn" id="btn-batch-map" onclick="batchMap()">Map Selected (with settings)</button>
+    <label title="Unticked (the default): map with KGC, using each fire's saved KGC settings, else the defaults; earlier Results are kept. Ticked: the deprecated t-SNE + Random Forest + HDBSCAN pipeline with the recommended settings; that sweep replaces a fire's earlier Results."
+           style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;user-select:none">
+        <input type="checkbox" id="batch-use-hdbscan"> hdbscan (deprecated)
+    </label>
     <button class="btn btn-danger" id="btn-batch-cancel" onclick="batchCancel()" style="display:none">Cancel Batch</button>
     <button class="btn btn-danger" onclick="batchRemove()">Delete Selected</button>
     <details class="report-menu" style="display:inline-block;position:relative">
@@ -900,7 +904,14 @@ async function batchMap() {
         alert('No eligible fires selected (accepted fires are skipped).');
         return;
     }
-    if (!confirm(`Map ${fires.length} fire(s) with recommended settings?\n\nAccepted fires will be skipped.`)) return;
+    // KGC unless "hdbscan (deprecated)" is ticked beside the button.
+    const _hb = document.getElementById('batch-use-hdbscan');
+    const method = (_hb && _hb.checked) ? 'hdbscan' : 'kgc';
+    const how = (method === 'kgc')
+        ? "KGC (each fire's saved KGC settings, else the defaults)"
+        : 'the deprecated t-SNE + Random Forest + HDBSCAN pipeline '
+          + 'and the recommended settings';
+    if (!confirm(`Map ${fires.length} fire(s) with ${how}?\n\nAccepted fires will be skipped.`)) return;
 
     document.getElementById('btn-batch-map').disabled = true;
     batchRunning = true;
@@ -909,7 +920,7 @@ async function batchMap() {
         const r = await fetch('/api/batch/map', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-            body: JSON.stringify({fire_numbes: fires}),
+            body: JSON.stringify({fire_numbes: fires, method}),
         });
         const data = await r.json();
         if (data.error) {

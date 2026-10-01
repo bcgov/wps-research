@@ -142,6 +142,12 @@ class BatchRoutes:
             if body is None:
                 return
             fire_numbes = body.get('fire_numbes', [])
+            # 'kgc' unless the caller asks for the deprecated pipeline.
+            method = str(body.get('method') or 'kgc').strip().lower()
+            if method not in ('kgc', 'hdbscan'):
+                self._send_json(
+                    {'error': f'Unknown batch method {method!r}'}, 400)
+                return
             fire_numbes = [
                 fn for fn in fire_numbes
                 if fn in state.fires
@@ -157,13 +163,14 @@ class BatchRoutes:
             sess_hash = self._session_hash()
             _batch_thread[0] = threading.Thread(
                 target=_batch_map_worker,
-                args=(fire_numbes, sess_hash),
+                args=(fire_numbes, sess_hash, method),
                 daemon=True)
             _batch_thread[0].start()
             started = True
             self._send_json({
                 'status': 'started',
                 'total': len(fire_numbes),
+                'method': method,
             })
         finally:
             if not started:
@@ -201,6 +208,21 @@ class BatchRoutes:
         if current and current in state.fires:
             fire = state.fires[current]
             if fire.status == FireStatus.MAPPING:
-                fire.serial_canceled = True
-                _terminate_serial_proc(current)
+                if batch.get('method', 'kgc') == 'kgc':
+                    # As the fire page's KGC cancel does: the flag for
+                    # the runner, and the subprocess terminated, since
+                    # KGC can be silent for minutes.
+                    with state.lock:
+                        fire.kgc_cancel = True
+                        proc = getattr(fire, 'kgc_proc', None)
+                    if proc is not None:
+                        try:
+                            proc.terminate()
+                        except Exception as exc:
+                            sys.stderr.write(
+                                f'[batch] {current}: KGC terminate '
+                                f'failed: {exc}\n')
+                else:
+                    fire.serial_canceled = True
+                    _terminate_serial_proc(current)
         self._send_json({'status': 'cancelling'})
