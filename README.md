@@ -75,17 +75,14 @@ Includes A) data integration B) routines applying or implementing supervised and
  
 Other classifiers that could be used: Minimum Dist; Max Likelihood; Spectral Angle Mapper; Spectral Information Divergence; SVM; neural net
 
-# Collaborators and Contributors:
-* Bill Co, BCWS Co-op student
+# Present contributors:
 * Ashlin Richardson, BCWS/PSU
 * BCWS and BCWS Agile team members
-
-## TRU Comp. Sci Students Co-supervised:
-* Gagan Bajwa
-* Brad Crump
-* Francesca Rammuno
+* Ruiz Rivera, BC Public Service
 
 # Past contributors: 
+* Bill Co, BCWS Co-op student
+* Adithi Balaji, BCWS Co-op student
 * Sterling von Dehn, BCWS Co-op student 
 * Sybrand Strauss, BCWS/PSU
 * Dana Hicks, BCWS
@@ -95,6 +92,11 @@ Other classifiers that could be used: Minimum Dist; Max Likelihood; Spectral Ang
 * Dr. Musfiq Rahman, TRU
 * Brady Holliday, BCWS
 * Jabed Tomal, TRU
+
+## TRU Comp. Sci Students Co-supervised:
+* Gagan Bajwa
+* Brad Crump
+* Francesca Rammuno
 
 # License
 
