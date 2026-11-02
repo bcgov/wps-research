@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-20261101 alos_polsar_process.py
+20261102 alos4_process.py
 
 Polarimetric processing of ALOS-2 (PALSAR-2) and ALOS-4 (PALSAR-3) Level 1.1
 stripmap data (CEOS format, from JAXA or EODMS) with ESA SNAP's command-line
@@ -18,7 +18,23 @@ Which folders are processed
     Skipped and reported: ScanSAR (several image files per polarisation),
     Spotlight, single-pol, and anything that is not complex (Level 1.1) data.
 
+ALOS-4: converted to PALSAR-2 format first
+    SNAP 14.0.0-14.0.2 misreads ALOS-4 (PALSAR-3) metadata (see Metadata
+    checks below). So each ALOS-4 dataset is first converted to PALSAR-2
+    (ALOS-2) CEOS format with a port of JAXA's sample code P3toP2snap, into
+    <dataset>/ALOS2_format/, and SNAP reads that copy with its ALOS-2 reader.
+    The copy is as big as the original data; --delete-intermediates removes
+    it (it is made again if step 01 ever has to run again). Outputs are still
+    labelled ALOS4. JAXA's code covers the stripmap modes UWS, UBD, UWD, UBQ,
+    FWD and HBQ; other modes are skipped. --native-alos4 reads the original
+    files instead, once a SNAP release has the fix.
+
+    JAXA's sample code P3toP2snap (author: Dr. Yunung Nina Lin):
+        https://www.eorc.jaxa.jp/ALOS/jp/alos-4/tool/P3toP2snap.zip
+    Thanks to JAXA for making this code publicly available.
+
 Processing chain (all outputs go inside the dataset's own folder)
+    ALOS2_format/    ALOS-4 only: the data in PALSAR-2 format (see above)
     probe            a 64 x 64 pixel subset, read only to check the metadata
                      before the heavy work starts (deleted afterwards)
     01_CalMtxMlk     one gpt graph: Read -> Calibration (complex output)
@@ -48,19 +64,22 @@ Processing chain (all outputs go inside the dataset's own folder)
     everything that starts with 01 to 06. Use --delete-intermediates here.
 
 Metadata checks (after the probe, and again on 01_CalMtxMlk)
-    A dataset fails if any of these is wrong. SNAP 14.0.2 misreads ALOS-4
-    metadata and still reports success (GitHub senbox-org/microwave-toolbox
-    issue #154, "ALOS-4 (PALSAR-3) CEOS reader misreads the leader"; fixed
-    on master by PR #155 on Oct 30 2026, in no release yet). These checks
-    are what catch it:
-      - MISSION in the metadata matches the VOL file (ALOS2 / ALOS4)
+    A dataset fails if any of these is wrong. SNAP 14.0.0-14.0.2 misreads
+    ALOS-4 metadata and still reports success (GitHub
+    senbox-org/microwave-toolbox issue #154, "ALOS-4 (PALSAR-3) CEOS reader
+    misreads the leader"; fixed on master by PR #155 on Oct 30 2026, in no
+    release yet). These checks catch that, and check the PALSAR-2 conversion:
+      - MISSION in the metadata is the expected one (ALOS2 for ALOS-2 data and
+        for converted ALOS-4 data, ALOS4 with --native-alos4)
       - range and azimuth pixel spacing greater than 0
       - slant range to the first pixel between 400 and 2500 km
       - near and far incidence angles between 5 and 75 degrees
       - PASS (ASCENDING / DESCENDING) agrees with the direction the
-        satellite was moving (orbit state vectors), with the ALOS-2 product
-        name's last letter (A / D), and with the .kml or summary.txt if
-        either of those spells the direction out
+        satellite was moving (orbit state vectors), with the orbit direction
+        letter in the original file name (ALOS-2: the last letter, as in
+        ...HBQR1.1__A; ALOS-4: the letter after the look direction, as in
+        ...HBQ-RD0606), and with the .kml or summary.txt if either of those
+        spells the direction out
       - the polarisations SNAP read match the IMG- files
       - after 01_CalMtxMlk: every matrix band was written, at full size
     The step output that failed is deleted, so a later run (with a fixed
@@ -100,14 +119,14 @@ Stopping and resuming
     not reached yet keep their earlier outputs).
 
 Usage (run from the folder that holds the dataset folders)
-    python3 alos_polsar_process.py                    # all defaults
-    python3 alos_polsar_process.py --dry-run          # list datasets, plan
-    python3 alos_polsar_process.py -j 4               # 4 datasets at a time
-    python3 alos_polsar_process.py --no-tf --no-pre-box
-    python3 alos_polsar_process.py --delete-intermediates
-    python3 alos_polsar_process.py --delete-intermediates-only
-    python3 alos_polsar_process.py --redo
-    python3 alos_polsar_process.py -h                 # all options
+    python3 alos4_process.py                    # all defaults
+    python3 alos4_process.py --dry-run          # list datasets, plan
+    python3 alos4_process.py -j 4               # 4 datasets at a time
+    python3 alos4_process.py --no-tf --no-pre-box
+    python3 alos4_process.py --delete-intermediates
+    python3 alos4_process.py --delete-intermediates-only
+    python3 alos4_process.py --redo
+    python3 alos4_process.py -h                 # all options
 
 Needs (as the older rcm scripts do): wps-research/py on the same checkout
 (misc.py, snap2psp_inplace.py, raster_stack.py, raster_plot.py) and the
@@ -122,6 +141,7 @@ import json
 import time
 import math
 import shutil
+import struct
 import contextlib
 import signal
 import argparse
@@ -140,7 +160,7 @@ import misc                                   # wps-research/py/misc.py
 from misc import find_snap, err
 import numpy as np
 
-SCRIPT_VERSION = '20261101'
+SCRIPT_VERSION = '20261102'
 
 VOL_PREFIXES = ('VOL-ALOS2', 'VOL-ALOS4')
 POLS = ('HH', 'HV', 'VH', 'VV')
@@ -324,7 +344,7 @@ def find_datasets(root='.'):
     return datasets, ignored
 
 
-def classify(ds):
+def classify(ds, convert_alos4=True):
     """Fill in mission, polarisations and mode from the file names alone.
     Returns None if the dataset can be processed, else a reason to skip."""
     if len(ds['vols']) > 1:
@@ -354,7 +374,277 @@ def classify(ds):
         return 'single-pol (%s): only dual-pol and quad-pol are processed' % ds['pols'][0]
     else:
         return 'unexpected polarisations: %s' % ', '.join(ds['pols'])
+    ds['convert'] = ds['mission'] == 'ALOS4' and convert_alos4
+    if ds['convert']:
+        return p3_plan(ds)
     return None
+
+
+# ---------------------------------------------------------------------------
+# PALSAR-3 -> PALSAR-2 CEOS conversion
+#
+# Port of JAXA's sample code P3toP2snap (Sep 2025, "converting PALSAR-3 L1.1
+# standard products to PALSAR-2 CEOS format", stripmap 3 m / 6 m / 10 m),
+# author Dr. Yunung Nina Lin:
+#     https://www.eorc.jaxa.jp/ALOS/jp/alos-4/tool/P3toP2snap.zip
+# Thanks to JAXA for making this code publicly available.
+# Made so SNAP can read ALOS-4 data with its ALOS-2 reader. Same byte edits
+# and file names as JAXA's code. Differences: image files are converted line
+# by line as a stream (JAXA's reads each whole file into memory and writes it
+# out three times); every record length is checked against the fixed layout
+# the code assumes, and the conversion stops if one differs; the second image
+# file pointer of dual-pol data is renamed like the others (JAXA's test for
+# it compares the ALOS-4 mode with the ALOS-2 name "FBD", so it never runs).
+# The ALOS-2 style names always end in "A" (as in JAXA's code), whatever the
+# orbit direction: the real direction stays in the leader and text record.
+# ---------------------------------------------------------------------------
+P2_DIR = 'ALOS2_format'                   # JAXA's name for the converted copy
+P3_MODES = {'UWS': 'UBS', 'FWD': 'FBD', 'HBQ': 'HBQ', 'UBD': 'UBD', 'UWD': 'UBD',
+            'UBQ': 'UBQ'}                 # ALOS-4 mode -> ALOS-2 mode (JAXA's table)
+P3_LED_RECORDS = [720, 4680, 4680, 16384, 65536, 1620, 325000, 511000, 3072, 728000, 9500]
+P3_LINE_PREFIX, P2_LINE_PREFIX = 800, 544         # bytes before the pixels of a line
+CEOS_VOL_RECORD = 360
+
+
+def p2_name(name, mode2):
+    """JAXA's ALOS-2 style file name for a PALSAR-3 file name."""
+    k = 7 if name.startswith('IMG-') else 4    # 'IMG-HH-' or 'VOL-' / 'LED-' / 'TRL-'
+    return (name[:k + 4] + '240' + name[k + 5:k + 12] + '-' + name[k + 12:k + 18] + '-' +
+            mode2 + 'R1.1__A')
+
+
+def p3_plan(ds):
+    """Check that the dataset fits JAXA's conversion and work out the names.
+    Returns None if it does, else a reason to skip."""
+    vol = ds['vol']                 # e.g. VOL-ALOS41712610250622HBQ-RD0606-1.1__-
+    mode = vol[22:25]
+    if not (len(vol) >= 28 and vol[4:9] == 'ALOS4' and vol[9:22].isdigit() and
+            vol[27:28] in ('A', 'D')):
+        return ('VOL file name %s is not in the form JAXA\'s PALSAR-3 to PALSAR-2 '
+                'conversion expects' % vol)
+    if mode not in P3_MODES:
+        return ('observation mode %s: JAXA\'s PALSAR-3 to PALSAR-2 conversion only covers '
+                'the stripmap modes %s' % (mode, ', '.join(sorted(P3_MODES))))
+    if {'S': 1, 'D': 2, 'Q': 4}.get(mode[2]) != len(ds['pols']):
+        return 'mode %s does not match the %d image files' % (mode, len(ds['pols']))
+    suffix = vol[4:]
+    files = {'LED': 'LED-' + suffix, 'TRL': 'TRL-' + suffix}
+    files.update({p: 'IMG-%s-%s' % (p, suffix) for p in ds['pols']})
+    missing = [f for f in files.values() if not os.path.isfile(os.path.join(ds['path'], f))]
+    if missing:
+        return 'files needed for the PALSAR-2 conversion are missing: %s' % ', '.join(missing)
+    mode2 = P3_MODES[mode]
+    ds['p3'] = {'mode': mode, 'mode2': mode2, 'look': vol[26:27], 'node': vol[27:28],
+                'scene_id': vol[4:8] + '240' + vol[9:16] + '-' + vol[16:22],
+                'files': files,
+                'vol2': p2_name(vol, mode2)}
+    return None
+
+
+def _put(buf, offset, data):
+    """Overwrite bytes in place (like JAXA's edit_byte), never past the end."""
+    if offset + len(data) > len(buf):
+        raise Failure('PALSAR-2 conversion: edit past the end of a record')
+    buf[offset:offset + len(data)] = data
+
+
+def _records(path, sizes, what):
+    """Split a CEOS file into records of the given sizes, checking each
+    record's own length field (bytes 8-11)."""
+    with open(path, 'rb') as f:
+        data = f.read(sum(sizes))
+    if len(data) < sum(sizes):
+        raise Failure('%s is %d bytes, JAXA\'s layout needs %d' % (what, len(data), sum(sizes)))
+    out, pos = [], 0
+    for i, n in enumerate(sizes):
+        r = bytearray(data[pos:pos + n])
+        length = struct.unpack('>L', r[8:12])[0]
+        if length != n:
+            raise Failure('%s record %d is %d bytes long, JAXA\'s layout says %d' % (
+                what, i + 1, length, n))
+        out.append(r)
+        pos += n
+    return out
+
+
+def p3_convert_vol(src, dst, p3, n_img):
+    recs = _records(src, [CEOS_VOL_RECORD] * (n_img + 4), 'VOL file')
+    desc, pole, poims, potr, trec = recs[0], recs[1], recs[2:2 + n_img], recs[-2], recs[-1]
+    _put(desc, 60, b'AL2')
+    _put(desc, 76, b'ALOS2')
+    for r in [pole] + poims + [potr]:
+        _put(r, 20, b'AL2')
+    pid = 'PRODUCT:' + p3['mode2'] + p3['look'] + '1.1__' + p3['node']
+    _put(trec, 16, pid.encode() + b' ' * 22)
+    _put(trec, 163, p3['scene_id'].encode() + b' ' * 12)
+    with open(dst, 'wb') as f:
+        for r in recs:
+            f.write(r)
+
+
+def p3_convert_led(src, dst, p3):
+    (desc, summ, posi, attd, radi, qual,
+     fac1, fac2, fac3, fac4, fac5) = _records(src, P3_LED_RECORDS, 'LED file')
+    # file descriptor record: the PALSAR-2 record sizes and counts
+    _put(desc, 48, b'AL2 SARBSARL    ')
+    _put(desc, 186, b'  4096')
+    _put(desc, 234, b'  9860')
+    for o in (342, 348, 354):
+        _put(desc, o, b'     0')
+    _put(desc, 360, b' ' * 60)
+    for o, v in ((420, b'     1'), (426, b'  325000'), (434, b'     1'), (440, b'  511000'),
+                 (448, b'     1'), (454, b'    3072'), (462, b'     1'), (468, b'  728000'),
+                 (476, b'     1'), (482, b'    5000')):
+        _put(desc, o, v)
+    _put(desc, 490, b' ' * 230)
+    # data set summary record: 4680 bytes (PALSAR-3) -> 4096 (PALSAR-2)
+    mode = p3['mode']
+    if mode[0] == 'U':
+        ope_mode = b'01'
+    elif mode[0] == 'F':
+        ope_mode = b'03'
+    elif mode == 'HBQ':
+        ope_mode = b'18'
+    else:
+        raise Failure('PALSAR-2 conversion: no operation mode code for %s' % mode)
+    orig = bytes(summ)
+    _put(summ, 8, struct.pack('>L', 4096))
+    _put(summ, 388, b'   ' + (b'4' if mode[2] == 'S' else b'8'))
+    _put(summ, 396, b'ALOS2' + b' ' * 11)
+    _put(summ, 20, p3['scene_id'].encode() + b' ' * 11)
+    _put(summ, 416, b'2')
+    _put(summ, 422, ope_mode)
+    # fields 105-167: from their PALSAR-3 offsets to the PALSAR-2 ones (JAXA's table)
+    for a, b, to in ((1622, 1670, 1478), (1822, 1830, 1534), (1830, 1878, 1542),
+                     (2038, 2086, 1606), (2246, 2254, 1670), (2254, 2258, 1678),
+                     (2274, 2278, 1682), (2282, 2298, 1686), (2298, 2314, 1702),
+                     (2314, 2330, 1718), (2330, 2346, 1734), (2346, 2362, 1750),
+                     (2362, 2366, 1766), (2366, 2374, 1770), (2374, 2382, 1778),
+                     (2382, 2390, 1786), (2390, 2398, 1794), (2398, 2402, 1802),
+                     (2402, 2410, 1806), (2410, 2426, 1814), (2426, 2430, 1830),
+                     (2434, 2450, 1838), (2450, 2454, 1854), (2482, 2502, 1886),
+                     (2502, 2522, 1906), (2522, 2542, 1926), (2542, 2562, 1946),
+                     (2562, 2582, 1966), (2582, 2602, 1986), (2602, 4680, 2006)):
+        _put(summ, to, orig[a:b])
+    for o, n in ((1462, 16), (1526, 8), (1590, 16), (1654, 16), (1834, 4), (1858, 28),
+                 (4084, 12)):
+        _put(summ, o, b' ' * n)
+    _put(radi, 8, struct.pack('>L', 9860))
+    _put(fac5, 8, struct.pack('>L', 5000))
+    with open(dst, 'wb') as f:
+        for r in (desc, summ[:4096], posi, attd, radi[:9860], qual, fac1, fac2, fac3, fac4,
+                  fac5[:5000]):
+            f.write(r)
+
+
+def p3_convert_trl(src, dst):
+    with open(src, 'rb') as f:
+        d = bytearray(f.read(720))
+    if len(d) != 720:
+        raise Failure('TRL file is shorter than 720 bytes')
+    _put(d, 48, b'AL2')
+    _put(d, 490, b'     1')
+    _put(d, 516, b'     2')
+    with open(dst, 'wb') as f:
+        f.write(d)
+
+
+def p3_img_layout(src):
+    """(record length, pixels per line, lines) of a PALSAR-3 image file."""
+    size = os.path.getsize(src)
+    with open(src, 'rb') as f:
+        f.seek(720)
+        first = f.read(P3_LINE_PREFIX)
+    if len(first) < 28:
+        raise Failure('%s has no image lines' % os.path.basename(src))
+    rec_len = struct.unpack('>L', first[8:12])[0]
+    rec_pix = struct.unpack('>L', first[24:28])[0]
+    if rec_len != P3_LINE_PREFIX + 8 * rec_pix or (size - 720) % rec_len:
+        raise Failure('%s: lines of %d bytes for %d pixels do not fit JAXA\'s layout' % (
+            os.path.basename(src), rec_len, rec_pix))
+    return rec_len, rec_pix, (size - 720) // rec_len
+
+
+def p3_convert_img(src, dst):
+    """Line by line: an 800-byte line header becomes the first 544 bytes of
+    it, with the record length cut by 256, bytes 32-35 zeroed, and the slant
+    range to the first pixel (bytes 116-119) from centimetres to metres."""
+    rec_len, rec_pix, lines = p3_img_layout(src)
+    npix = 8 * rec_pix
+    with open(src, 'rb', buffering=16 << 20) as fi, open(dst, 'wb', buffering=16 << 20) as fo:
+        desc = bytearray(fi.read(720))
+        try:
+            fn30 = int(desc[186:192]) - 256     # field 30: record length
+        except ValueError:
+            raise Failure('%s: unreadable record length in the file descriptor' %
+                          os.path.basename(src))
+        _put(desc, 48, b'AL2 SARBIMOP    ')
+        _put(desc, 186, b'%6d' % fn30)
+        _put(desc, 276, b' 544')
+        fo.write(desc)
+        for i in range(lines):
+            rec = fi.read(rec_len)
+            if len(rec) != rec_len or struct.unpack('>L', rec[8:12])[0] != rec_len:
+                raise Failure('%s: line %d is not %d bytes long' % (
+                    os.path.basename(src), i + 1, rec_len))
+            pre = bytearray(rec[:P2_LINE_PREFIX])
+            _put(pre, 8, struct.pack('>L', rec_len - 256))
+            _put(pre, 32, struct.pack('>L', 0))
+            slant_cm = struct.unpack('>L', rec[116:120])[0]
+            _put(pre, 116, struct.pack('>L', slant_cm // 100))
+            fo.write(pre)
+            fo.write(rec[P3_LINE_PREFIX:P3_LINE_PREFIX + npix])
+    return lines
+
+
+def p2_expected(ds):
+    """Converted file name -> expected size in bytes."""
+    p3, path = ds['p3'], ds['path']
+    out = {p3['vol2']: CEOS_VOL_RECORD * (len(ds['pols']) + 4),
+           p2_name(p3['files']['LED'], p3['mode2']):
+               sum(P3_LED_RECORDS) - (4680 - 4096) - (65536 - 9860) - (9500 - 5000),
+           p2_name(p3['files']['TRL'], p3['mode2']): 720}
+    for p in ds['pols']:
+        rec_len, rec_pix, lines = p3_img_layout(os.path.join(path, p3['files'][p]))
+        out[p2_name(p3['files'][p], p3['mode2'])] = 720 + lines * (rec_len - 256)
+    return out
+
+
+def p2_complete(ds, folder):
+    try:
+        expected = p2_expected(ds)
+    except (Failure, OSError):
+        return False
+    return all(os.path.isfile(os.path.join(folder, n)) and
+               os.path.getsize(os.path.join(folder, n)) == size
+               for n, size in expected.items())
+
+
+def p3_to_p2(ds, log):
+    """The dataset in PALSAR-2 format in <dataset>/ALOS2_format/ (made if
+    missing or incomplete). Returns the path of its VOL file."""
+    path, p3 = ds['path'], ds['p3']
+    out = os.path.join(path, P2_DIR)
+    if os.path.isdir(out) and p2_complete(ds, out):
+        return os.path.join(out, p3['vol2'])
+    staging = new_staging(path, P2_DIR)
+    try:
+        src = lambda name: os.path.join(path, name)
+        dst = lambda name: os.path.join(staging, p2_name(name, p3['mode2']))
+        p3_convert_vol(src(ds['vol']), dst(ds['vol']), p3, len(ds['pols']))
+        p3_convert_led(src(p3['files']['LED']), dst(p3['files']['LED']), p3)
+        p3_convert_trl(src(p3['files']['TRL']), dst(p3['files']['TRL']))
+        for p in ds['pols']:
+            lines = p3_convert_img(src(p3['files'][p]), dst(p3['files'][p]))
+            log.write('converted %s (%d lines)\n' % (p3['files'][p], lines))
+        if not p2_complete(ds, staging):
+            raise Failure('PALSAR-2 conversion: converted files have unexpected sizes')
+        remove_path(out)
+        os.rename(staging, out)
+    except BaseException:
+        remove_path(staging)
+        raise
+    return os.path.join(out, p3['vol2'])
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +662,9 @@ def settings_from_args(a):
           'grid_aligned_to_m': [0.0, 0.0],
           'dem': DEM,
           'resampling': RESAMPLING,
-          'edge_trim': not a.no_edge_trim}
+          'edge_trim': not a.no_edge_trim,
+          'alos4_input': ('SNAP ALOS-4 reader' if a.native_alos4 else
+                          'converted to PALSAR-2 format (JAXA P3toP2snap code)')}
     return json.loads(json.dumps(st))       # normalise (as stored in JSON)
 
 
@@ -464,7 +756,7 @@ def outputs_present(path):
             len(export_dirs(path)) > 0)
 
 
-def check_settings(path, st, log):
+def check_settings(path, st, log, mission):
     """Refuse to mix outputs made with different options."""
     f = os.path.join(path, SETTINGS_NAME)
     old = read_json(f)
@@ -473,7 +765,10 @@ def check_settings(path, st, log):
             raise Failure('outputs exist but %s is missing, so the options they '
                           'were made with are unknown; use --redo' % SETTINGS_NAME)
     else:
-        diff = [k for k in st if k not in EXPORT_ONLY_KEYS and old.get(k) != st[k]]
+        ignore = set(EXPORT_ONLY_KEYS)
+        if mission != 'ALOS4':
+            ignore.add('alos4_input')
+        diff = [k for k in st if k not in ignore and old.get(k) != st[k]]
         if diff and outputs_present(path):
             raise Failure('existing outputs were made with other options (%s). Rerun '
                           'with those options, or use --redo to delete this script\'s '
@@ -654,7 +949,7 @@ def find_tools():
 # ---------------------------------------------------------------------------
 def graph_xml(nodes):
     """nodes: list of (node id, operator, source node id or None, [(k, v)])."""
-    out = ['<graph id="alos_polsar_process">', '  <version>1.0</version>']
+    out = ['<graph id="alos4_process">', '  <version>1.0</version>']
     for nid, op, src, params in nodes:
         out.append('  <node id="%s">' % nid)
         out.append('    <operator>%s</operator>' % op)
@@ -803,6 +1098,13 @@ def pass_hints(ds):
             hints.append((ds['vol'] + ' (last letter)', 'ASCENDING'))
         elif ds['vol'].endswith('__D'):
             hints.append((ds['vol'] + ' (last letter)', 'DESCENDING'))
+    else:
+        # ALOS-4 names: orbit direction after the look direction, e.g. HBQ-RD0606
+        # (character 27 of the VOL name; JAXA's P3toP2snap code reads it there)
+        node = ds['vol'][27:28]
+        if node in ('A', 'D'):
+            hints.append((ds['vol'] + ' (orbit direction letter)',
+                          'ASCENDING' if node == 'A' else 'DESCENDING'))
     for n in sorted(os.listdir(ds['path'])):
         if not (n.lower().endswith('.kml') or n.lower() == 'summary.txt'):
             continue
@@ -822,8 +1124,9 @@ def check_metadata(info, ds, stage):
     a = info['abs']
     problems, skip = [], None
     mission = a.get('MISSION', '')
-    if mission != ds['mission']:
-        problems.append('MISSION is "%s" but the VOL file is %s' % (mission, ds['mission']))
+    expected = 'ALOS2' if ds.get('convert') else ds['mission']   # converted: ALOS-2 reader
+    if mission != expected:
+        problems.append('MISSION is "%s", expected %s' % (mission, expected))
     acq = a.get('ACQUISITION_MODE', '')
     if acq in ('ScanSAR', 'Spotlight'):
         skip = 'acquisition mode %s: only stripmap is processed' % acq
@@ -862,10 +1165,13 @@ def check_metadata(info, ds, stage):
         for src, hp in pass_hints(ds):
             if hp != p:
                 problems.append('PASS is %s but %s says %s' % (p, src, hp))
-    if problems and ds['mission'] == 'ALOS4':
+    if problems and ds.get('convert'):
+        problems.append('read from the PALSAR-2 format copy in %s/' % P2_DIR)
+    elif problems and ds['mission'] == 'ALOS4':
         problems.append('this is what the ALOS-4 reader bug in SNAP 14.0.0-14.0.2 looks '
                         'like (GitHub senbox-org/microwave-toolbox issue #154); a SNAP '
-                        'release with the fix (PR #155) is needed')
+                        'release with the fix (PR #155) is needed, or leave out '
+                        '--native-alos4 to convert the data to PALSAR-2 format first')
     return problems, skip
 
 
@@ -876,6 +1182,9 @@ def scene_from_info(ds, info, scene=None):
     scene.pop('path', None)
     scene.update({'dataset': ds['name'], 'folder': os.path.relpath(ds['path']),
                   'vol': ds['vol'],
+                  'read_by_snap': (P2_DIR + '/' + ds['p3']['vol2'] + ' (converted to '
+                                   'PALSAR-2 format with JAXA\'s P3toP2snap code)'
+                                   if ds.get('convert') else ds['vol']),
                   'mission': ds['mission'], 'mode': ds['mode'], 'pols': ds['pols'],
                   'date': t.strftime('%Y%m%d') if t else None,
                   'first_line_time': a.get('first_line_time'),
@@ -937,12 +1246,12 @@ def remove_product(path, name):
     remove_path(os.path.join(path, name + '.data'))
 
 
-def run_probe(ds, ctx, log):
+def run_probe(ds, ctx, log, vol_path):
     staging = new_staging(ds['path'], 'probe')
     try:
         target = os.path.join(staging, 'probe.dim')
         graph = os.path.join(staging, 'probe_graph.xml')
-        write_text(graph, graph_probe(os.path.join(ds['path'], ds['vol']), target))
+        write_text(graph, graph_probe(vol_path, target))
         rc = run_logged([ctx['gpt'], graph] + gpt_extra(ctx), log)
         if rc != 0:
             raise Failure('reading the product failed (gpt exit code %d; see %s)' %
@@ -1179,7 +1488,7 @@ def export(ds, ctx, steps, scene, log):
         if n_valid == 0:
             raise Failure('export: no valid pixels left')
         png = make_rgb(staging, name, mode, ctx, log)
-        prov = {'script': 'alos_polsar_process.py ' + SCRIPT_VERSION,
+        prov = {'script': 'alos4_process.py ' + SCRIPT_VERSION,
                 'made': now_str(),
                 'snap_version': vstr(ctx['snap_version']),
                 'settings': st, 'scene': scene,
@@ -1216,13 +1525,15 @@ def remove_outputs(path):
         remove_path(d)
         removed.append(os.path.basename(d))
     for n in sorted(os.listdir(path)):
-        if n.startswith(PARTIAL) or n in (SETTINGS_NAME, SCENE_NAME, GRAPH_NAME):
+        if n.startswith(PARTIAL) or n in (SETTINGS_NAME, SCENE_NAME, GRAPH_NAME, P2_DIR):
             remove_path(os.path.join(path, n))
             removed.append(n)
     return removed
 
 
 def delete_intermediates(path, steps, st):
+    """Step products except the final one (and 04_TC for the beta0
+    correction), and the PALSAR-2 format copy of ALOS-4 data."""
     keep = kept_steps(steps, st)
     removed = []
     for s in steps:
@@ -1231,6 +1542,9 @@ def delete_intermediates(path, steps, st):
                               os.path.lexists(os.path.join(path, n + '.data'))):
             remove_product(path, n)
             removed.append(n)
+    if os.path.isdir(os.path.join(path, P2_DIR)):
+        remove_path(os.path.join(path, P2_DIR))
+        removed.append(P2_DIR)
     return removed
 
 
@@ -1247,7 +1561,7 @@ def process_dataset(ds, ctx):
         res['message'] = 'cannot write in the dataset folder (%s)' % e
         return res
     try:
-        log.write('\n' + '=' * 78 + '\n[%s] alos_polsar_process.py %s  %s %s-pol\n' % (
+        log.write('\n' + '=' * 78 + '\n[%s] alos4_process.py %s  %s %s-pol\n' % (
             now_str(), SCRIPT_VERSION, ds['mission'], ds['mode']))
         log.write('settings: %s\n' % json.dumps(st, sort_keys=True))
         if ctx['redo']:
@@ -1257,7 +1571,7 @@ def process_dataset(ds, ctx):
                 say('[%s] --redo: removed %d earlier outputs' % (label, len(removed)))
         clean_partials(path, log)
         steps = plan_steps(ds['mode'], st)
-        check_settings(path, st, log)
+        check_settings(path, st, log, ds['mission'])
         scene = read_json(os.path.join(path, SCENE_NAME))
 
         done = [d for d in export_dirs(path)
@@ -1286,9 +1600,17 @@ def process_dataset(ds, ctx):
                     write_json(os.path.join(path, SCENE_NAME), scene)
 
             todo = steps_to_run(path, steps, st)
+            snap_vol = os.path.join(path, ds['vol'])
             if todo and todo[0] == 0:
+                if ds.get('convert'):
+                    if not p2_complete(ds, os.path.join(path, P2_DIR)):
+                        say('[%s] converting PALSAR-3 to PALSAR-2 format (JAXA P3toP2snap) '
+                            'into %s/ ...' % (label, P2_DIR))
+                    t1 = time.time()
+                    snap_vol = p3_to_p2(ds, log)
+                    log.write('PALSAR-2 format copy ready in %s\n' % fmt_time(time.time() - t1))
                 say('[%s] checking metadata (probe)' % label)
-                info = run_probe(ds, ctx, log)
+                info = run_probe(ds, ctx, log, snap_vol)
                 problems, skip = check_metadata(info, ds, 'probe')
                 if skip:
                     raise Skip(skip)
@@ -1308,8 +1630,7 @@ def process_dataset(ds, ctx):
 
             for i in todo:
                 s = steps[i]
-                src = (os.path.join(path, ds['vol']) if i == 0
-                       else dim_of(path, steps[i - 1]['name']))
+                src = snap_vol if i == 0 else dim_of(path, steps[i - 1]['name'])
                 say('[%s] %s  %s ...' % (label, s['name'], s['what']))
                 t1 = time.time()
                 run_step(ds, s, src, ctx, log)
@@ -1427,7 +1748,8 @@ def parse_args():
                         '(1 or 2 pixels from it; biased low)')
     p.add_argument('--delete-intermediates', action='store_true',
                    help='after a dataset is finished, delete its intermediate SNAP '
-                        'products (the final one is kept)')
+                        'products (the final one is kept) and the PALSAR-2 format copy '
+                        'of ALOS-4 data')
     p.add_argument('--delete-intermediates-only', action='store_true',
                    help='only delete intermediate products of finished datasets; process nothing')
     p.add_argument('--redo', action='store_true',
@@ -1435,6 +1757,10 @@ def parse_args():
     p.add_argument('--dry-run', action='store_true',
                    help='list the datasets and what would run, then stop')
     p.add_argument('--gpt', default=None, help='path to SNAP gpt (default: found automatically)')
+    p.add_argument('--native-alos4', action='store_true',
+                   help='read ALOS-4 data with SNAP\'s own ALOS-4 reader instead of converting '
+                        'it to PALSAR-2 format first (only once SNAP has the fix for GitHub '
+                        'senbox-org/microwave-toolbox issue #154)')
     a = p.parse_args()
     if a.jobs < 1:
         p.error('--jobs must be 1 or more')
@@ -1456,7 +1782,7 @@ def main():
     a = parse_args()
     st = settings_from_args(a)
     datasets, ignored = find_datasets('.')
-    print('alos_polsar_process.py %s in %s' % (SCRIPT_VERSION, os.getcwd()))
+    print('alos4_process.py %s in %s' % (SCRIPT_VERSION, os.getcwd()))
     if ignored:
         print('folders without a VOL-ALOS2/VOL-ALOS4 file (ignored): %s' % ', '.join(ignored))
     if not datasets:
@@ -1464,7 +1790,7 @@ def main():
 
     runnable, results = [], []
     for ds in datasets:
-        reason = classify(ds)
+        reason = classify(ds, convert_alos4=not a.native_alos4)
         where = ('' if ds['path'] == os.path.abspath(ds['name'])
                  else '  (data in %s/%s)' % (ds['name'], ds['name']))
         if reason:
@@ -1473,8 +1799,10 @@ def main():
             print('  %-28s skipped: %s' % (ds['name'], reason))
         else:
             runnable.append(ds)
-            print('  %-28s %s %s-pol (%s)%s' % (ds['name'], ds['mission'], ds['mode'],
-                                                 '+'.join(ds['pols']), where))
+            print('  %-28s %s %s-pol (%s)%s%s' % (
+                ds['name'], ds['mission'], ds['mode'], '+'.join(ds['pols']), where,
+                ', %s mode, read via PALSAR-2 format' % ds['p3']['mode']
+                if ds.get('convert') else ''))
 
     if a.delete_intermediates_only:
         for ds in runnable:
@@ -1500,8 +1828,11 @@ def main():
             else:
                 todo = (list(range(len(steps))) if a.redo
                         else steps_to_run(ds['path'], steps, st))
-                plan = ' -> '.join(steps[i]['name'] for i in todo) or 'nothing'
-                plan += ' -> export'
+                names = [steps[i]['name'] for i in todo]
+                if (ds.get('convert') and todo and todo[0] == 0 and
+                        (a.redo or not p2_complete(ds, os.path.join(ds['path'], P2_DIR)))):
+                    names.insert(0, 'convert to PALSAR-2 format')
+                plan = ' -> '.join(names + ['export'])
             print('  %-28s %s' % (ds['name'], plan))
         return 0
     if not runnable:
