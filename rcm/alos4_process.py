@@ -116,6 +116,18 @@ Stopping and resuming
     succeeds and the output checks out, so any output that exists is
     complete. Leftover ".partial_*" folders are deleted on the next run.
     Do not run two copies on the same folder at the same time.
+    Only what is missing is made again, from the nearest product still
+    there: a missing PNG / RGB preview from the exported bands (no SNAP
+    step runs); a missing export band from the final SNAP product; a missing
+    final product from the newest step product left (or, after
+    --delete-intermediates, from the original data). The same in ./warp/:
+    a missing preview, PNG copy or GIF is made on its own, and a warped
+    dataset is only resampled again if its bands are missing or its export
+    holds different data (made from a newer final product).
+    The PNG title is the original product ID; the caption gives the data
+    attribution (JAXA, year), acquisition time (UTC) and pass direction,
+    observation mode, incidence range, and the map grid (or, in ./warp/,
+    the reference date). PNGs with other labels are made again.
     The options a dataset was processed with are saved in
     alos_polsar_settings.json. If a later run asks for different processing
     options, that dataset fails with a message instead of mixing outputs;
@@ -1421,11 +1433,93 @@ def rezero_after_filter(new_dim, src_dim, mode, r):
     return int(np.count_nonzero(mask))
 
 
-def make_rgb(folder, name, mode, ctx, log):
-    """rgb/<name>_rgb.bin (+ .hdr) and its PNG, from the matrix bands in folder.
-    Returns the PNG path."""
+def obs_mode(vol):
+    """Observation mode code from a VOL file name (HBQ, FBD, FWD, ...)."""
+    if vol.startswith('VOL-ALOS4'):
+        return vol[22:25]
+    parts = vol.split('-')                       # VOL-ALOS2...-yymmdd-HBQR1.1__A
+    return parts[3][:3] if len(parts) > 3 else '?'
+
+
+def png_labels(prov, warp_ref=None):
+    """(title, caption) for the PNG previews, from an export's processing.json.
+    The title is the original product ID (for reproducibility); the caption
+    is the attribution, acquisition, mode, incidence range and grid.
+    raster_plot.py shows the caption after "(R,G,B) = (...) ©"."""
+    sc, st = prov.get('scene', {}), prov.get('settings', {})
+    vol = sc.get('vol', '')
+    title = vol[4:] if vol.startswith('VOL-') else (vol or 'unknown product')
+    t = parse_utc(sc.get('first_line_time'))
+    when = t.strftime('%Y-%m-%d %H:%M UTC') if t else sc.get('date', '?')
+    year = t.strftime('%Y') if t else ''
+    # kept short: raster_plot.py's fixed font fits about 115 characters,
+    # "(R,G,B) = (T22, T33, T11) ©" included
+    direction = {'ASCENDING': 'asc.', 'DESCENDING': 'desc.'}.get(
+        (sc.get('pass') or '').upper(), '?')
+    parts = ['JAXA %s' % year if year else 'JAXA',
+             '%s, %s' % (when, direction),
+             '%s %s-pol' % (obs_mode(vol), sc.get('mode', '?'))]
+    ml = sc.get('multilook') or {}
+    if ml.get('incidence_near_deg') and ml.get('incidence_far_deg'):
+        parts.append('inc. %.0f-%.0f°' % (ml['incidence_near_deg'],
+                                                ml['incidence_far_deg']))
+    if warp_ref:
+        parts.append('on %s grid' % warp_ref.split('_')[0])   # the reference's date
+    else:
+        parts.append('%s, %g m' % (st.get('map_projection', '?'),
+                                   float(st.get('pixel_spacing_m') or 0)))
+    return title, ' | '.join(parts)
+
+
+def rgb_files(folder, name):
     rgb = os.path.join(folder, 'rgb')
-    remove_path(rgb)
+    stack = os.path.join(rgb, name + '_rgb.bin')
+    return rgb, stack, stack + '_1_2_3_rgb.png'
+
+
+def rgb_ok(folder, name, title, caption):
+    """True if the RGB stack and its PNG exist, with these labels."""
+    rgb, stack, png = rgb_files(folder, name)
+    if not all(os.path.isfile(f) for f in (stack, stack[:-4] + '.hdr', png)):
+        return False
+    for fn, want in (('title_string.txt', title), ('copyright_string.txt', caption)):
+        try:
+            with open(os.path.join(rgb, fn), encoding='utf-8') as f:
+                if f.read().strip() != want:
+                    return False
+        except OSError:
+            return False
+    return True
+
+
+def bands_ok(folder, mode, extra=()):
+    """True if every matrix band (.bin + .hdr, of the size its header gives)
+    and the extra files exist in folder."""
+    for f in extra:
+        if not os.path.isfile(os.path.join(folder, f)):
+            return False
+    for b in BANDS[mode]:
+        f, hdr = os.path.join(folder, b + '.bin'), os.path.join(folder, b + '.hdr')
+        if not (os.path.isfile(f) and os.path.isfile(hdr)):
+            return False
+        try:
+            h = read_envi_header(hdr)
+            if os.path.getsize(f) != int(h['samples']) * int(h['lines']) * 4:
+                return False
+        except (OSError, KeyError, ValueError):
+            return False
+    return True
+
+
+def make_rgb(folder, name, mode, ctx, log, title, caption):
+    """rgb/<name>_rgb.bin (+ .hdr) and its PNG, from the matrix bands in
+    folder, labelled with title and caption. Built in a staging folder and
+    swapped in when complete. Returns the PNG path."""
+    for n in os.listdir(folder):                 # left by a stopped run
+        if n.startswith(PARTIAL):
+            remove_path(os.path.join(folder, n))
+    final_rgb, _, final_png = rgb_files(folder, name)
+    rgb = os.path.join(folder, '%srgb.%d' % (PARTIAL, os.getpid()))
     os.makedirs(rgb)
     py, tools, env = ctx['python'], ctx['tools'], ctx['env']
     stack = name + '_rgb.bin'
@@ -1433,6 +1527,20 @@ def make_rgb(folder, name, mode, ctx, log):
     def run(cmd, what):
         if run_logged(cmd, log, cwd=rgb, env=env) != 0:
             raise Failure('preview: %s failed (see %s)' % (what, LOG_NAME))
+
+    try:
+        _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption)
+    except BaseException:
+        remove_path(rgb)
+        raise
+    remove_path(final_rgb)
+    os.rename(rgb, final_rgb)
+    return final_png
+
+
+def _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption):
+    write_text(os.path.join(rgb, 'title_string.txt'), title + '\n')
+    write_text(os.path.join(rgb, 'copyright_string.txt'), caption + '\n')
 
     if mode == 'quad':
         inputs = ['../T22.bin', '../T33.bin', '../T11.bin']
@@ -1444,17 +1552,18 @@ def make_rgb(folder, name, mode, ctx, log):
         inputs = ['../C11.bin', '../C22.bin', 'C12.bin_abs.bin']
         names = ['C11', 'C22', '|C12|']
     run([py, tools['raster_stack.py']] + inputs + [stack], 'raster_stack.py')
-    # raster_stack.py takes every header line after "band names" for a band
-    # name; write a clean header instead, keeping the map information
+    # A clean header, keeping the map information. misc.band_names() (used
+    # by raster_plot.py) takes every line after "band names" as a band name,
+    # so the band names go last, one per line.
     hdr0 = os.path.join(folder, names[0] + '.hdr')          # T22.hdr or C11.hdr
     first = read_envi_header(hdr0)
     lines = ['ENVI', 'samples = ' + first['samples'], 'lines = ' + first['lines'],
              'bands = 3', 'header offset = 0', 'file type = ENVI Standard',
-             'data type = 4', 'interleave = bsq', 'byte order = 0',
-             'band names = {' + ', '.join(names) + '}']
+             'data type = 4', 'interleave = bsq', 'byte order = 0']
     with open(hdr0) as f:
         lines += [ln.rstrip('\n') for ln in f
                   if ln.lower().startswith(('map info', 'coordinate system string'))]
+    lines += ['band names = {' + names[0] + ',', names[1] + ',', names[2] + '}']
     write_text(os.path.join(rgb, stack[:-4] + '.hdr'), '\n'.join(lines) + '\n')
     run([py, tools['raster_plot.py'], stack, '1', '2', '3', '1'], 'raster_plot.py')
     png = os.path.join(rgb, stack + '_1_2_3_rgb.png')
@@ -1463,7 +1572,6 @@ def make_rgb(folder, name, mode, ctx, log):
     if mode == 'dual':                          # helper files for |C12|
         for n in ('C12.bin', 'C12.hdr', 'C12.bin.hdr', 'C12.bin_abs.bin', 'C12.bin_abs.hdr'):
             remove_path(os.path.join(rgb, n))
-    return png
 
 
 def nan_mask_and_save(folder, mode, w, h, trim=0, inc_path=None, inc_big_endian=True):
@@ -1535,10 +1643,13 @@ def export(ds, ctx, steps, scene, log):
         n_valid, n_all = nan_mask_and_save(staging, mode, w, h, trim, inc_path)
         if n_valid == 0:
             raise Failure('export: no valid pixels left')
-        png = make_rgb(staging, name, mode, ctx, log)
         prov = {'script': 'alos4_process.py ' + SCRIPT_VERSION,
                 'made': now_str(),
                 'snap_version': vstr(ctx['snap_version']),
+                # identifies the data: an export made again from the same final
+                # product holds the same values (the warp step relies on this)
+                'from_product': {'name': final,
+                                 'modified_ns': os.stat(dim_of(path, final)).st_mtime_ns},
                 'settings': st, 'scene': scene,
                 'steps': [{'name': s['name'], 'what': s['what'],
                            'operator': s.get('op', 'graph: Read, Calibration, '
@@ -1550,13 +1661,33 @@ def export(ds, ctx, steps, scene, log):
                            'tf_beta0_correction_applied': bool(inc_path),
                            'valid_pixels': n_valid, 'all_pixels': n_all,
                            'rgb_bands': RGB_BANDS[mode],
-                           'png': os.path.relpath(png, staging)}}
+                           'png': os.path.relpath(rgb_files(staging, name)[2], staging)}}
+        title, caption = png_labels(prov)
+        make_rgb(staging, name, mode, ctx, log, title, caption)
         write_json(os.path.join(staging, 'processing.json'), prov)
         os.rename(staging, out)
     except BaseException:
         remove_path(staging)
         raise
     return out
+
+
+def export_state(folder, mode):
+    """'complete'; 'rgb' (bands fine, RGB preview / PNG missing or with old
+    labels); or 'incomplete' (a matrix band or processing.json missing)."""
+    if not bands_ok(folder, mode, ['processing.json']):
+        return 'incomplete'
+    prov = read_json(os.path.join(folder, 'processing.json'))
+    if prov is None:
+        return 'incomplete'
+    title, caption = png_labels(prov)
+    return 'complete' if rgb_ok(folder, os.path.basename(folder), title, caption) else 'rgb'
+
+
+def repair_rgb(folder, mode, ctx, log):
+    prov = read_json(os.path.join(folder, 'processing.json'))
+    title, caption = png_labels(prov)
+    make_rgb(folder, os.path.basename(folder), mode, ctx, log, title, caption)
 
 
 # ---------------------------------------------------------------------------
@@ -1645,9 +1776,22 @@ def process_dataset(ds, ctx):
 
         done = [d for d in export_dirs(path)
                 if os.path.basename(d).split('_')[1:] == [ds['mission'], ds['mode']]]
-        if done:
+        state = export_state(done[0], ds['mode']) if done else 'missing'
+        if state == 'incomplete':
+            # matrix bands or processing.json missing: made again from the
+            # final product (or, if that is gone too, from the newest step left)
+            say('[%s] %s is incomplete: making the export again' % (
+                label, os.path.basename(done[0])))
+            log.write('export incomplete: removing %s\n' % os.path.basename(done[0]))
+            remove_path(done[0])
+        if state in ('complete', 'rgb'):
             res['export'] = done[0]
-            res['message'] = 'already done'
+            if state == 'rgb':
+                say('[%s] RGB preview / PNG missing or out of date: making only that' % label)
+                repair_rgb(done[0], ds['mode'], ctx, log)
+                res['message'] = 'RGB preview / PNG made again'
+            else:
+                res['message'] = 'already done'
         else:
             # an existing first product must pass the checks before it is used
             s1 = steps[0]['name']
@@ -1988,15 +2132,30 @@ def warp_outputs(ref_choice, bilinear, tools, env):
     done, failed = [], []
     for e in entries:
         target = os.path.join(out, e['name'])
-        source_made = (read_json(os.path.join(e['dir'], 'processing.json')) or {}).get('made')
+        prov = read_json(os.path.join(e['dir'], 'processing.json')) or {}
+        # what identifies the source data (older exports: when it was made)
+        source_key = json.dumps(prov.get('from_product') or prov.get('made'), sort_keys=True)
+        title, caption = png_labels(prov, warp_ref=ref['name'])
         if os.path.isdir(target):
             w = read_json(os.path.join(target, 'warp.json')) or {}
-            if w.get('source_made') == source_made and w.get('resampling') == resampling:
-                print('  %-24s already done' % e['name'])
-                done.append(e)
+            same = ((w.get('source_key') or json.dumps(w.get('source_made'))) == source_key
+                    and w.get('resampling') == resampling)
+            if same and bands_ok(target, e['mode'], ['warp.json']):
+                try:
+                    if rgb_ok(target, e['name'], title, caption):
+                        print('  %-24s already done' % e['name'])
+                    else:
+                        print('  %-24s RGB preview / PNG missing or out of date: making '
+                              'only that' % e['name'])
+                        make_rgb(target, e['name'], e['mode'], ctx, log, title, caption)
+                    done.append(e)
+                except (Failure, OSError) as x:
+                    failed.append((e['name'], str(x)))
+                    print('  %-24s FAILED: %s' % (e['name'], x))
                 continue
-            # the dataset was processed again since, or other resampling asked for
-            print('  %-24s out of date: making it again' % e['name'])
+            # processed again since, other resampling asked for, or bands missing
+            print('  %-24s %s: making it again' % (
+                e['name'], 'out of date' if not same else 'incomplete'))
             remove_path(target)
         print('  %-24s %s ...' % (e['name'], 'copying (reference)' if e is ref else
                                   'resampling (%s)' % resampling), flush=True)
@@ -2022,10 +2181,10 @@ def warp_outputs(ref_choice, bilinear, tools, env):
                     raise Failure('raster_project_onto.py failed for %s (see %s/%s)' % (
                         ', '.join(bad), WARP_DIR, WARP_LOG))
             n_valid, n_all = nan_mask_and_save(staging, e['mode'], ref_w, ref_h)
-            png = make_rgb(staging, e['name'], e['mode'], ctx, log)
+            png = make_rgb(staging, e['name'], e['mode'], ctx, log, title, caption)
             write_json(os.path.join(staging, 'warp.json'), {
                 'script': 'alos4_process.py ' + SCRIPT_VERSION, 'made': now_str(),
-                'source': os.path.relpath(e['dir']), 'source_made': source_made,
+                'source': os.path.relpath(e['dir']), 'source_key': source_key,
                 'reference': ref['name'], 'reference_folder': os.path.relpath(ref['dir']),
                 'copied_not_resampled': e is ref, 'resampling': resampling,
                 'on_reference_grid': e['name'] not in off_grid,
@@ -2045,16 +2204,30 @@ def warp_outputs(ref_choice, bilinear, tools, env):
             raise
 
     # PNG copies and one animation per polarisation mode (the colours differ)
+    # (each made only if missing or older than what it is made from)
+    def stale(f, sources):
+        return (not os.path.isfile(f) or
+                any(os.path.getmtime(s) > os.path.getmtime(f) for s in sources))
+
     for e in done:
-        png = os.path.join(out, e['name'], 'rgb', e['name'] + '_rgb.bin_1_2_3_rgb.png')
-        if os.path.isfile(png):
-            shutil.copy2(png, os.path.join(out, e['name'] + '.png'))
+        png = rgb_files(os.path.join(out, e['name']), e['name'])[2]
+        copy = os.path.join(out, e['name'] + '.png')
+        if os.path.isfile(png) and stale(copy, [png]):
+            shutil.copy2(png, copy)
     convert = shutil.which('convert') or shutil.which('magick')
     for mode in ('quad', 'dual'):
         pngs = [os.path.join(out, e['name'] + '.png') for e in done
                 if e['mode'] == mode and os.path.isfile(os.path.join(out, e['name'] + '.png'))]
         gif = os.path.join(out, 'sequence_%s.gif' % mode)
+        frames_txt = os.path.join(out, 'sequence_%s.txt' % mode)    # the frames, in order
+        frames = '\n'.join(os.path.basename(p) for p in pngs) + '\n'
         if len(pngs) < 2:
+            continue
+        try:
+            same_frames = open(frames_txt).read() == frames
+        except OSError:
+            same_frames = False
+        if same_frames and not stale(gif, pngs):
             continue
         if not convert:
             print('ImageMagick (convert) not found: no %s' % os.path.basename(gif))
@@ -2063,6 +2236,7 @@ def warp_outputs(ref_choice, bilinear, tools, env):
         if run_logged([convert, '-delay', str(GIF_DELAY)] + pngs + [tmp], log) == 0 \
                 and os.path.isfile(tmp):
             os.replace(tmp, gif)
+            write_text(frames_txt, frames)
             print('%s: %d frames' % (os.path.relpath(gif), len(pngs)))
         else:
             remove_path(tmp)
@@ -2139,8 +2313,11 @@ def main():
             steps = plan_steps(ds['mode'], st)
             done = [d for d in export_dirs(ds['path'])
                     if os.path.basename(d).split('_')[1:] == [ds['mission'], ds['mode']]]
-            if done and not a.redo:
+            state = export_state(done[0], ds['mode']) if done and not a.redo else 'missing'
+            if state == 'complete':
                 plan = 'finished (%s)' % os.path.basename(done[0])
+            elif state == 'rgb':
+                plan = 'make only the RGB preview / PNG of %s' % os.path.basename(done[0])
             else:
                 todo = (list(range(len(steps))) if a.redo
                         else steps_to_run(ds['path'], steps, st))
