@@ -24,7 +24,8 @@ ALOS-4: converted to PALSAR-2 format first
     (ALOS-2) CEOS format with a port of JAXA's sample code P3toP2snap, into
     <dataset>/ALOS2_format/, and SNAP reads that copy with its ALOS-2 reader.
     The copy is as big as the original data; --delete-intermediates removes
-    it (it is made again if step 01 ever has to run again). Outputs are still
+    it as soon as 01_CalMtxMlk is made (it is made again if step 01 ever has
+    to run again). Outputs are still
     labelled ALOS4. JAXA's code covers the stripmap modes UWS, UBD, UWD, UBQ,
     FWD and HBQ; other modes are skipped. --native-alos4 reads the original
     files instead, once a SNAP release has the fix.
@@ -106,11 +107,25 @@ No-data and edges
     on after a run needs --redo.
 
 Stopping and resuming
-    Safe to stop at any time (Ctrl-C) and run again with the same options.
-    Each step writes into a hidden ".partial_<step>" folder inside the
-    dataset folder and is moved into place only after gpt succeeds and the
-    output checks out, so any output that exists is complete. Leftover
-    ".partial_*" folders are deleted on the next run.
+    Safe to stop at any time (Ctrl-C, kill, closed terminal) and run again:
+    each dataset carries on from its newest complete step. (After kill -9,
+    gpt may keep running on its own: stop it before starting again.)
+    -j (number of datasets at a time) and --delete-intermediates can differ
+    between runs. Each step writes into a hidden ".partial_<step>" folder
+    inside the dataset folder and is moved into place only after gpt
+    succeeds and the output checks out, so any output that exists is
+    complete. Leftover ".partial_*" folders are deleted on the next run.
+    Do not run two copies on the same folder at the same time.
+
+--delete-intermediates
+    Deletes each intermediate as soon as nothing still to be done needs it:
+    the PALSAR-2 format copy of ALOS-4 data once 01_CalMtxMlk is made, and
+    each step product once the next step's product is made (04_TC is kept
+    for --tf-beta0-correction). The final product (05_BoxPost) is kept: the
+    export is made from it. Turned on in a later run, it first deletes what
+    earlier runs left. A step is only deleted after the step that reads it
+    has finished, so stopping at any point loses at most the step running.
+    --delete-intermediates-only does the same deleting without processing.
     The options a dataset was processed with are saved in
     alos_polsar_settings.json. If a later run asks for different processing
     options, that dataset fails with a message instead of mixing outputs;
@@ -1217,7 +1232,9 @@ def multilook_summary(info):
 # Steps
 # ---------------------------------------------------------------------------
 def new_staging(path, name):
-    staging = os.path.join(path, PARTIAL + name)
+    # the process id in the name keeps a gpt left running by a killed run
+    # from writing into this run's folder
+    staging = os.path.join(path, '%s%s.%d' % (PARTIAL, name, os.getpid()))
     remove_path(staging)
     os.makedirs(staging)
     return staging
@@ -1532,19 +1549,40 @@ def remove_outputs(path):
 
 
 def delete_intermediates(path, steps, st):
-    """Step products except the final one (and 04_TC for the beta0
-    correction), and the PALSAR-2 format copy of ALOS-4 data."""
+    """Delete everything the remaining work no longer needs: every step
+    product older than the newest complete one (04_TC is kept while the beta0
+    correction still needs it), and the PALSAR-2 format copy of ALOS-4 data
+    once 01_CalMtxMlk (or anything later) exists. Safe at any point: whatever
+    the next step reads is kept, and so is the final product (the export is
+    made from it). Also removes half-deleted leftovers (a .data folder
+    without its .dim). Returns what was removed."""
     keep = kept_steps(steps, st)
+    names = [s['name'] for s in steps]
+    have = [i for i, n in enumerate(names) if step_exists(path, n)]
     removed = []
-    for s in steps:
-        n = s['name']
-        if n not in keep and (os.path.lexists(dim_of(path, n)) or
-                              os.path.lexists(os.path.join(path, n + '.data'))):
-            remove_product(path, n)
-            removed.append(n)
-    if os.path.isdir(os.path.join(path, P2_DIR)):
+    for i, n in enumerate(names):
+        data = os.path.join(path, n + '.data')
+        if i in have:
+            if i < have[-1] and n not in keep:
+                remove_product(path, n)
+                removed.append(n)
+        elif os.path.lexists(data):            # .data without .dim: incomplete
+            remove_path(data)
+            removed.append(n + '.data')
+    if have and os.path.isdir(os.path.join(path, P2_DIR)):
         remove_path(os.path.join(path, P2_DIR))
         removed.append(P2_DIR)
+    return removed
+
+
+def prune(ds, steps, st, ctx, log):
+    """delete_intermediates() when --delete-intermediates is on."""
+    if not ctx['delete_intermediates']:
+        return []
+    removed = delete_intermediates(ds['path'], steps, st)
+    if removed:
+        log.write('deleted (no longer needed): %s\n' % ', '.join(removed))
+        say('[%s] deleted (no longer needed): %s' % (ds['name'], ', '.join(removed)))
     return removed
 
 
@@ -1599,6 +1637,7 @@ def process_dataset(ds, ctx):
                     scene['multilook'] = multilook_summary(info)
                     write_json(os.path.join(path, SCENE_NAME), scene)
 
+            prune(ds, steps, st, ctx, log)      # e.g. left over from a run without it
             todo = steps_to_run(path, steps, st)
             snap_vol = os.path.join(path, ds['vol'])
             if todo and todo[0] == 0:
@@ -1654,16 +1693,13 @@ def process_dataset(ds, ctx):
                     log.write(looks + '\n')
                     say('[%s] %s' % (label, looks))
                 say('[%s] %s  done in %s' % (label, s['name'], fmt_time(time.time() - t1)))
+                prune(ds, steps, st, ctx, log)  # the step before is no longer needed
 
             say('[%s] export: ENVI files, NaN no-data, RGB preview ...' % label)
             res['export'] = export(ds, ctx, steps, scene, log)
             res['message'] = 'done in %s' % fmt_time(time.time() - t0)
         res['status'] = 'done'
-        if ctx['delete_intermediates']:
-            removed = delete_intermediates(path, steps, st)
-            if removed:
-                log.write('deleted intermediates: %s\n' % ', '.join(removed))
-                res['message'] += '; deleted %s' % ', '.join(removed)
+        prune(ds, steps, st, ctx, log)
     except Skip as e:
         res['status'], res['message'] = 'skipped', str(e)
     except Failure as e:
@@ -1747,11 +1783,13 @@ def parse_args():
                    help='keep the output pixels Terrain-Correction mixed with no-data '
                         '(1 or 2 pixels from it; biased low)')
     p.add_argument('--delete-intermediates', action='store_true',
-                   help='after a dataset is finished, delete its intermediate SNAP '
-                        'products (the final one is kept) and the PALSAR-2 format copy '
-                        'of ALOS-4 data')
+                   help='delete each intermediate product as soon as the next step no '
+                        'longer needs it (the PALSAR-2 format copy of ALOS-4 data once '
+                        '01_CalMtxMlk is made, each step product once the next one is); '
+                        'the final product is kept')
     p.add_argument('--delete-intermediates-only', action='store_true',
-                   help='only delete intermediate products of finished datasets; process nothing')
+                   help='only delete what the remaining steps no longer need, in every '
+                        'dataset (finished or not); process nothing')
     p.add_argument('--redo', action='store_true',
                    help="delete this script's outputs for each dataset and process it again")
     p.add_argument('--dry-run', action='store_true',
@@ -1805,12 +1843,12 @@ def main():
                 if ds.get('convert') else ''))
 
     if a.delete_intermediates_only:
+        # finished or not: only what the remaining steps no longer need goes
+        # (do not run this while another run is processing the same folder)
         for ds in runnable:
             old = read_json(os.path.join(ds['path'], SETTINGS_NAME))
-            done = [d for d in export_dirs(ds['path'])
-                    if os.path.basename(d).split('_')[1:] == [ds['mission'], ds['mode']]]
-            if old is None or not done:
-                print('  %-28s not finished: left alone' % ds['name'])
+            if old is None:
+                print('  %-28s not processed yet: left alone' % ds['name'])
                 continue
             removed = delete_intermediates(ds['path'], plan_steps(ds['mode'], old), old)
             print('  %-28s %s' % (ds['name'], 'deleted ' + ', '.join(removed)
