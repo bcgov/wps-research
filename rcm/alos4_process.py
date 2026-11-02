@@ -116,6 +116,12 @@ Stopping and resuming
     succeeds and the output checks out, so any output that exists is
     complete. Leftover ".partial_*" folders are deleted on the next run.
     Do not run two copies on the same folder at the same time.
+    The options a dataset was processed with are saved in
+    alos_polsar_settings.json. If a later run asks for different processing
+    options, that dataset fails with a message instead of mixing outputs;
+    --redo deletes this script's outputs for each dataset and starts again
+    (if a --redo run is stopped, carry on without --redo; datasets it had
+    not reached yet keep their earlier outputs).
 
 --delete-intermediates
     Deletes each intermediate as soon as nothing still to be done needs it:
@@ -126,12 +132,33 @@ Stopping and resuming
     earlier runs left. A step is only deleted after the step that reads it
     has finished, so stopping at any point loses at most the step running.
     --delete-intermediates-only does the same deleting without processing.
-    The options a dataset was processed with are saved in
-    alos_polsar_settings.json. If a later run asks for different processing
-    options, that dataset fails with a message instead of mixing outputs;
-    --redo deletes this script's outputs for each dataset and starts again
-    (if a --redo run is stopped, carry on without --redo; datasets it had
-    not reached yet keep their earlier outputs).
+
+Warp (at the end of every run; --no-warp turns it off)
+    Puts every finished output (from this run and earlier ones) on one
+    common grid for a time series, in ./warp/ (this was alos4_warp.py):
+        <name>/            the bands on the reference grid, ENVI .bin/.hdr,
+                           no-data = NaN; rgb/ RGB stack + PNG preview;
+                           warp.json (source, reference, resampling)
+        <name>.png         copy of each PNG preview
+        sequence_quad.gif  quad-pol previews in date order (T22, T33, T11)
+        sequence_dual.gif  dual-pol previews in date order (C11, C22, |C12|)
+        reference.txt      which dataset defines the grid
+        alos4_warp.log     output of the tools that were run
+    The reference is the earliest date, or --warp-ref (a date such as
+    20250622, or a name such as 20250622_ALOS4_quad). Its bands are copied;
+    every other dataset's are resampled onto its grid with
+    py/raster_project_onto.py (GDAL). All outputs are snapped to the same
+    20 m grid, so the default nearest-neighbour resampling only moves whole
+    pixels and keeps values unchanged; datasets not on the reference's grid
+    are reported (--warp-bilinear may suit those better). Quad-pol and
+    dual-pol go on the same grid but are animated separately. Two datasets
+    with the same name (same date, mission and mode) are an error.
+    Resumable like the rest: finished ones are skipped, unless the dataset
+    was processed again since or the resampling changed; if the reference
+    changes (e.g. an earlier date was processed since), ./warp/ is made
+    again from the start (--warp-ref keeps the old reference). It runs even
+    when some datasets failed, on the ones that are finished.
+    --warp-only does just this step.
 
 Usage (run from the folder that holds the dataset folders)
     python3 alos4_process.py                    # all defaults
@@ -141,10 +168,13 @@ Usage (run from the folder that holds the dataset folders)
     python3 alos4_process.py --delete-intermediates
     python3 alos4_process.py --delete-intermediates-only
     python3 alos4_process.py --redo
+    python3 alos4_process.py --no-warp          # skip the warp at the end
+    python3 alos4_process.py --warp-only --warp-ref 20250622
     python3 alos4_process.py -h                 # all options
 
 Needs (as the older rcm scripts do): wps-research/py on the same checkout
-(misc.py, snap2psp_inplace.py, raster_stack.py, raster_plot.py) and the
+(misc.py, snap2psp_inplace.py, raster_stack.py, raster_plot.py,
+raster_project_onto.py) and the
 wps-research C++ tools sbo_inplace.exe, convert_iq_to_cplx and abs on the
 PATH (or compiled in wps-research/cpp). Exit code 0 when nothing failed.
 """
@@ -166,6 +196,7 @@ import traceback
 import subprocess
 import multiprocessing
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from xml.sax.saxutils import escape
 
 sep = os.path.sep
@@ -1799,6 +1830,17 @@ def parse_args():
                    help='read ALOS-4 data with SNAP\'s own ALOS-4 reader instead of converting '
                         'it to PALSAR-2 format first (only once SNAP has the fix for GitHub '
                         'senbox-org/microwave-toolbox issue #154)')
+    p.add_argument('--no-warp', action='store_true',
+                   help='do not put the finished outputs on one common grid (in ./warp/) '
+                        'at the end')
+    p.add_argument('--warp-only', action='store_true',
+                   help='only do the warp step (on the outputs finished so far); '
+                        'process nothing')
+    p.add_argument('--warp-ref', default=None,
+                   help='warp reference: a date (YYYYMMDD) or a name such as '
+                        '20250622_ALOS4_quad (default: the earliest)')
+    p.add_argument('--warp-bilinear', action='store_true',
+                   help='warp with bilinear instead of nearest-neighbour resampling')
     a = p.parse_args()
     if a.jobs < 1:
         p.error('--jobs must be 1 or more')
@@ -1813,7 +1855,237 @@ def parse_args():
         p.error('--tf-beta0-correction only applies with Terrain-Flattening (drop --no-tf)')
     if a.redo and a.delete_intermediates_only:
         p.error('--redo and --delete-intermediates-only do not go together')
+    if a.no_warp and a.warp_only:
+        p.error('--no-warp and --warp-only do not go together')
     return a
+
+
+# ---------------------------------------------------------------------------
+# Warp: all finished exports onto one common grid (was alos4_warp.py)
+# ---------------------------------------------------------------------------
+WARP_DIR = 'warp'
+WARP_LOG = 'alos4_warp.log'
+GIF_DELAY = 111                                 # hundredths of a second per frame
+
+
+def warp_collect():
+    """Finished exports of every dataset folder here, sorted by name."""
+    datasets, _ = find_datasets('.')
+    entries, unfinished = [], []
+    for ds in datasets:
+        dirs = export_dirs(ds['path'])
+        if not dirs:
+            unfinished.append(ds['name'])
+        for d in dirs:
+            name = os.path.basename(d)
+            date, mission, mode = name.split('_')
+            missing = [b for b in BANDS[mode] if not os.path.isfile(os.path.join(d, b + '.bin'))]
+            if missing:
+                print('WARNING: %s/%s lacks %s: left out of the warp' % (
+                    ds['name'], name, ', '.join(missing)))
+                continue
+            entries.append({'name': name, 'date': date, 'mission': mission, 'mode': mode,
+                            'dataset': ds['name'], 'dir': d,
+                            'ref_band': os.path.join(d, DIAG[mode][0] + '.bin')})
+    entries.sort(key=lambda e: e['name'])
+    return entries, unfinished
+
+
+def warp_grid(path):
+    from osgeo import gdal
+    gdal.UseExceptions()
+    try:
+        g = gdal.Open(path)
+    except RuntimeError as e:
+        raise Failure('GDAL cannot open %s (%s)' % (path, e))
+    return g.GetGeoTransform(), g.GetProjection(), g.RasterXSize, g.RasterYSize
+
+
+def warp_same_grid(gt, wkt, ref_gt, ref_wkt):
+    """True if a raster's pixels coincide with the reference's pixels."""
+    from osgeo import osr
+    if not wkt or not ref_wkt:
+        return False
+    a, b = osr.SpatialReference(), osr.SpatialReference()
+    a.ImportFromWkt(wkt)
+    b.ImportFromWkt(ref_wkt)
+    if not a.IsSame(b):
+        return False
+    px, py = ref_gt[1], ref_gt[5]
+    if gt[2] != 0 or gt[4] != 0 or ref_gt[2] != 0 or ref_gt[4] != 0:
+        return False
+    if abs(gt[1] - px) > 1e-6 * abs(px) or abs(gt[5] - py) > 1e-6 * abs(py):
+        return False
+    for off, step in ((gt[0] - ref_gt[0], px), (gt[3] - ref_gt[3], py)):
+        k = off / step
+        if abs(k - round(k)) > 1e-3:
+            return False
+    return True
+
+
+def warp_outputs(ref_choice, bilinear, tools, env):
+    """Copy the reference export and resample every other finished export
+    onto its grid, in ./warp/. Returns a list of (name, problem)."""
+    print('\nwarp: putting every finished output on one common grid in %s/' % WARP_DIR)
+    entries, unfinished = warp_collect()
+    if unfinished:
+        print('left out (no finished output: not processed, failed or skipped): %s' %
+              ', '.join(unfinished))
+    if not entries:
+        print('warp: no finished outputs yet: nothing to do')
+        return []
+    names = [e['name'] for e in entries]
+    dups = sorted(set(n for n in names if names.count(n) > 1))
+    if dups:
+        return [('warp', 'more than one dataset is called %s (folders: %s); one observation '
+                 'per date is assumed: move one of them aside' % (', '.join(dups), ', '.join(
+                     e['dataset'] for e in entries if e['name'] in dups)))]
+    if ref_choice:
+        m = [e for e in entries if ref_choice in (e['name'], e['date'])]
+        if len(m) != 1:
+            return [('warp', '--warp-ref %s matches %d datasets (%s); use a full name' % (
+                ref_choice, len(m), ', '.join(e['name'] for e in m) or 'none'))]
+        ref = m[0]
+    else:
+        ref = entries[0]
+
+    out = os.path.abspath(WARP_DIR)
+    rt = os.path.join(out, 'reference.txt')
+    if os.path.isfile(rt):
+        old = open(rt).read().split()
+        if old and old[0] != ref['name']:
+            # e.g. an earlier date was processed since: every output must move
+            print('the reference was %s, now it is %s: making %s/ again from the start '
+                  '(use --warp-ref %s to keep the old reference)' % (
+                      old[0], ref['name'], WARP_DIR, old[0]))
+            remove_path(out)
+    os.makedirs(out, exist_ok=True)
+    if not os.path.isfile(rt):
+        write_text(rt, '%s\n%s\n' % (ref['name'], os.path.relpath(ref['dir'])))
+    for n in os.listdir(out):
+        if n.startswith(PARTIAL):
+            remove_path(os.path.join(out, n))
+    project = os.path.join(misc.pd, 'raster_project_onto.py')
+    ctx = {'python': sys.executable, 'tools': tools, 'env': env}
+
+    ref_gt, ref_wkt, ref_w, ref_h = warp_grid(ref['ref_band'])
+    print('reference: %s (%s), %d x %d pixels of %g m' % (
+        ref['name'], ref['dataset'], ref_w, ref_h, abs(ref_gt[1])))
+    if not ref_wkt:
+        print('WARNING: GDAL finds no map projection for %s' % ref['ref_band'])
+    off_grid = []
+    for e in entries:
+        gt, wkt, _, _ = warp_grid(e['ref_band'])
+        if not warp_same_grid(gt, wkt, ref_gt, ref_wkt):
+            off_grid.append(e['name'])
+    if off_grid:
+        print('WARNING: not on the reference grid (values will be resampled%s): %s' % (
+            '' if bilinear else '; consider --warp-bilinear', ', '.join(off_grid)))
+
+    log = open(os.path.join(out, WARP_LOG), 'a', buffering=1)
+    log.write('\n[%s] warp, reference %s\n' % (now_str(), ref['name']))
+    resampling = 'bilinear' if bilinear else 'nearest neighbour'
+    done, failed = [], []
+    for e in entries:
+        target = os.path.join(out, e['name'])
+        source_made = (read_json(os.path.join(e['dir'], 'processing.json')) or {}).get('made')
+        if os.path.isdir(target):
+            w = read_json(os.path.join(target, 'warp.json')) or {}
+            if w.get('source_made') == source_made and w.get('resampling') == resampling:
+                print('  %-24s already done' % e['name'])
+                done.append(e)
+                continue
+            # the dataset was processed again since, or other resampling asked for
+            print('  %-24s out of date: making it again' % e['name'])
+            remove_path(target)
+        print('  %-24s %s ...' % (e['name'], 'copying (reference)' if e is ref else
+                                  'resampling (%s)' % resampling), flush=True)
+        staging = os.path.join(out, '%s%s.%d' % (PARTIAL, e['name'], os.getpid()))
+        remove_path(staging)
+        os.makedirs(staging)
+        try:
+            bands = BANDS[e['mode']]
+            if e is ref:
+                for b in bands:
+                    for ext in ('.bin', '.hdr'):
+                        shutil.copy2(os.path.join(e['dir'], b + ext),
+                                     os.path.join(staging, b + ext))
+            else:
+                cmds = [[sys.executable, project, os.path.join(e['dir'], b + '.bin'),
+                         ref['ref_band'], os.path.join(staging, b + '.bin')] +
+                        ([] if bilinear else ['nearest']) for b in bands]
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    rcs = list(pool.map(lambda c: run_logged(c, log, env=env), cmds))
+                bad = [b for b, rc in zip(bands, rcs) if rc != 0 or not os.path.isfile(
+                    os.path.join(staging, b + '.bin'))]
+                if bad:
+                    raise Failure('raster_project_onto.py failed for %s (see %s/%s)' % (
+                        ', '.join(bad), WARP_DIR, WARP_LOG))
+            n_valid, n_all = nan_mask_and_save(staging, e['mode'], ref_w, ref_h)
+            png = make_rgb(staging, e['name'], e['mode'], ctx, log)
+            write_json(os.path.join(staging, 'warp.json'), {
+                'script': 'alos4_process.py ' + SCRIPT_VERSION, 'made': now_str(),
+                'source': os.path.relpath(e['dir']), 'source_made': source_made,
+                'reference': ref['name'], 'reference_folder': os.path.relpath(ref['dir']),
+                'copied_not_resampled': e is ref, 'resampling': resampling,
+                'on_reference_grid': e['name'] not in off_grid,
+                'size_pixels': [ref_w, ref_h], 'valid_pixels': n_valid,
+                'all_pixels': n_all, 'no_data': 'NaN',
+                'png': os.path.relpath(png, staging)})
+            os.rename(staging, target)
+            done.append(e)
+            if n_valid == 0:
+                print('  %-24s WARNING: no overlap with the reference' % e['name'])
+        except (Failure, OSError) as x:
+            remove_path(staging)
+            failed.append((e['name'], str(x)))
+            print('  %-24s FAILED: %s' % (e['name'], x))
+        except BaseException:
+            remove_path(staging)
+            raise
+
+    # PNG copies and one animation per polarisation mode (the colours differ)
+    for e in done:
+        png = os.path.join(out, e['name'], 'rgb', e['name'] + '_rgb.bin_1_2_3_rgb.png')
+        if os.path.isfile(png):
+            shutil.copy2(png, os.path.join(out, e['name'] + '.png'))
+    convert = shutil.which('convert') or shutil.which('magick')
+    for mode in ('quad', 'dual'):
+        pngs = [os.path.join(out, e['name'] + '.png') for e in done
+                if e['mode'] == mode and os.path.isfile(os.path.join(out, e['name'] + '.png'))]
+        gif = os.path.join(out, 'sequence_%s.gif' % mode)
+        if len(pngs) < 2:
+            continue
+        if not convert:
+            print('ImageMagick (convert) not found: no %s' % os.path.basename(gif))
+            continue
+        tmp = os.path.join(out, '.tmp_sequence_%s.gif' % mode)
+        if run_logged([convert, '-delay', str(GIF_DELAY)] + pngs + [tmp], log) == 0 \
+                and os.path.isfile(tmp):
+            os.replace(tmp, gif)
+            print('%s: %d frames' % (os.path.relpath(gif), len(pngs)))
+        else:
+            remove_path(tmp)
+            print('making %s failed (see %s/%s)' % (os.path.basename(gif), WARP_DIR, WARP_LOG))
+    log.close()
+    print('warp: %d on the grid of %s in %s/%s' % (
+        len(done), ref['name'], WARP_DIR, ', %d failed' % len(failed) if failed else ''))
+    return failed
+
+
+def run_warp(a):
+    """The warp step with the tools it needs; returns a list of problems."""
+    tools, env, missing = find_tools()
+    missing = [m for m in missing if not m.startswith('sbo_inplace') and
+               not m.endswith('snap2psp_inplace.py')]          # not used by the warp
+    if not os.path.isfile(os.path.join(misc.pd, 'raster_project_onto.py')):
+        missing.append(os.path.join(misc.pd, 'raster_project_onto.py'))
+    if missing:
+        return [('warp', 'missing tools: %s' % ', '.join(missing))]
+    try:
+        return warp_outputs(a.warp_ref, a.warp_bilinear, tools, env)
+    except Failure as e:
+        return [('warp', str(e))]
 
 
 def main():
@@ -1841,6 +2113,12 @@ def main():
                 ds['name'], ds['mission'], ds['mode'], '+'.join(ds['pols']), where,
                 ', %s mode, read via PALSAR-2 format' % ds['p3']['mode']
                 if ds.get('convert') else ''))
+
+    if a.warp_only:
+        problems = run_warp(a)
+        for n, m in problems:
+            print('FAILED %s: %s' % (n, m))
+        return 1 if problems else 0
 
     if a.delete_intermediates_only:
         # finished or not: only what the remaining steps no longer need goes
@@ -1872,10 +2150,17 @@ def main():
                     names.insert(0, 'convert to PALSAR-2 format')
                 plan = ' -> '.join(names + ['export'])
             print('  %-28s %s' % (ds['name'], plan))
+        print('  then: %s' % ('no warp (--no-warp)' if a.no_warp else
+                              'warp every finished output onto one grid in %s/' % WARP_DIR))
         return 0
     if not runnable:
         print('nothing to process')
-        return 0
+        if a.no_warp:
+            return 0
+        problems = run_warp(a)
+        for n, m in problems:
+            print('FAILED %s: %s' % (n, m))
+        return 1 if problems else 0
 
     gpt, version = pick_gpt(a.gpt)
     tools, env, missing = find_tools()
@@ -1919,6 +2204,14 @@ def main():
         interrupted = True
         print('\ninterrupted: run the same command again to carry on')
 
+    warp_problems = []
+    if not interrupted and not a.no_warp:
+        try:
+            warp_problems = run_warp(a)
+        except KeyboardInterrupt:
+            interrupted = True
+            print('\ninterrupted during the warp: run the same command again to carry on')
+
     print('\nsummary (%s):' % fmt_time(time.time() - t0))
     for status in ('done', 'skipped', 'failed'):
         rs = [r for r in results if r['status'] == status]
@@ -1927,9 +2220,16 @@ def main():
             for r in sorted(rs, key=lambda r: r['name']):
                 extra = ('  -> ' + os.path.relpath(r['export'])) if r.get('export') else ''
                 print('    %-28s %s%s' % (r['name'], r['message'], extra))
+    if a.no_warp:
+        print('  warp: off (--no-warp)')
+    elif not interrupted:
+        print('  warp: %s' % ('%d problem(s)' % len(warp_problems) if warp_problems
+                              else 'done (%s/)' % WARP_DIR))
+        for n, m in warp_problems:
+            print('    %-28s %s' % (n, m))
     if interrupted:
         return 130
-    return 1 if any(r['status'] == 'failed' for r in results) else 0
+    return 1 if (any(r['status'] == 'failed' for r in results) or warp_problems) else 0
 
 
 if __name__ == '__main__':
