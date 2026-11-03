@@ -1,19 +1,101 @@
 #!/usr/bin/env python3
-"""raster_to_kmz.py -- convert one or more GeoTIFF (.tif/.tiff) and ENVI
-(.bin + .hdr) rasters into a single KMZ for Google Earth, either as image
-overlays (default) or as footprint outlines only (--footprint).
+"""raster2kmz.py -- put one or more rasters into a KMZ for Google Earth
 
+Converts GeoTIFF (.tif/.tiff) and ENVI (.bin + .hdr) rasters into a single
+KMZ file, either as image overlays (default) or as footprint outlines only.
+
+USAGE
+  python3 raster2kmz.py [options] [INPUT ...]
+
+  INPUT                   raster files and/or directories to convert
+                          (default: the current directory)
+
+  Common uses:
+
+  Image overlays of every raster in the current directory -> rasters.kmz
+      python3 raster2kmz.py
+
+  Footprints (outlines only) of every raster in the current directory
+  -> footprints.kmz
+      python3 raster2kmz.py -f
+
+  Image overlays of every raster in a folder, named output
+      python3 raster2kmz.py /data/scenes -o scenes.kmz
+
+  Footprints of every raster in a folder, named output
+      python3 raster2kmz.py /data/scenes -f -o scene_footprints.kmz
+
+  Image overlays of selected files only
+      python3 raster2kmz.py fire_20260801.tif fire_20260802.bin
+
+  One multi-band stack as true colour (Sentinel-2 stored in band order
+  B1,B2,...: file bands 4,3,2 = red,green,blue)
+      python3 raster2kmz.py S2_stack.bin -b 4,3,2 -o s2_rgb.kmz
+
+  One band of a stack as greyscale (-b counts bands by position in the
+  file, starting at 1; here the 12th band)
+      python3 raster2kmz.py S2_stack.bin -b 12 -o s2_band12.kmz
+
+  Full min-max contrast stretch and larger PNGs (up to 8192 px)
+      python3 raster2kmz.py *.tif --stretch minmax --max-size 8192
+
+OPTIONS
+  -h, --help              show this help and exit
+  -o, --output FILE       output KMZ path (default: rasters.kmz, or
+                          footprints.kmz with --footprint)
+  -n, --name NAME         name shown for the KMZ in Google Earth
+                          (default: output file name without .kmz)
+
+  Footprint mode:
+  -f, --footprint         footprint only: draw the outline of each raster's
+                          extent instead of its image
+  --line-color AABBGGRR   outline colour as 8 hex digits in KML order
+                          alpha,blue,green,red (default: ff0000ff = red;
+                          ff00ffff = yellow, ffffffff = white)
+  --line-width W          outline width in pixels (default: 2)
+
+  Image mode (the default; these are ignored with --footprint):
+  -b, --bands LIST        bands to show, 1-based: one band for greyscale
+                          (e.g. 1) or three for red,green,blue (e.g. 4,3,2);
+                          applied to every input raster
+  -s, --stretch MODE      contrast stretch of each band to 0-255:
+                            percent  clip at the --percent limits (default)
+                            minmax   use the full data range
+                            none     just clip values to 0-255
+  -p, --percent LOW HIGH  percentiles for --stretch percent (default: 2 98)
+  -r, --resample METHOD   resampling when reprojecting: near, bilinear
+                          (default), cubic, average or mode; single-band
+                          colour-table rasters always use near
+  -m, --max-size N        cap on the longest side of each PNG in pixels;
+                          larger rasters are downsampled (default: 4096;
+                          0 = no cap)
+
+NOTES
+  * --footprint draws the outline of each raster's full extent (the
+    rectangle of its pixel grid, including any NoData areas) as an
+    unfilled polygon, reprojected with densified edges so it stays
+    accurate in lat/lon. Clicking an outline in Google Earth shows the
+    file name, size, band count, coordinate system and bounds. Pixel
+    values are not read, so this is fast even for very large files.
+  * ENVI .bin files need a header next to them: name.hdr or name.bin.hdr.
+  * Rasters can be in any projection; they are reprojected to WGS84
+    lat/lon (EPSG:4326), which is what KML requires.
+  * NoData pixels (as declared in the file) and NaN pixels are transparent.
+  * Band selection when --bands is not given: a 3- or 4-band raster is
+    shown as RGB from bands 1,2,3; anything else is shown as greyscale
+    band 1. A single band with a colour table keeps its colours.
+  * Requires GDAL's Python bindings (osgeo) and numpy.
+
+CHANGE HISTORY
 20260115 original (as rasters_to_kmz.py): convert all .tif and .bin raster
          files in present directory into a KMZ file
 20261103 added --help / command-line options and fixed bugs (see FIXES below)
-20261103 renamed to raster_to_kmz.py; added -f / --footprint (outline of each
-         raster's extent, no imagery)
-
-Run with -h or --help for usage. With no arguments it behaves as before:
-every .tif/.tiff/.bin raster in the current directory goes into rasters.kmz.
+20261103 renamed raster2kmz.py; added -f / --footprint (outline of each
+         raster's extent, no imagery); usage moved to the top of the file,
+         and -h now prints exactly the text above CHANGE HISTORY
 
 FIXES (20261103)
-  1. Shebang was below the module docstring, so ./raster_to_kmz.py would not
+  1. Shebang was below the module docstring, so ./raster2kmz.py would not
      run directly; it is now on line 1.
   2. Latitude/longitude were swapped with GDAL >= 3: EPSG:4326 uses lat,lon axis
      order unless the traditional GIS order (lon,lat) is requested, so the
@@ -113,92 +195,40 @@ FOOTPRINT_TEMPLATE = """    <Placemark>
       </Polygon>
     </Placemark>"""
 
-USAGE_EXAMPLES = """
-examples:
-  python3 raster_to_kmz.py
-      every .tif/.tiff/.bin in the current directory -> rasters.kmz
+# The help text is the top of this file (the module docstring, down to
+# CHANGE HISTORY), so the file header and -h output are always identical.
+HELP_TEXT = (__doc__ or 'See the top of raster2kmz.py for usage.'
+             ).split('CHANGE HISTORY')[0].rstrip() + '\n'
 
-  python3 raster_to_kmz.py --footprint
-      outlines of every raster's extent in the current directory, no
-      imagery -> footprints.kmz
 
-  python3 raster_to_kmz.py /data/scenes -f -o scene_footprints.kmz
-      outlines of every raster in /data/scenes -> scene_footprints.kmz
+class _HelpAction(argparse.Action):
+    def __init__(self, option_strings, dest, **kw):
+        super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS)
 
-  python3 raster_to_kmz.py /data/scenes -o scenes.kmz
-      every raster in /data/scenes as image overlays -> scenes.kmz
-
-  python3 raster_to_kmz.py S2_stack.bin -b 4,3,2 -o s2_rgb.kmz
-      one Sentinel-2 ENVI stack, bands 4,3,2 as red,green,blue
-
-  python3 raster_to_kmz.py --stretch minmax --max-size 8192 *.tif
-      full min-max stretch, allow PNGs up to 8192 pixels on the long side
-
-notes:
-  * --footprint draws the outline of each raster's full extent (the
-    rectangle of its pixel grid, including any NoData areas) as an
-    unfilled polygon, reprojected with densified edges so it stays
-    accurate in lat/lon. Clicking an outline in Google Earth shows the
-    file name, size, band count, coordinate system and bounds. Pixel
-    values are not read, so this is fast even for very large files.
-    The image options (--bands, --stretch, --percent, --resample,
-    --max-size) are ignored in this mode.
-  * ENVI .bin files need a header next to them: name.hdr or name.bin.hdr.
-  * Rasters can be in any projection; they are reprojected to WGS84
-    lat/lon (EPSG:4326), which is what KML ground overlays require.
-  * NoData pixels (as declared in the file) and NaN pixels are transparent.
-  * Band selection when --bands is not given: a 3- or 4-band raster is
-    shown as RGB from bands 1,2,3; anything else is shown as greyscale
-    band 1. A single band with a colour table keeps its colours.
-"""
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(HELP_TEXT)
+        parser.exit()
 
 
 def parse_args(argv=None):
-    """Command-line options. -h / --help prints the help text."""
+    """Command-line options (documented at the top of this file)."""
     p = argparse.ArgumentParser(
-        prog='raster_to_kmz.py',
-        description='Convert one or more GeoTIFF (.tif/.tiff) and ENVI (.bin + .hdr) '
-                    'rasters into one KMZ for Google Earth: image overlays by '
-                    'default, or footprint outlines only with --footprint.',
-        epilog=USAGE_EXAMPLES,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('inputs', nargs='*', default=['.'],
-                   help='raster files and/or directories to convert '
-                        '(default: the current directory)')
-    p.add_argument('-o', '--output', default=None,
-                   help='output KMZ path (default: rasters.kmz, or '
-                        'footprints.kmz with --footprint)')
-    p.add_argument('-f', '--footprint', action='store_true',
-                   help='footprint only: write the outline of each raster\'s '
-                        'extent instead of its image')
-    p.add_argument('--line-color', default='ff0000ff', metavar='AABBGGRR',
-                   help='footprint outline colour in KML hex order '
-                        'alpha,blue,green,red (default: ff0000ff = opaque red; '
-                        'ff00ffff = yellow, ffffffff = white)')
-    p.add_argument('--line-width', type=float, default=2.0,
-                   help='footprint outline width in pixels (default: 2)')
-    p.add_argument('-b', '--bands', default=None,
-                   help='bands to display, 1-based: one band for greyscale '
-                        '(e.g. "1") or three for red,green,blue (e.g. "4,3,2"). '
-                        'Applied to every input raster.')
+        prog='raster2kmz.py', add_help=False,
+        usage='python3 raster2kmz.py [options] [INPUT ...]   (-h for help)')
+    p.add_argument('-h', '--help', action=_HelpAction)
+    p.add_argument('inputs', nargs='*', default=['.'])
+    p.add_argument('-o', '--output', default=None)
+    p.add_argument('-n', '--name', default=None)
+    p.add_argument('-f', '--footprint', action='store_true')
+    p.add_argument('--line-color', default='ff0000ff')
+    p.add_argument('--line-width', type=float, default=2.0)
+    p.add_argument('-b', '--bands', default=None)
     p.add_argument('-s', '--stretch', choices=['percent', 'minmax', 'none'],
-                   default='percent',
-                   help='contrast stretch to 0-255 per band: "percent" clips at '
-                        'the --percent limits (default), "minmax" uses the full '
-                        'data range, "none" just clips values to 0-255')
-    p.add_argument('-p', '--percent', nargs=2, type=float, metavar=('LOW', 'HIGH'),
-                   default=[2.0, 98.0],
-                   help='percentiles for --stretch percent (default: 2 98)')
+                   default='percent')
+    p.add_argument('-p', '--percent', nargs=2, type=float, default=[2.0, 98.0])
     p.add_argument('-r', '--resample', default='bilinear',
-                   choices=['near', 'bilinear', 'cubic', 'average', 'mode'],
-                   help='resampling used when reprojecting (default: bilinear; '
-                        'single-band colour-table rasters always use near)')
-    p.add_argument('-m', '--max-size', type=int, default=4096,
-                   help='cap on the longest side of each PNG in pixels; larger '
-                        'rasters are downsampled (default: 4096; 0 = no cap)')
-    p.add_argument('-n', '--name', default=None,
-                   help='name shown for the KMZ in Google Earth '
-                        '(default: output file name without .kmz)')
+                   choices=['near', 'bilinear', 'cubic', 'average', 'mode'])
+    p.add_argument('-m', '--max-size', type=int, default=4096)
     args = p.parse_args(argv)
     if args.output is None:
         args.output = 'footprints.kmz' if args.footprint else 'rasters.kmz'
@@ -484,7 +514,7 @@ def create_kmz(rasters, args):
     print(f"\nFound {len(rasters)} raster file(s)")
     print(f"Creating {output_kmz}...\n")
 
-    temp_dir = tempfile.mkdtemp(prefix='raster_to_kmz_')
+    temp_dir = tempfile.mkdtemp(prefix='raster2kmz_')
     files_dir = os.path.join(temp_dir, 'files')
     os.makedirs(files_dir)
     overlays, png_files, used = [], [], set()
