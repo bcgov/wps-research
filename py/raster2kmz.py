@@ -7,37 +7,17 @@ KMZ file, either as image overlays (default) or as footprint outlines only.
 USAGE
   python3 raster2kmz.py [options] [INPUT ...]
 
+  python3 raster2kmz.py                          # images of every raster here -> rasters.kmz
+  python3 raster2kmz.py -f                       # footprints (outlines) only -> footprints.kmz
+  python3 raster2kmz.py dir/ -o out.kmz          # images of every raster in a folder
+  python3 raster2kmz.py dir/ -f -o out.kmz       # footprints of every raster in a folder
+  python3 raster2kmz.py a.tif b.bin              # images of selected files only
+  python3 raster2kmz.py stack.bin -b 4,3,2       # RGB from file bands 4,3,2 (S2 true colour)
+  python3 raster2kmz.py stack.bin -b 12          # greyscale from the 12th band in the file
+  python3 raster2kmz.py *.tif -s minmax -m 8192  # min-max stretch, PNGs up to 8192 px
+
   INPUT                   raster files and/or directories to convert
                           (default: the current directory)
-
-  Common uses:
-
-  Image overlays of every raster in the current directory -> rasters.kmz
-      python3 raster2kmz.py
-
-  Footprints (outlines only) of every raster in the current directory
-  -> footprints.kmz
-      python3 raster2kmz.py -f
-
-  Image overlays of every raster in a folder, named output
-      python3 raster2kmz.py /data/scenes -o scenes.kmz
-
-  Footprints of every raster in a folder, named output
-      python3 raster2kmz.py /data/scenes -f -o scene_footprints.kmz
-
-  Image overlays of selected files only
-      python3 raster2kmz.py fire_20260801.tif fire_20260802.bin
-
-  One multi-band stack as true colour (Sentinel-2 stored in band order
-  B1,B2,...: file bands 4,3,2 = red,green,blue)
-      python3 raster2kmz.py S2_stack.bin -b 4,3,2 -o s2_rgb.kmz
-
-  One band of a stack as greyscale (-b counts bands by position in the
-  file, starting at 1; here the 12th band)
-      python3 raster2kmz.py S2_stack.bin -b 12 -o s2_band12.kmz
-
-  Full min-max contrast stretch and larger PNGs (up to 8192 px)
-      python3 raster2kmz.py *.tif --stretch minmax --max-size 8192
 
 OPTIONS
   -h, --help              show this help and exit
