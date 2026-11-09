@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
-20261102 alos4_process.py
+20261109 alos4_process.py
 
 Polarimetric processing of ALOS-2 (PALSAR-2) and ALOS-4 (PALSAR-3) Level 1.1
-stripmap data (CEOS format, from JAXA or EODMS) with ESA SNAP's command-line
-tool gpt, SNAP 14 or newer. Quad-pol data become the 3x3 coherency matrix
-(T3); dual-pol data the 2x2 covariance matrix (C2). Replaces
+stripmap data (CEOS format, from JAXA or EODMS), and of SAOCOM-1A/1B (CONAE)
+Level 1A quad-pol stripmap SLC data, with ESA SNAP's command-line tool gpt,
+SNAP 14 or newer. Quad-pol data become the 3x3 coherency matrix (T3);
+dual-pol data the 2x2 covariance matrix (C2). Replaces
 alos2_dualpol_process.py and alos2_quadpol_process.py (both left unchanged).
 
 Which folders are processed
-    Every folder in the present working directory that has a VOL-ALOS2* or
-    VOL-ALOS4* file directly inside it. There is no recursive search. One
-    exception, for ALOS-2 data from EODMS: a folder X whose data sit one level
-    down in X/X/ (the layout py/shallow.py flattens) is processed in X/X/.
-    Hidden folders (e.g. ".20250622.partial" left by alos4_unzip.py) are ignored.
+    Every folder in the present working directory that has, directly inside
+    it, a VOL-ALOS2* or VOL-ALOS4* file (ALOS), or a SAOCOM product file
+    S1A_*.xemt / S1B_*.xemt (with its extracted product folder of the same
+    name, holding Data/slc-...-hh/-hv/-vh/-vv, or the .zip next to it).
+    There is no recursive search. One exception, for ALOS-2 data from EODMS:
+    a folder X whose data sit one level down in X/X/ (the layout
+    py/shallow.py flattens) is processed in X/X/. Hidden folders (e.g.
+    ".20250622.partial" left by alos4_unzip.py) are ignored.
 
-    Skipped and reported: ScanSAR (several image files per polarisation),
-    Spotlight, single-pol, and anything that is not complex (Level 1.1) data.
+    Skipped and reported: ScanSAR / TOPSAR (several image files per
+    polarisation), Spotlight, single-pol, SAOCOM other than quad-pol, and
+    anything that is not complex (Level 1.1 / 1A SLC) data.
+
+    SAOCOM data are read by SNAP's own SAOCOM reader (no conversion) and go
+    through the same chain as ALOS quad-pol data; outputs are labelled
+    SAOCOM (e.g. 20260905_SAOCOM_quad) and credited to CONAE.
 
 ALOS-4: converted to PALSAR-2 format first
     SNAP 14.0.0-14.0.2 misreads ALOS-4 (PALSAR-3) metadata (see Metadata
@@ -218,9 +227,12 @@ import misc                                   # wps-research/py/misc.py
 from misc import find_snap, err
 import numpy as np
 
-SCRIPT_VERSION = '20261102'
+SCRIPT_VERSION = '20261109'
 
 VOL_PREFIXES = ('VOL-ALOS2', 'VOL-ALOS4')
+SAOCOM_PREFIXES = ('S1A_', 'S1B_')                # SAOCOM-1A / -1B product files (.xemt)
+MISSIONS = ('ALOS2', 'ALOS4', 'SAOCOM')
+DATA_CREDIT = {'ALOS2': 'JAXA', 'ALOS4': 'JAXA', 'SAOCOM': 'CONAE'}
 POLS = ('HH', 'HV', 'VH', 'VV')
 BANDS = {'quad': ['T11', 'T12_real', 'T12_imag', 'T13_real', 'T13_imag',
                   'T22', 'T23_real', 'T23_imag', 'T33'],
@@ -340,7 +352,7 @@ def is_export_name(name):
     """True for names like 20250622_ALOS4_quad (no regular expressions)."""
     parts = name.split('_')
     return (len(parts) == 3 and len(parts[0]) == 8 and parts[0].isdigit() and
-            parts[1] in ('ALOS2', 'ALOS4') and parts[2] in ('quad', 'dual'))
+            parts[1] in MISSIONS and parts[2] in ('quad', 'dual'))
 
 
 def export_dirs(path):
@@ -379,15 +391,26 @@ def vol_files_in(d):
             if n.startswith(VOL_PREFIXES) and os.path.isfile(os.path.join(d, n))]
 
 
+def saocom_files_in(d):
+    """SAOCOM product files (S1A_*.xemt / S1B_*.xemt) directly inside d."""
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return []
+    return [n for n in names if n.startswith(SAOCOM_PREFIXES) and n.endswith('.xemt')
+            and os.path.isfile(os.path.join(d, n))]
+
+
 def find_datasets(root='.'):
     """Folders in root with a VOL-ALOS2*/VOL-ALOS4* file directly inside
-    (or, EODMS layout, inside X/X/). Returns (datasets, ignored_names)."""
+    (or, EODMS layout, inside X/X/), or a SAOCOM S1A_/S1B_*.xemt file
+    directly inside. Returns (datasets, ignored_names)."""
     datasets, ignored = [], []
     for name in sorted(os.listdir(root)):
         p = os.path.join(root, name)
         if name.startswith('.') or not os.path.isdir(p):
             continue
-        path, vols = p, vol_files_in(p)
+        path, vols = p, vol_files_in(p) or saocom_files_in(p)
         if not vols:
             inner = os.path.join(p, name)
             if os.path.isdir(inner):
@@ -406,8 +429,11 @@ def classify(ds, convert_alos4=True):
     """Fill in mission, polarisations and mode from the file names alone.
     Returns None if the dataset can be processed, else a reason to skip."""
     if len(ds['vols']) > 1:
-        return 'more than one VOL file: %s' % ', '.join(ds['vols'])
+        return 'more than one product file: %s' % ', '.join(ds['vols'])
+    if ds['vol'].endswith('.xemt'):
+        return classify_saocom(ds)
     ds['mission'] = 'ALOS2' if ds['vol'].startswith('VOL-ALOS2') else 'ALOS4'
+    ds['obs_mode'] = obs_mode(ds['vol'])
     counts = {}
     for n in sorted(os.listdir(ds['path'])):
         if n.startswith('IMG-') and os.path.isfile(os.path.join(ds['path'], n)):
@@ -435,6 +461,37 @@ def classify(ds, convert_alos4=True):
     ds['convert'] = ds['mission'] == 'ALOS4' and convert_alos4
     if ds['convert']:
         return p3_plan(ds)
+    return None
+
+
+def classify_saocom(ds):
+    """SAOCOM (CONAE) Level 1A SLC: <dataset>/<product>.xemt, read by SNAP
+    together with <dataset>/<product>/Data/slc-...-hh (and -hv, -vh, -vv)
+    or, if that folder is missing, <dataset>/<product>.zip. Quad-pol
+    stripmap is assumed, and checked where the Data folder is there."""
+    ds['mission'] = 'SAOCOM'
+    ds['convert'] = False
+    product = ds['vol'][:-len('.xemt')]
+    data = os.path.join(ds['path'], product, 'Data')
+    zipped = os.path.isfile(os.path.join(ds['path'], product + '.zip'))
+    ds['pols'], ds['mode'], ds['obs_mode'] = list(POLS), 'quad', '?'
+    if not os.path.isdir(data):
+        if not zipped:
+            return 'no %s/Data folder and no %s.zip next to %s' % (product, product, ds['vol'])
+        return None                             # SNAP reads the zip; checked by the probe
+    slc = [n for n in sorted(os.listdir(data)) if n.startswith('slc-') and '.' not in n]
+    pols = sorted(set(n.rsplit('-', 1)[-1].upper() for n in slc))
+    if sorted(pols) != sorted(POLS):
+        return 'SAOCOM data files have polarisations %s; only quad-pol is processed' % (
+            ', '.join(pols) or 'none')
+    if len(slc) != 4:
+        return ('%d SLC data files (several beams or bursts, as in TOPSAR); only quad-pol '
+                'stripmap is processed' % len(slc))
+    # slc-acqId0002029907-b-sm7-2609052309-s7qp-hh: beam "sm7" (stripmap, beam 7)
+    beam = slc[0].split('-')[3] if len(slc[0].split('-')) > 3 else '?'
+    if not beam.startswith('sm'):
+        return 'beam %s: only stripmap (sm1 ... sm10) is processed' % beam
+    ds['obs_mode'] = beam.upper()
     return None
 
 
@@ -1156,7 +1213,7 @@ def pass_hints(ds):
             hints.append((ds['vol'] + ' (last letter)', 'ASCENDING'))
         elif ds['vol'].endswith('__D'):
             hints.append((ds['vol'] + ' (last letter)', 'DESCENDING'))
-    else:
+    elif ds['mission'] == 'ALOS4':
         # ALOS-4 names: orbit direction after the look direction, e.g. HBQ-RD0606
         # (character 27 of the VOL name; JAXA's P3toP2snap code reads it there)
         node = ds['vol'][27:28]
@@ -1186,7 +1243,7 @@ def check_metadata(info, ds, stage):
     if mission != expected:
         problems.append('MISSION is "%s", expected %s' % (mission, expected))
     acq = a.get('ACQUISITION_MODE', '')
-    if acq in ('ScanSAR', 'Spotlight'):
+    if acq in ('ScanSAR', 'Spotlight') or acq.startswith('TOPSAR'):
         skip = 'acquisition mode %s: only stripmap is processed' % acq
     if stage == 'probe':
         if a.get('SAMPLE_TYPE', '').upper() != 'COMPLEX':
@@ -1244,6 +1301,9 @@ def scene_from_info(ds, info, scene=None):
                                    'PALSAR-2 format with JAXA\'s P3toP2snap code)'
                                    if ds.get('convert') else ds['vol']),
                   'mission': ds['mission'], 'mode': ds['mode'], 'pols': ds['pols'],
+                  # from the file names; else (SAOCOM read from a zip) SNAP's beam
+                  'obs_mode': (ds.get('obs_mode') if ds.get('obs_mode') not in (None, '?')
+                               else (a.get('BEAMS') or '?').strip() or '?'),
                   'date': t.strftime('%Y%m%d') if t else None,
                   'first_line_time': a.get('first_line_time'),
                   'pass': a.get('PASS'),
@@ -1448,7 +1508,12 @@ def png_labels(prov, warp_ref=None):
     raster_plot.py shows the caption after "(R,G,B) = (...) ©"."""
     sc, st = prov.get('scene', {}), prov.get('settings', {})
     vol = sc.get('vol', '')
-    title = vol[4:] if vol.startswith('VOL-') else (vol or 'unknown product')
+    if vol.startswith('VOL-'):
+        title = vol[4:]
+    elif vol.endswith('.xemt'):                    # SAOCOM product name
+        title = vol[:-len('.xemt')]
+    else:
+        title = vol or 'unknown product'
     t = parse_utc(sc.get('first_line_time'))
     when = t.strftime('%Y-%m-%d %H:%M UTC') if t else sc.get('date', '?')
     year = t.strftime('%Y') if t else ''
@@ -1456,9 +1521,11 @@ def png_labels(prov, warp_ref=None):
     # "(R,G,B) = (T22, T33, T11) ©" included
     direction = {'ASCENDING': 'asc.', 'DESCENDING': 'desc.'}.get(
         (sc.get('pass') or '').upper(), '?')
-    parts = ['JAXA %s' % year if year else 'JAXA',
+    credit = DATA_CREDIT.get(sc.get('mission'), 'JAXA')
+    mode_code = sc.get('obs_mode') or obs_mode(vol)
+    parts = ['%s %s' % (credit, year) if year else credit,
              '%s, %s' % (when, direction),
-             '%s %s-pol' % (obs_mode(vol), sc.get('mode', '?'))]
+             '%s %s-pol' % (mode_code, sc.get('mode', '?'))]
     ml = sc.get('multilook') or {}
     if ml.get('incidence_near_deg') and ml.get('incidence_far_deg'):
         parts.append('inc. %.0f-%.0f°' % (ml['incidence_near_deg'],
@@ -2268,9 +2335,11 @@ def main():
     datasets, ignored = find_datasets('.')
     print('alos4_process.py %s in %s' % (SCRIPT_VERSION, os.getcwd()))
     if ignored:
-        print('folders without a VOL-ALOS2/VOL-ALOS4 file (ignored): %s' % ', '.join(ignored))
+        print('folders without a VOL-ALOS2/VOL-ALOS4 or SAOCOM .xemt file (ignored): %s' %
+              ', '.join(ignored))
     if not datasets:
-        err('no dataset folders (with a VOL-ALOS2* or VOL-ALOS4* file inside) here')
+        err('no dataset folders (with a VOL-ALOS2*, VOL-ALOS4* or SAOCOM S1A_/S1B_*.xemt '
+            'file inside) here')
 
     runnable, results = [], []
     for ds in datasets:
