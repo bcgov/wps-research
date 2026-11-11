@@ -2,7 +2,7 @@
 """jaxa_catalogue.py -- catalogue ALOS-2 / ALOS-4 zip products on all mounted volumes
 
 USAGE
-  python3 jaxa_catalogue.py [--merge | --inspect] [--verify] [--no-qgis] [PATH ...]
+  python3 jaxa_catalogue.py [--merge | --inspect] [--verify] [--include-alos1] [--no-qgis] [PATH ...]
 
   python3 jaxa_catalogue.py                  # scan all volumes -> CSV -> shapefiles -> QGIS
   python3 jaxa_catalogue.py /data /mnt/usb   # scan only these paths (one worker each)
@@ -11,7 +11,15 @@ USAGE
   python3 jaxa_catalogue.py --inspect DIR    # full structure report on the zips in DIR (writes nothing)
   python3 jaxa_catalogue.py --verify         # also CRC-check one copy of every scene (slow: reads all data)
   python3 jaxa_catalogue.py --merge --verify # merge, verifying the copies on this machine
+  python3 jaxa_catalogue.py --include-alos1  # also catalogue ALOS-1 products (left out by default)
   mv JAXA_products_catalogue.csv old.csv     # forces a fresh scan on the next run
+
+ALOS-1 (left out unless --include-alos1)
+  ALOS-1 products (2006-2011) are not catalogued by default. They are
+  recognised by file name (ALOS1 / ALOS-1, or the ALOS-1 product codes ALPSRP,
+  ALAV2, ALPSM) during the search, and by the satellite in their metadata
+  after reading. --merge also drops ALOS-1 rows found in older catalogues.
+  --include-alos1 keeps them all, in the search, the merge and the outputs.
 
 SCENES AND REPRESENTATIVE COPIES
   Copies of a scene are grouped by scene_key (the zip name without extension
@@ -262,6 +270,14 @@ SITE_STOPWORDS = {
     'batch', 'catalog', 'catalogue', 'important', 'bak', 'test', 'sample', 'samples',
     'order', 'orders', 'ftp', 'pub', 'sar', 'esa', 'polsarpro', 'processed', 'output',
 }
+# ALOS-1 (2006-2011) products are left out unless --include-alos1 is given.
+# Recognised by file name (ALOS1 / ALOS-1, or JAXA's ALOS-1 product codes
+# ALPSRP = PALSAR, ALAV2 = AVNIR-2, ALPSM = PRISM) and, after reading, by the
+# satellite named in the metadata.
+INCLUDE_ALOS1 = False                          # set by --include-alos1
+ALOS1_NAME_RE = re.compile(r'(ALOS[-_ ]?1(?!\d)|ALPSRP|ALAV2|ALPSM)', re.I)
+ALOS1_SATELLITES = {'ALOS', 'ALOS1', 'ALOS-1'}
+
 # Folders that name a site without the "<year>_" pattern: folder name
 # (case-insensitive) -> site name.
 FOLDER_SITE_NAMES = {
@@ -440,6 +456,27 @@ def dedupe_entries(entries):
     return [v[1] for v in best.values()]
 
 
+def is_alos1_name(path):
+    return bool(ALOS1_NAME_RE.search(os.path.basename(path)))
+
+
+def is_alos1_row(r):
+    """An ALOS-1 product, by its metadata (satellite) or its file name."""
+    return (r.get('satellite', '').upper() in ALOS1_SATELLITES
+            or is_alos1_name(r.get('zip_path', '')) or is_alos1_name(r.get('product', '')))
+
+
+def drop_alos1(rows, where):
+    """Remove ALOS-1 rows unless --include-alos1 was given."""
+    if INCLUDE_ALOS1:
+        return rows
+    kept = [r for r in rows if not is_alos1_row(r)]
+    if len(kept) < len(rows):
+        log(f"  left out {len(rows) - len(kept)} ALOS-1 product(s) {where} "
+            f"(use --include-alos1 to keep them)")
+    return kept
+
+
 def stage_scan(paths):
     if paths:
         volumes = [(os.path.abspath(p), 'given') for p in paths if os.path.isdir(p)]
@@ -469,6 +506,13 @@ def stage_scan(paths):
             results.append(entries)
 
     joined = [e for lst in results for e in lst]                 # join the lists
+    if not INCLUDE_ALOS1:                                        # ALOS-1 by file name
+        before = len(joined)
+        joined = [e for e in joined
+                  if not is_alos1_name(e if isinstance(e, str) else e[0])]
+        if len(joined) < before:
+            log(f"  left out {before - len(joined)} ALOS-1 product(s) by file name "
+                f"(use --include-alos1 to keep them)")
     unique = dedupe_entries(joined)
     if len(unique) < len(joined):
         log(f"  removed {len(joined) - len(unique)} duplicate(s) seen via other mount points")
@@ -2634,14 +2678,17 @@ def inspect(paths):
 
 def main():
     p = argparse.ArgumentParser(prog='jaxa_catalogue.py', add_help=False,
-                                usage='python3 jaxa_catalogue.py [--merge | --inspect] [--verify] [--no-qgis] [PATH ...]   (-h for help)')
+                                usage='python3 jaxa_catalogue.py [--merge | --inspect] [--verify] [--include-alos1] [--no-qgis] [PATH ...]   (-h for help)')
     p.add_argument('-h', '--help', action=_HelpAction)
     p.add_argument('--no-qgis', action='store_true')
     p.add_argument('--merge', action='store_true')
     p.add_argument('--inspect', action='store_true')
     p.add_argument('--verify', action='store_true')
+    p.add_argument('--include-alos1', action='store_true')
     p.add_argument('paths', nargs='*')
     args = p.parse_args()
+    global INCLUDE_ALOS1
+    INCLUDE_ALOS1 = args.include_alos1
 
     if args.inspect:
         inspect(args.paths)
@@ -2655,7 +2702,7 @@ def main():
         if args.paths:
             log("[WARN] PATH arguments are ignored with --merge (it searches the "
                 "present folder tree for catalogue CSVs)")
-        rows = stage_merge()
+        rows = drop_alos1(stage_merge(), 'from the merged catalogues')
         if not rows:
             sys.exit(1)
     elif os.path.exists(CSV_FILE):
@@ -2670,12 +2717,23 @@ def main():
                          if isinstance(k, str) and isinstance(v, str) and v != ''}
                         for r in csv.DictReader(f)]
             log(f"--verify: checking the copies listed in {CSV_FILE} and updating it")
+            rows = drop_alos1(rows, f'from {CSV_FILE}')
+        else:
+            with open(CSV_FILE, newline='', encoding='utf-8', errors='surrogateescape') as f:
+                n1 = sum(1 for r in csv.DictReader(f) if is_alos1_row(r))
+            if n1 and not INCLUDE_ALOS1:
+                log(f"[WARN] {CSV_FILE} lists {n1} ALOS-1 product(s) from an earlier run; "
+                    f"they stay in the outputs until the catalogue is remade "
+                    f"(rename the CSV and run again)")
     else:
         entries = stage_scan(args.paths)
         if not entries:
             log("[ERROR] no ALOS zip files found; nothing to catalogue")
             sys.exit(1)
-        rows = stage_metadata(entries)
+        rows = drop_alos1(stage_metadata(entries), 'after reading their metadata')
+        if not rows:
+            log("[ERROR] nothing left to catalogue")
+            sys.exit(1)
 
     if rows is not None:
         choose_representatives(rows, verify=args.verify)
