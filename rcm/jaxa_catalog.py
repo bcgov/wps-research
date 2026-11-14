@@ -65,7 +65,7 @@ STATUS COLUMN (one per product; damaged zips are also listed at the end of a run
 MERGE MODE (--merge)
   For combining catalogues made on different machines / file systems: copy
   each machine's JAXA_products_catalogue.csv into its own subfolder of one
-  folder (any depth, e.g. computer/, laptop/usb1/), cd to that folder
+  folder (any depth, e.g. heartofgold/, laptop/usb1/), cd to that folder
   and run with --merge.
   * Exits with an error if JAXA_products_catalogue.csv already exists in
     the present folder, since that is where the merged CSV is written.
@@ -224,6 +224,12 @@ SETTINGS
 
 REQUIREMENTS
   Python 3.8+, POSIX `find`. Stage 2 needs GDAL's Python bindings (osgeo).
+  If those were built for NumPy 1.x but NumPy 2 is installed (GDAL then prints
+  "A module that was compiled using NumPy 1.x cannot be run in NumPy 2..."),
+  the script fixes it at startup: it removes a NumPy 2 in your user folder
+  that hides the NumPy GDAL was built with, or installs numpy<2 (pip --user,
+  ready-made wheels only), then restarts. If neither is possible it skips
+  GDAL's NumPy part, which it does not use, so no error is ever printed.
 """
 import argparse
 import collections
@@ -244,6 +250,13 @@ import xml.etree.ElementTree as ET
 import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# GDAL's NumPy part (osgeo.gdal_array) is never used here. When it cannot load
+# (GDAL built for NumPy 1.x, NumPy 2 installed) GDAL prints a long NumPy error
+# every time it switches on exceptions; marking it unavailable silences that.
+# Set by fix_gdal_numpy() below; inherited by worker processes.
+if os.environ.get('JAXA_NO_GDAL_ARRAY') == '1':
+    sys.modules['osgeo.gdal_array'] = None
 
 # ---------------------------------------------------------------- settings --
 CORNER_THRESHOLD_KM = 1.0     # max distance between matching corners (item 2)
@@ -1203,7 +1216,11 @@ def geotiff_footprint(archive, members):
     try:
         from osgeo import gdal, osr
         gdal.UseExceptions()
-        ds = gdal.Open(archive.gdal_path(tifs[0]))
+        gdal.PushErrorHandler('CPLQuietErrorHandler')   # e.g. harmless TIFF tag warnings
+        try:
+            ds = gdal.Open(archive.gdal_path(tifs[0]))
+        finally:
+            gdal.PopErrorHandler()
         gt, w, h = ds.GetGeoTransform(), ds.RasterXSize, ds.RasterYSize
         src = osr.SpatialReference()
         src.ImportFromWkt(ds.GetProjection())
@@ -2184,6 +2201,19 @@ def area_file_name(area_id, name):
     return f"{area_id}_{safe}.shp"
 
 
+def surface_area(g):
+    """Area of the polygon parts of a geometry; 0 for lines/points (footprints
+    that only touch), without GDAL's 'non-surface geometry' warning."""
+    if g is None:
+        return 0.0
+    name = g.GetGeometryName()
+    if name in ('POLYGON', 'MULTIPOLYGON'):
+        return g.GetArea()
+    if name == 'GEOMETRYCOLLECTION':
+        return sum(surface_area(g.GetGeometryRef(k)) for k in range(g.GetGeometryCount()))
+    return 0.0
+
+
 def group_areas(geoms, fraction):
     """Union-find over class polygons: linked when their overlap is at least
     `fraction` of the smaller polygon's area. Returns lists of indices."""
@@ -2201,7 +2231,7 @@ def group_areas(geoms, fraction):
             if not gi.Intersects(gj):
                 continue
             small = min(gi.GetArea(), gj.GetArea())
-            if small > 0 and gi.Intersection(gj).GetArea() / small >= fraction:
+            if small > 0 and surface_area(gi.Intersection(gj)) / small >= fraction:
                 parent[find(i)] = find(j)
     groups = {}
     for i in range(len(geoms)):
@@ -2676,6 +2706,119 @@ def inspect(paths):
     log("=" * 78)
 
 
+def _gdal_array_test(*python_flags):
+    """Import GDAL's NumPy part in a separate, silent Python process.
+    Returns (ok, error text)."""
+    r = subprocess.run([sys.executable] + list(python_flags) + ['-c', 'import osgeo.gdal_array'],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return r.returncode == 0, r.stderr.decode('utf-8', 'replace')
+
+
+def _numpy_location():
+    """(version, folder) of the NumPy this Python imports, or ('', '')."""
+    r = subprocess.run([sys.executable, '-c',
+                        'import numpy, os; print(numpy.__version__); '
+                        'print(os.path.dirname(os.path.dirname(numpy.__file__)))'],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    out = r.stdout.decode('utf-8', 'replace').split('\n')
+    return (out[0].strip(), out[1].strip()) if r.returncode == 0 and len(out) > 1 else ('', '')
+
+
+def _pip(*args):
+    """Run pip for this Python; retries without --break-system-packages for
+    older pip versions. Returns True on success."""
+    base = [sys.executable, '-m', 'pip'] + list(args)
+    for extra in (['--break-system-packages'], []):
+        r = subprocess.run(base + extra, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode == 0:
+            return True
+        if b'no such option' not in r.stderr and b'unrecognized' not in r.stderr:
+            break
+    return False
+
+
+def _move_aside_numpy(folder):
+    """Rename the numpy package (and its metadata / bundled libraries) in
+    `folder` so Python no longer finds it. Reversible: the originals keep
+    their names with '.disabled_by_jaxa_catalogue' added."""
+    moved = []
+    for name in sorted(os.listdir(folder)):
+        if re.match(r'^numpy(-[^/]+\.dist-info|-[^/]+\.egg-info|\.libs|\.dylibs)?$', name):
+            src = os.path.join(folder, name)
+            dst = src + '.disabled_by_jaxa_catalogue'
+            if os.path.exists(dst):
+                shutil.rmtree(dst, ignore_errors=True)
+            os.rename(src, dst)
+            moved.append(dst)
+    return moved
+
+
+def fix_gdal_numpy():
+    """Make GDAL's 'A module that was compiled using NumPy 1.x cannot be run
+    in NumPy 2...' errors go away. They appear when GDAL's Python bindings
+    were built for NumPy 1.x but a NumPy 2 is found first. In order:
+      1. If a NumPy in the user's own folder (pip --user) shadows the NumPy
+         GDAL was built with, remove it (pip uninstall; if pip cannot,
+         rename it aside, reversibly) and restart.
+      2. Otherwise install numpy<2 for this Python from a ready-made wheel
+         (pip --user, never a source build) and restart.
+      3. If neither works, mark GDAL's NumPy part as unavailable; GDAL then
+         skips it silently. This script never uses it, so results are the
+         same and no error is printed."""
+    if os.environ.get('JAXA_NO_GDAL_ARRAY') == '1':
+        return
+    ok, err = _gdal_array_test()
+    if ok or "No module named 'osgeo'" in err:
+        return                                          # fine, or no GDAL at all
+    clash = ('_ARRAY_API' in err or 'NumPy 1.x' in err or 'NumPy 2' in err
+             or 'numpy.core.multiarray failed to import' in err
+             or 'numpy.core._multiarray_umath' in err)
+    if clash and os.environ.get('JAXA_NUMPY_FIX_TRIED') != '1':
+        os.environ['JAXA_NUMPY_FIX_TRIED'] = '1'
+        version, folder = _numpy_location()
+        import site
+        user_site = os.path.realpath(site.getusersitepackages())
+        in_user_site = bool(folder) and os.path.realpath(folder) == user_site
+        log(f"GDAL's Python bindings were built for NumPy 1.x, but NumPy {version or '2'} "
+            f"is installed{(' in ' + folder) if folder else ''}. Fixing ...")
+        fixed = False
+        if in_user_site and _gdal_array_test('-s')[0]:
+            # 1. the user-folder NumPy hides the one GDAL needs: take it away
+            log(f"  removing NumPy {version} from your user folder, so the NumPy GDAL was "
+                f"built with is used")
+            for _ in range(3):                         # in case of several copies
+                if not _pip('uninstall', '-y', 'numpy'):
+                    break
+                v, f = _numpy_location()
+                if not f or os.path.realpath(f) != user_site:
+                    break
+            if _numpy_location()[1] and os.path.realpath(_numpy_location()[1]) == user_site:
+                moved = _move_aside_numpy(user_site)
+                if moved:
+                    log("  pip could not remove it, so it was renamed aside (undo by removing "
+                        "'.disabled_by_jaxa_catalogue' from these names):")
+                    for m in moved:
+                        log(f"    {m}")
+            fixed = _gdal_array_test()[0]
+        if not fixed:
+            # 2. install numpy<2 (ready-made wheels only; never builds from source)
+            log("  installing numpy<2 for this Python (pip --user, wheel only) ...")
+            if _pip('install', '--user', '--quiet', '--only-binary=:all:', 'numpy<2'):
+                fixed = _gdal_array_test()[0]
+            else:
+                log("  no numpy<2 wheel for this Python (or no pip / network)")
+        if fixed:
+            log("  fixed; restarting\n")
+            sys.stdout.flush()
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    # 3. last resort, and the guarantee: GDAL skips its NumPy part quietly
+    if clash:
+        log("GDAL's NumPy part cannot be loaded with this NumPy; skipping it (this script "
+            "does not use it, so results are unaffected)")
+    os.environ['JAXA_NO_GDAL_ARRAY'] = '1'
+    sys.modules['osgeo.gdal_array'] = None
+
+
 def main():
     p = argparse.ArgumentParser(prog='jaxa_catalogue.py', add_help=False,
                                 usage='python3 jaxa_catalogue.py [--merge | --inspect] [--verify] [--include-alos1] [--no-qgis] [PATH ...]   (-h for help)')
@@ -2687,6 +2830,7 @@ def main():
     p.add_argument('--include-alos1', action='store_true')
     p.add_argument('paths', nargs='*')
     args = p.parse_args()
+    fix_gdal_numpy()
     global INCLUDE_ALOS1
     INCLUDE_ALOS1 = args.include_alos1
 
@@ -2752,5 +2896,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
