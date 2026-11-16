@@ -17,21 +17,24 @@ WHAT IT NEEDS
   jaxa_catalog.py (JAXA_products_catalogue.csv and JAXA_scene_centres.dbf).
   Make it by running jaxa_catalog.py from inside catalog/ first, e.g.
     mkdir -p catalog && cd catalog && python3 jaxa_catalog.py --no-qgis /Volumes/d5t1 && cd ..
-  Every zip in the catalogue must be on the same volume as the present
-  folder; the script exits otherwise (a --merge catalogue from several
-  machines will not do). On one volume a move only renames: no data is
-  read or written, so even a terabyte takes seconds.
+  Only JAXA product zips are considered: zips that merely have ALOS in their
+  name (documents, photos, ...) are dropped first. Only JAXA copies on the
+  same volume as the present folder are gathered; copies on other volumes
+  or machines (e.g. in a --merge catalogue) are ignored, and scenes that
+  exist only elsewhere are listed. On one volume a move only renames: no
+  data is read or written, so even a terabyte takes seconds.
 
 WHAT IT DOES
-  1. Reads the catalogue: one representative copy per scene (the copy
-     jaxa_catalog.py chose, undamaged, verified when --verify was used),
-     and the area name of each scene (NAME in JAXA_scene_centres.dbf, the
-     top-level areas of JAXA_areas.shp).
+  1. Reads the catalogue, drops non-JAXA zips and copies on other volumes,
+     and picks one undamaged copy per scene on this volume (one that passed
+     --verify first, then the copy jaxa_catalog.py chose); takes the area
+     name of each scene from NAME in JAXA_scene_centres.dbf (the top-level
+     areas of JAXA_areas.shp).
   2. Named areas go to one folder each in the present folder (Elephant Hill
      -> Elephant_Hill/; areas sharing a name share a folder). JAXA scenes
      with no area name (an UNRESOLVED area, or no footprint) go to
-     UNRESOLVED/. Zips that are not JAXA products, and scenes with no
-     undamaged copy, are left where they are.
+     UNRESOLVED/. Scenes with no undamaged copy on this volume are listed
+     and left where they are.
   3. Keeps one copy per image capture: copies with the same JAXA scene ID
      and the same size are the same product (e.g. the same scene in two
      orders), so only one is gathered. Products of one capture that differ
@@ -66,7 +69,9 @@ CHANGES
   2026-11-14  first version
   2026-11-16  moves by default (--copy for rsync); plan of move commands shown and
               confirmed first; undo script; unresolved JAXA scenes -> UNRESOLVED/;
-              reruns recognise files already moved; leftovers reported
+              reruns recognise files already moved; leftovers reported;
+              non-JAXA zips dropped first; copies on other volumes ignored (merged
+              catalogues work), best undamaged copy on this volume chosen per scene
 """
 import csv
 import os
@@ -196,18 +201,36 @@ def device_of(path):
             p = q
 
 
-def check_volume(rows):
-    here = os.stat('.').st_dev
-    off = []
-    for r in rows:
-        for p, _ in row_parts(r):
-            if device_of(p) != here:
-                off.append(p)
-    if off:
-        die(f"{len(off)} catalogued file(s) are not on the volume of the present folder ({os.getcwd()}):\n  "
-            + "\n  ".join(off[:15]) + (f"\n  ... and {len(off) - 15} more" if len(off) > 15 else '') + "\n\n"
-            "All the zips must be on the same volume as this folder. Run jaxa_catalog.py on this\n"
-            "volume only (not a --merge of several machines), into catalog/, and try again.")
+def is_jaxa(r):
+    """A JAXA product zip: its metadata was read (ok / no_footprint / damaged but readable),
+    or a JAXA scene ID was found. Other zips with ALOS in the name are not."""
+    st = r.get('status', '')
+    if st == 'not_jaxa_product':
+        return False
+    return st in UNDAMAGED + ('damaged_recovered',) or bool(r.get('scene_id'))
+
+
+def on_this_volume(r, here_dev):
+    return all(device_of(p) == here_dev for p, _ in row_parts(r))
+
+
+def screen(rows):
+    """Drops non-JAXA zips first, then sorts the JAXA copies into this volume / elsewhere.
+    Returns (indices of JAXA rows on this volume, n non-JAXA, n JAXA copies elsewhere)."""
+    here_dev = os.stat('.').st_dev
+    local, n_non, n_else = [], 0, 0
+    for i, r in enumerate(rows):
+        if not is_jaxa(r):
+            n_non += 1
+        elif on_this_volume(r, here_dev):
+            local.append(i)
+        else:
+            n_else += 1
+    if not local:
+        die(f"none of the JAXA zips in catalog/ are on the volume of the present folder ({os.getcwd()}).\n"
+            "Run jaxa_collect.py from a folder on the volume that holds the JAXA zips, with a catalogue\n"
+            "that covers that volume (jaxa_catalog.py run into catalog/).")
+    return local, n_non, n_else
 
 
 def safe_folder(name):
@@ -216,27 +239,50 @@ def safe_folder(name):
 
 # ----------------------------------------------------------------------------- plan
 
-def make_plan(rows, names):
+def make_plan(rows, names, local):
     """Returns the files to gather and everything left out, with reasons.
     Each candidate is (row index, row, area name, folder name)."""
-    skipped = OrderedDict((k, []) for k in ('not a JAXA product', 'no undamaged copy (re-download)'))
-    cands, unresolved = [], []
+    here = os.path.realpath('.')
+    skipped = OrderedDict((k, []) for k in ('no undamaged copy on this volume (re-download)',
+                                            'scene only on other volumes / machines'))
+    cands, unresolved, spares = [], [], []
+    local = set(local)
+    scene_rows = OrderedDict()                   # scene_key -> indices of its JAXA copies (all volumes)
     for i, r in enumerate(rows):
-        if r.get('is_representative') != 'yes':
-            continue
-        st, vs = r.get('status', ''), r.get('verify_status', '')
-        if st == 'not_jaxa_product':
-            skipped['not a JAXA product'].append(r)
-        elif st not in UNDAMAGED or vs.startswith('FAILED') or r.get('scene_state', '').startswith('NEEDS'):
-            skipped['no undamaged copy (re-download)'].append(r)
-        elif not names.get(i):
-            cands.append((i, r, 'UNRESOLVED (no footprint)', UNRESOLVED_DIR))
-            unresolved.append(r)
-        elif names[i].upper().startswith('UNRESOLVED'):
-            cands.append((i, r, names[i], UNRESOLVED_DIR))
-            unresolved.append(r)
+        if is_jaxa(r):
+            scene_rows.setdefault(r.get('scene_key') or r.get('product') or os.path.basename(r['zip_path']),
+                                  []).append(i)
+
+    def usable(r):
+        return r.get('status', '') in UNDAMAGED and not r.get('verify_status', '').startswith('FAILED')
+
+    def in_folder(r, folder):
+        d = os.path.join(here, folder)
+        return all(os.path.isfile(os.path.join(d, os.path.basename(p))) for p, _ in row_parts(r))
+
+    for key, idx in scene_rows.items():
+        name = next((names[i] for i in idx if names.get(i)), '')
+        if not name:
+            name, folder = 'UNRESOLVED (no footprint)', UNRESOLVED_DIR
+        elif name.upper().startswith('UNRESOLVED'):
+            folder = UNRESOLVED_DIR
         else:
-            cands.append((i, r, names[i], safe_folder(names[i])))
+            folder = safe_folder(name)
+        mine = [i for i in idx if i in local]
+        ok = [i for i in mine if usable(rows[i])]
+        if not ok:
+            if mine:
+                skipped['no undamaged copy on this volume (re-download)'].append(rows[mine[0]])
+            else:
+                skipped['scene only on other volumes / machines'].append(rows[idx[0]])
+            continue
+        ok.sort(key=lambda i: (not rows[i].get('verify_status', '').startswith('passed'),
+                               not in_folder(rows[i], folder), rows[i].get('is_representative') != 'yes',
+                               rows[i]['zip_path']))
+        cands.append((ok[0], rows[ok[0]], name, folder))
+        spares += [rows[i] for i in ok[1:]]
+        if folder == UNRESOLVED_DIR:
+            unresolved.append(rows[ok[0]])
 
     # one copy per capture: same scene ID and same size = same product
     groups = OrderedDict()
@@ -244,7 +290,6 @@ def make_plan(rows, names):
         r = c[1]
         key = (r.get('scene_id') or r.get('scene_key') or r.get('product') or r['zip_path'], r.get('zip_size', ''))
         groups.setdefault(key, []).append(c)
-    here = os.path.realpath('.')
     scenes, duplicates, size_variants = [], [], {}
 
     def already_here(item):
@@ -298,30 +343,28 @@ def make_plan(rows, names):
                                 f"check it and delete it, then run again: {dst}")
                 continue
             files.append(entry)
-    return files, scenes, skipped, unresolved, duplicates, size_variants, problems
+    return files, scenes, skipped, unresolved, duplicates, size_variants, problems, spares
 
 
-def left_behind(rows, files, skipped, duplicates):
-    """Catalogued copies that are not gathered, with the reason: (row, reason)."""
+def left_behind(rows, local, files, skipped, duplicates, spares):
+    """JAXA copies on this volume that are not gathered, with the reason: (row, reason)."""
     used = {id(f['row']) for f in files}
-    why = {}
+    why = {id(r): 'spare copy of a gathered scene' for r in spares}
     for k, rs in skipped.items():
         for r in rs:
             why[id(r)] = k
     for r, keep in duplicates:
         why[id(r)] = f"duplicate of {os.path.basename(keep['zip_path'])}"
     out = []
-    for r in rows:
+    for r in (rows[i] for i in local):
         if id(r) in used:
             continue
         if id(r) in why:
             reason = why[id(r)]
-        elif r.get('is_representative') == 'yes':
+        elif r.get('status', '') in UNDAMAGED and not r.get('verify_status', '').startswith('FAILED'):
             reason = 'not gathered (see PROBLEMS)'
-        elif r.get('status', '') in UNDAMAGED:
-            reason = 'spare copy of a gathered scene'
         else:
-            reason = f"damaged copy ({r.get('status', '')})"
+            reason = f"damaged copy ({r.get('status', '')}{', verify FAILED' if r.get('verify_status', '').startswith('FAILED') else ''})"
         out.append((r, reason))
     return out
 
@@ -623,16 +666,17 @@ def main():
     print(f"jaxa_collect.py in {os.getcwd()}  [{'COPY with rsync' if copy else 'MOVE'} mode"
           f"{', dry run' if dry else ''}]")
     rows, names = load_catalogue()
-    check_volume(rows)
-    print(f"catalog/: {len(rows)} catalogued file set(s), all on this volume; "
-          f"{sum(1 for r in rows if r.get('is_representative') == 'yes')} scene(s)")
+    local, n_non, n_else = screen(rows)
+    print(f"catalog/: {len(rows)} catalogued zip(s): {n_non} not JAXA products (ignored), "
+          f"{len(local) + n_else} JAXA copies, {len(local)} of them on this volume"
+          + (f" ({n_else} on other volumes / machines, ignored)" if n_else else ''))
 
-    files, scenes, skipped, unresolved, dups, variants, problems = make_plan(rows, names)
-    leftovers = left_behind(rows, files, skipped, dups)
+    files, scenes, skipped, unresolved, dups, variants, problems, spares = make_plan(rows, names, local)
+    leftovers = left_behind(rows, local, files, skipped, dups, spares)
 
     for why, items in skipped.items():
         if items:
-            print(f"left where they are, {why}: {len(items)}")
+            print(f"not gathered, {why}: {len(items)} scene(s)")
             for r in items[:12]:
                 print(f"    {r['zip_path']}")
             if len(items) > 12:
@@ -721,8 +765,8 @@ def main():
     if n_pre:
         print(f"    ({n_pre} file(s) already in their folder, skipped)")
     left_size = sum(sum(s or 0 for _, s in row_parts(r)) for r, _ in leftovers)
-    print(f"Left where they are: {len(leftovers)} catalogued copy/copies ({gb(left_size)}): duplicates, "
-          f"damaged and spare copies, non-JAXA zips (each listed in {MANIFEST} after a run)")
+    print(f"Left where they are on this volume: {len(leftovers)} JAXA copies ({gb(left_size)}): duplicates, "
+          f"damaged and spare copies (each listed in {MANIFEST} after a run)")
 
     if not todo:
         if blocked:
