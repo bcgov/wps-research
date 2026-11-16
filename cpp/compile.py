@@ -3,6 +3,9 @@
 20220813 add work queue
 20220813 add python program wrapping
     Compile all python files in python folder using a C wrapper (access from common folder)
+20261116 add python program wrapping for rcm folder
+    Also wrap python files in rcm folder (top level only, not subfolders) the same way, into the same folder
+    Skip any rcm script with the same name as a script wrapped from py/ (report skipped scripts at the end)
 '''
 import os
 import sys
@@ -78,6 +81,18 @@ of.write("\nwait\n".encode())
 # wrap the python files
 files = [x.strip() for x in os.popen('ls -1 ' + pd + '*.py').readlines()]
 files += [x.strip() for x in os.popen('ls -1 ' + pd + 'gcp' + sep + '*.py').readlines()]
+
+# also wrap the python files in the rcm folder (top level only, not subfolders), using the same method.
+# skip any rcm script whose name matches a script wrapped above from py/, so its wrapper is not overwritten
+rd = os.path.abspath(sep.join(abspath(__file__).split(sep)[:-2])) + sep + 'rcm' + sep # rcm directory
+print("rcm dir", rd)
+py_names = set([x.split(sep)[-1] for x in files])
+rcm_skipped = []
+for x in [x.strip() for x in os.popen('ls -1 ' + rd + '*.py').readlines()]:
+    if x.split(sep)[-1] in py_names:
+        rcm_skipped.append(x)
+    else:
+        files.append(x)
 print(files)
 for f in files:
     f = os.path.abspath(f)
@@ -134,3 +149,11 @@ cmake ..
 cmake --build .
 cmake --build . --target install
 ''')
+
+# report rcm scripts skipped because a py/ script has the same name
+if len(rcm_skipped) > 0:
+    print("rcm scripts skipped (same name as a script in py/, whose wrapper was kept):")
+    for x in rcm_skipped:
+        print("  " + x)
+else:
+    print("rcm scripts skipped: none")
