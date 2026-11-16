@@ -71,7 +71,8 @@ CHANGES
               confirmed first; undo script; unresolved JAXA scenes -> UNRESOLVED/;
               reruns recognise files already moved; leftovers reported;
               non-JAXA zips dropped first; copies on other volumes ignored (merged
-              catalogues work), best undamaged copy on this volume chosen per scene
+              catalogues work), best undamaged copy on this volume chosen per scene;
+              every list printed in full (with sizes, parts and reasons)
 """
 import csv
 import os
@@ -231,6 +232,14 @@ def screen(rows):
             "Run jaxa_collect.py from a folder on the volume that holds the JAXA zips, with a catalogue\n"
             "that covers that volume (jaxa_catalog.py run into catalog/).")
     return local, n_non, n_else
+
+
+def describe(r):
+    """'path (size, N parts)' for listings."""
+    parts = row_parts(r)
+    size = sum(s or 0 for _, s in parts)
+    extra = f", {len(parts)} parts" if len(parts) > 1 else ''
+    return f"{r['zip_path']}  ({gb(size) if size else 'size unknown'}{extra})"
 
 
 def safe_folder(name):
@@ -671,18 +680,24 @@ def main():
           f"{len(local) + n_else} JAXA copies, {len(local)} of them on this volume"
           + (f" ({n_else} on other volumes / machines, ignored)" if n_else else ''))
 
+    non_jaxa = [r for r in rows if not is_jaxa(r)]
+    if non_jaxa:
+        print(f"ignored, not JAXA products: {len(non_jaxa)}")
+        for r in sorted(non_jaxa, key=lambda r: r['zip_path']):
+            print(f"    {describe(r)}  [{r.get('status', '') or 'no status'}]")
+
     files, scenes, skipped, unresolved, dups, variants, problems, spares = make_plan(rows, names, local)
     leftovers = left_behind(rows, local, files, skipped, dups, spares)
 
     for why, items in skipped.items():
         if items:
             print(f"not gathered, {why}: {len(items)} scene(s)")
-            for r in items[:12]:
-                print(f"    {r['zip_path']}")
-            if len(items) > 12:
-                print(f"    ... and {len(items) - 12} more")
+            for r in items:
+                print(f"    {describe(r)}")
     if unresolved:
         print(f"JAXA scenes with no area name -> {UNRESOLVED_DIR}/: {len(unresolved)}")
+        for r in unresolved:
+            print(f"    {describe(r)}")
     if dups:
         print(f"left where they are, same scene ID and size as the copy gathered (duplicate order/file): {len(dups)}")
         for a, b in dups:
@@ -731,10 +746,8 @@ def main():
                            f"--copy, or delete it and run again")
     if kept:
         print(f"already collected in another folder here, left there: {len(kept)}")
-        for f, d in kept[:20]:
+        for f, d in kept:
             print(f"    {d}/{os.path.basename(f['src'])}  (catalogue now says {f['was']}/)")
-        if len(kept) > 20:
-            print(f"    ... and {len(kept) - 20} more")
     blocked = [f for f in files if f['result'].startswith('FAILED')]
     for f in blocked:
         problems.append(f"{f['dst']}: {f['result'][8:]}")
@@ -766,7 +779,9 @@ def main():
         print(f"    ({n_pre} file(s) already in their folder, skipped)")
     left_size = sum(sum(s or 0 for _, s in row_parts(r)) for r, _ in leftovers)
     print(f"Left where they are on this volume: {len(leftovers)} JAXA copies ({gb(left_size)}): duplicates, "
-          f"damaged and spare copies (each listed in {MANIFEST} after a run)")
+          f"damaged and spare copies (also listed in {MANIFEST} after a run)")
+    for r, reason in sorted(leftovers, key=lambda x: (x[1], x[0]['zip_path'])):
+        print(f"    {describe(r)}  [{reason}]")
 
     if not todo:
         if blocked:
