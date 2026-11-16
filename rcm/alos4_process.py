@@ -998,8 +998,11 @@ def pick_gpt(user_gpt):
     the PATH, so another program called gpt may come first) and ~/esa-snap.
     SNAP 14 or newer is required (ALOS-4 support)."""
     cands = []                                  # (path, is a known SNAP location)
+    mac_gpt = '/Applications/esa-snap/bin/gpt'  # SNAP on a Mac (/usr/sbin/gpt is another tool)
     if user_gpt:
         cands.append((os.path.abspath(os.path.expanduser(user_gpt)), True))
+    elif os.path.isfile(mac_gpt):
+        cands.append((mac_gpt, True))           # use it; no other "gpt" is tried
     else:
         try:
             with contextlib.redirect_stdout(io.StringIO()):     # its "not found" message
