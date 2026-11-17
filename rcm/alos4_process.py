@@ -135,11 +135,13 @@ Stopping and resuming
     holds different data (made from a newer final product). E.g. delete
     PNGs in ./warp/ and run again: only those PNGs are plotted again (from
     the RGB stacks still there) and copied, and a GIF only if a frame changed.
-    The PNG title is the original product ID; the caption gives the data
-    attribution (JAXA, year), acquisition time (UTC) and pass direction,
-    observation mode, incidence range, and the map grid (or, in ./warp/,
-    the reference date). PNGs with other labels are made again, and so are
-    PNGs plotted before the black background was set (below).
+    The PNG title (left-aligned, font 22) is the site (the name of the
+    folder this script runs in), the acquisition date (YYYYMMDD) and the
+    original product ID; the caption
+    gives the acquisition time (UTC) and pass direction, observation mode,
+    incidence range, the map grid (or, in ./warp/, the reference date) and,
+    last, the copyright holder (e.g. ©JAXA). PNGs with other labels are made
+    again, and so are PNGs plotted with an older plot setup (below).
     PNG background: newer matplotlib versions (e.g. 3.11, as on a Mac) no
     longer give dark_background plots a black saved background, so the PNG
     came out white with the (white) title and labels invisible. A small
@@ -211,6 +213,36 @@ Warp (at the end of every run; --no-warp turns it off)
     the common values, so the PNGs of its mode are plotted again (the RGB
     stacks are reused) and the GIF made again. The previews outside
     ./warp/ keep their own (per-scene) stretch.
+    Faraday rotation flag (warped PNGs): the title ends with "Faraday
+    rotation HIGH" when the scene's indicator below is at or above its
+    threshold (dual-pol: rho >= 0.10; quad-pol: |Omega| >= 3 deg, the size
+    at which L-band polarimetric values are noticeably biased; rho 0.10 is
+    about 2 deg for typical forest levels), and nothing otherwise. The
+    values are kept in the json files named below.
+    Dual-pol indicator (regular and angle PNGs): rho, the
+    scene's HH-HV coherence from its warped bands,
+        |sum C12| / sqrt(sum C11 * sum C22)
+    over the pixels where all four bands are valid, with C12 summed as
+    complex numbers (so phases that vary from pixel to pixel cancel). It is
+    near 0 for natural terrain (HH and HV uncorrelated); Faraday rotation
+    (not corrected here, and not removable from HH+HV data) leaks HH into
+    HV with a fixed phase and raises it, roughly in proportion to the
+    rotation angle. Kept in <name>/hh_hv_coherence.json.
+    Quad-pol indicator (ALOS-2 / ALOS-4, warped PNG): Omega, the Faraday
+    rotation angle estimated as in Bickel & Bates (1965) from the original Level 1.1
+    image files (the T3 matrix cannot give it: it is formed from the
+    averaged HV and VH, which removes what Faraday rotation leaves). In the
+    circular basis
+        Z12 = M_HV - M_VH + j (M_HH + M_VV)
+        Z21 = M_VH - M_HV + j (M_HH + M_VV)
+        Omega = -1/4 arg( sum Z12 conj(Z21) )
+    summed over every pixel of up to 2000 evenly spaced image lines where
+    all four channels are non-zero (a one-off read of about 2000 lines per
+    polarisation). 0 without Faraday rotation; the sign depends on the
+    polarisation naming convention, so its size is used. Kept in
+    faraday_rotation.json in the dataset folder and not worked out again
+    once there (also not with --regen-png). No estimate for SAOCOM, or if
+    the original image files are gone (the PNG is then made without it).
     --regen-png plots every PNG in ./warp/ again (regular and angle), with
     the common stretch worked out afresh, then makes the PNG copies and the
     GIFs again; nothing else runs (no SNAP, no resampling). It stops with a
@@ -1545,9 +1577,11 @@ def obs_mode(vol):
 
 def png_labels(prov, warp_ref=None):
     """(title, caption) for the PNG previews, from an export's processing.json.
-    The title is the original product ID (for reproducibility); the caption
-    is the attribution, acquisition, mode, incidence range and grid.
-    raster_plot.py shows the caption after "(R,G,B) = (...) ©"."""
+    The title is the site (the name of the folder this script runs in, e.g.
+    Battleship_Mountain), the acquisition date (YYYYMMDD) and the original
+    product ID (for reproducibility);
+    the caption is the acquisition, mode, incidence range, grid and, last,
+    the copyright holder. Shown after "(R,G,B) = (...) | " (PLOT_WRAPPER)."""
     sc, st = prov.get('scene', {}), prov.get('settings', {})
     vol = sc.get('vol', '')
     if vol.startswith('VOL-'):
@@ -1557,16 +1591,16 @@ def png_labels(prov, warp_ref=None):
     else:
         title = vol or 'unknown product'
     t = parse_utc(sc.get('first_line_time'))
+    title = '%s %s %s' % (os.path.basename(os.getcwd()) or 'UNKNOWN',      # site, date, ID
+                          t.strftime('%Y%m%d') if t else (sc.get('date') or '?'), title)
     when = t.strftime('%Y-%m-%d %H:%M UTC') if t else sc.get('date', '?')
-    year = t.strftime('%Y') if t else ''
     # kept short: raster_plot.py's fixed font fits about 115 characters,
-    # "(R,G,B) = (T22, T33, T11) ©" included
+    # "(R,G,B) = (T22, T33, T11) | " included
     direction = {'ASCENDING': 'asc.', 'DESCENDING': 'desc.'}.get(
         (sc.get('pass') or '').upper(), '?')
     credit = DATA_CREDIT.get(sc.get('mission'), 'JAXA')
     mode_code = sc.get('obs_mode') or obs_mode(vol)
-    parts = ['%s %s' % (credit, year) if year else credit,
-             '%s, %s' % (when, direction),
+    parts = ['%s, %s' % (when, direction),
              '%s %s-pol' % (mode_code, sc.get('mode', '?'))]
     ml = sc.get('multilook') or {}
     if ml.get('incidence_near_deg') and ml.get('incidence_far_deg'):
@@ -1577,6 +1611,7 @@ def png_labels(prov, warp_ref=None):
     else:
         parts.append('%s, %g m' % (st.get('map_projection', '?'),
                                    float(st.get('pixel_spacing_m') or 0)))
+    parts.append('\u00a9' + credit)                 # copyright last (no year)
     return title, ' | '.join(parts)
 
 
@@ -1585,16 +1620,45 @@ def png_labels(prov, warp_ref=None):
 PREVIEW_VARIANTS = {'rgb': ('rgb', '_rgb'), 'angle': ('angle', '_angle')}
 # Recorded with each preview; previews made with another plot setup are
 # plotted again (only the PNG: the RGB stack is reused).
-PLOT_STYLE = 'black figure and savefig background (matplotlibrc), v1'
+PLOT_STYLE = ('black figure and savefig background, left-aligned title (matplotlibrc); '
+              'title font 22, copyright last (PLOT_WRAPPER), v3')
 # Newer matplotlib versions (e.g. 3.11, as on the Mac) no longer set a black
 # savefig background in the dark_background style raster_plot.py uses, so
 # the PNG came out white with its (white) title and labels invisible. This
 # file, written next to the stack while raster_plot.py runs (matplotlib
 # reads a matplotlibrc in the current folder first), makes it black again.
 MPL_RC = ('figure.facecolor: black\nfigure.edgecolor: black\n'
-          'savefig.facecolor: black\nsavefig.edgecolor: black\n')
+          'savefig.facecolor: black\nsavefig.edgecolor: black\n'
+          'axes.titlelocation: left\n')          # titles line up, with or without an indicator
+# raster_plot.py is run through this (python -c PLOT_WRAPPER raster_plot.py
+# args...), unchanged, with two of its matplotlib calls adjusted: a smaller
+# title font (its fixed 30 does not fit the site, product ID and indicator
+# on one line), and " | " instead of the " \u00a9" it puts between the band
+# names and the caption (the caption ends with the copyright holder).
+PLOT_TITLE_SIZE = 22
+PLOT_WRAPPER = '''
+import os, sys, runpy
+import matplotlib.pyplot as plt
+script = sys.argv[1]
+sys.argv = [script] + sys.argv[2:]
+sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+_title, _xlabel = plt.title, plt.xlabel
+def title(label, *a, **k):
+    k['fontsize'] = %d
+    return _title(label, *a, **k)
+def xlabel(label, *a, **k):
+    return _xlabel(label.replace(' \\u00a9', ' | ', 1), *a, **k)
+plt.title, plt.xlabel = title, xlabel
+runpy.run_path(script, run_name='__main__')
+''' % PLOT_TITLE_SIZE
 # A warped preview's own colour stretch (see scene_stretch), kept next to its stack
 SCENE_STRETCH = 'scene_stretch.json'
+HH_HV_COHERENCE = 'hh_hv_coherence.json'     # a warped dual-pol dataset's indicator
+FARADAY_JSON = 'faraday_rotation.json'       # a quad-pol dataset's estimate (dataset folder)
+FARADAY_LINES = 2000                         # image lines read per polarisation
+FARADAY_HIGH_RHO = 0.10                      # dual-pol: "Faraday rotation HIGH" from here
+FARADAY_HIGH_DEG = 3.0                       # quad-pol: the same, |Omega| in degrees
+FARADAY_FLAG = '  Faraday rotation HIGH'     # added to the warped PNG title
 STRETCH_PERCENT = 1.5               # as py/raster_plot.py: cut at each end, per band
 
 
@@ -1766,7 +1830,8 @@ def _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption, variant,
         rc = os.path.join(rgb, 'matplotlibrc')
         write_text(rc, MPL_RC)
         try:
-            run([py, tools['raster_plot.py'], stack, '1', '2', '3', '1'], 'raster_plot.py')
+            run([py, '-c', PLOT_WRAPPER, tools['raster_plot.py'], stack, '1', '2', '3', '1'],
+                'raster_plot.py')
         finally:
             remove_path(rc)
         png = os.path.join(rgb, stack + '_1_2_3_rgb.png')
@@ -2468,10 +2533,26 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
             for v in preview_variants(e['mode']):
                 own[(e['name'], v)] = scene_stretch(os.path.join(out, e['name']), e['name'],
                                                     v, force=regen)
+            if e['mode'] == 'dual':              # Faraday rotation indicator in the title
+                rho = hh_hv_coherence(os.path.join(out, e['name']), force=regen)
+                if rho is not None and rho >= FARADAY_HIGH_RHO:
+                    e['title'] += FARADAY_FLAG
+            elif e['mission'] in ('ALOS2', 'ALOS4'):    # quad-pol: from the original data
+                try:
+                    omega = faraday_rotation(os.path.dirname(e['dir']), e['name'])
+                    if omega is None:
+                        print('  %-24s Faraday rotation: no estimate (original image files '
+                              'not found, or no usable pixels); title without it' % e['name'])
+                except (Failure, OSError, ValueError) as x:
+                    omega = None
+                    print('  %-24s Faraday rotation: not estimated (%s); title without it' % (
+                        e['name'], x))
+                if omega is not None and abs(omega) >= FARADAY_HIGH_DEG:
+                    e['title'] += FARADAY_FLAG
         except (Failure, OSError, ValueError, KeyError) as x:
             done.remove(e)
-            failed.append((e['name'], 'colour stretch: %s' % x))
-            print('  %-24s FAILED: colour stretch: %s' % (e['name'], x))
+            failed.append((e['name'], 'colour stretch / indicator: %s' % x))
+            print('  %-24s FAILED: colour stretch / indicator: %s' % (e['name'], x))
     common, record = {}, {}
     for mode in ('quad', 'dual'):
         members = [e['name'] for e in done if e['mode'] == mode]
@@ -2613,6 +2694,124 @@ def scene_stretch(folder, name, variant, force=False):
                        'percent': STRETCH_PERCENT, 'stack': os.path.basename(stack),
                        'stack_size_mtime': key, 'bands': bands})
     return bands
+
+
+def hh_hv_coherence(folder, force=False):
+    """Scene-wide HH-HV coherence of a warped dual-pol dataset:
+    |sum C12| / sqrt(sum C11 * sum C22) over the pixels where C11, C22,
+    C12_real and C12_imag are all valid, C12 summed as complex numbers.
+    Near 0 when HH and HV are uncorrelated (natural terrain); Faraday
+    rotation raises it. None if there is nothing to sum. Kept in
+    hh_hv_coherence.json and worked out again if a band changed (or force)."""
+    names = ['C11', 'C22', 'C12_real', 'C12_imag']
+    paths = [os.path.join(folder, n + '.bin') for n in names]
+    key = [[os.stat(f).st_size, os.stat(f).st_mtime_ns] for f in paths]
+    cache = os.path.join(folder, HH_HV_COHERENCE)
+    c = read_json(cache)
+    if not force and c and c.get('bands_size_mtime') == key and 'coherence' in c:
+        return c['coherence']
+    h = read_envi_header(os.path.join(folder, 'C11.hdr'))
+    w, n_lines = int(h['samples']), int(h['lines'])
+    b = [load_band(f, w, n_lines) for f in paths]
+    ok = np.isfinite(b[0]) & np.isfinite(b[1]) & np.isfinite(b[2]) & np.isfinite(b[3])
+    s11, s22, s_re, s_im = [float(a[ok].sum(dtype=np.float64)) for a in b]
+    n = int(ok.sum())
+    rho = (math.hypot(s_re, s_im) / math.sqrt(s11 * s22)
+           if n > 0 and s11 > 0 and s22 > 0 else None)
+    write_json(cache, {'about': 'scene-wide HH-HV coherence |sum C12| / sqrt(sum C11 * '
+                                'sum C22) over pixels where all four bands are valid (C12 '
+                                'summed as complex numbers); near 0 for natural terrain, '
+                                'raised by Faraday rotation',
+                       'coherence': rho, 'valid_pixels': n,
+                       'phase_of_sum_C12_deg': math.degrees(math.atan2(s_im, s_re)) if n else None,
+                       'bands_size_mtime': key})
+    return rho
+
+
+def ceos_img_layout(path):
+    """(record length, bytes before the pixels, pixels per line, lines) of an
+    ALOS-2 or ALOS-4 Level 1.1 image file: a 720-byte file descriptor, then
+    one record per line, a line header and complex float32 pixels."""
+    size = os.path.getsize(path)
+    with open(path, 'rb') as f:
+        f.seek(720)
+        first = f.read(28)
+    if len(first) < 28:
+        raise Failure('%s has no image lines' % os.path.basename(path))
+    rec_len = struct.unpack('>L', first[8:12])[0]
+    pix = struct.unpack('>L', first[24:28])[0]
+    pre = rec_len - 8 * pix
+    if pix <= 0 or pre <= 0 or (size - 720) % rec_len:
+        raise Failure('%s: lines of %d bytes for %d pixels do not fit the Level 1.1 layout' % (
+            os.path.basename(path), rec_len, pix))
+    return rec_len, pre, pix, (size - 720) // rec_len
+
+
+def faraday_rotation(path, name):
+    """Faraday rotation angle (degrees) of a quad-pol ALOS-2 / ALOS-4 dataset,
+    estimated as in Bickel & Bates (1965) from its original Level 1.1 image
+    files in path (see the docstring). Kept in path/faraday_rotation.json and
+    not worked out again once there. None if the four image files are not
+    there (or no pixel is usable)."""
+    cache = os.path.join(path, FARADAY_JSON)
+    c = read_json(cache)
+    if c and 'omega_deg' in c:
+        return c['omega_deg']
+    files = {}
+    for n in sorted(os.listdir(path)):
+        parts = n.split('-')
+        if (n.startswith('IMG-') and len(parts) > 2 and parts[1].upper() in POLS
+                and os.path.isfile(os.path.join(path, n))):
+            files.setdefault(parts[1].upper(), []).append(n)
+    if sorted(files) != sorted(POLS) or any(len(v) != 1 for v in files.values()):
+        return None
+    lay = {p: ceos_img_layout(os.path.join(path, files[p][0])) for p in POLS}
+    if len(set((v[2], v[3]) for v in lay.values())) != 1:
+        raise Failure('the four image files differ in size')
+    pix, lines = lay['HH'][2], lay['HH'][3]
+    rows = sorted(set(int(r) for r in np.linspace(0, lines - 1, min(lines, FARADAY_LINES))))
+    print('  %-24s Faraday rotation: estimating from the original data (%d of %d lines) ...' % (
+        name, len(rows), lines), flush=True)
+    acc, n_used = 0j, 0
+    fh = {}
+    np_err = np.seterr(all='ignore')             # damaged values are left out below
+    try:
+        for p in POLS:
+            fh[p] = open(os.path.join(path, files[p][0]), 'rb')
+        for r in rows:
+            v = {}
+            for p in POLS:
+                rec_len, pre = lay[p][0], lay[p][1]
+                fh[p].seek(720 + r * rec_len + pre)
+                b = fh[p].read(8 * pix)
+                if len(b) != 8 * pix:
+                    raise Failure('%s: line %d is short' % (files[p][0], r + 1))
+                a = np.frombuffer(b, dtype='>f4').astype(np.float64)
+                v[p] = a[0::2] + 1j * a[1::2]
+            ok = np.ones(pix, dtype=bool)
+            for p in POLS:
+                ok &= np.isfinite(v[p]) & (v[p] != 0)
+            hh, hv, vh, vv = [v[p][ok] for p in POLS]
+            z12 = hv - vh + 1j * (hh + vv)
+            z21 = vh - hv + 1j * (hh + vv)
+            acc += complex(np.sum(z12 * np.conj(z21)))
+            n_used += int(ok.sum())
+    finally:
+        np.seterr(**np_err)
+        for f in fh.values():
+            f.close()
+    usable = n_used and acc and math.isfinite(acc.real) and math.isfinite(acc.imag)
+    omega = -0.25 * math.degrees(math.atan2(acc.imag, acc.real)) if usable else None
+    write_json(cache, {'about': 'Faraday rotation angle, Bickel & Bates (1965): Omega = -1/4 '
+                                'arg(sum Z12 conj(Z21)), Z12 = HV - VH + j (HH + VV), Z21 = '
+                                'VH - HV + j (HH + VV), from the original Level 1.1 image '
+                                'files; the sign depends on the polarisation naming '
+                                'convention', 'omega_deg': omega,
+                       'image_files': [files[p][0] for p in POLS],
+                       'lines_used': len(rows), 'lines': lines, 'pixels_per_line': pix,
+                       'pixels_used': n_used, 'made': now_str(),
+                       'script': 'alos4_process.py ' + SCRIPT_VERSION})
+    return omega
 
 
 def weighted_median(pairs, geometric):
