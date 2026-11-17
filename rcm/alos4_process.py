@@ -2401,7 +2401,6 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
                                   (e['name'], 'RGB' if v == 'rgb' else 'angle'))
                             make_rgb(target, e['name'], e['mode'], ctx, log, title, caption, v,
                                      plot=False)
-                    print('  %-24s warped bands already done' % e['name'])
                     done.append(e)
                 except (Failure, OSError) as x:
                     failed.append((e['name'], str(x)))
@@ -2506,12 +2505,14 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
     n_plotted = 0
     for e in list(done):
         target = os.path.join(out, e['name'])
+        label = e['name']                         # the name only on the first line
         try:
             for v in preview_variants(e['mode']):
                 s = common[(e['mode'], v)]
                 if regen or not rgb_ok(target, e['name'], e['title'], e['caption'], v, s):
                     print('  %-24s %s PNG: plotting with the common stretch' % (
-                        e['name'], 'RGB' if v == 'rgb' else 'angle'), flush=True)
+                        label, 'RGB' if v == 'rgb' else 'angle'), flush=True)
+                    label = ''
                     make_rgb(target, e['name'], e['mode'], ctx, log, e['title'], e['caption'],
                              v, stretch=s)
                     n_plotted += 1
