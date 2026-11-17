@@ -132,11 +132,18 @@ Stopping and resuming
     --delete-intermediates, from the original data). The same in ./warp/:
     a missing preview, PNG copy or GIF is made on its own, and a warped
     dataset is only resampled again if its bands are missing or its export
-    holds different data (made from a newer final product).
+    holds different data (made from a newer final product). E.g. delete
+    PNGs in ./warp/ and run again: only those PNGs are plotted again (from
+    the RGB stacks still there) and copied, and a GIF only if a frame changed.
     The PNG title is the original product ID; the caption gives the data
     attribution (JAXA, year), acquisition time (UTC) and pass direction,
     observation mode, incidence range, and the map grid (or, in ./warp/,
-    the reference date). PNGs with other labels are made again.
+    the reference date). PNGs with other labels are made again, and so are
+    PNGs plotted before the black background was set (below).
+    PNG background: newer matplotlib versions (e.g. 3.11, as on a Mac) no
+    longer give dark_background plots a black saved background, so the PNG
+    came out white with the (white) title and labels invisible. A small
+    matplotlibrc, used only while py/raster_plot.py runs, makes it black.
     The options a dataset was processed with are saved in
     alos_polsar_settings.json. If a later run asks for different processing
     options, that dataset fails with a message instead of mixing outputs;
@@ -161,8 +168,14 @@ Warp (at the end of every run; --no-warp turns it off)
                            no-data = NaN; rgb/ RGB stack + PNG preview;
                            warp.json (source, reference, resampling)
         <name>.png         copy of each PNG preview
+        angle/<name>_angle.png   dual-pol only: a second preview with the
+                           polar angle of C12 (arg C12, from atan2 of
+                           C12_imag, C12_real) for blue instead of |C12|
+                           (made in <name>/angle/)
         sequence_quad.gif  quad-pol previews in date order (T22, T33, T11)
         sequence_dual.gif  dual-pol previews in date order (C11, C22, |C12|)
+        common_stretch.json  the colour stretch shared by the warped previews
+                           (below), with each preview's own values
         reference.txt      which dataset defines the grid
         alos4_warp.log     output of the tools that were run
     The reference is the earliest date, or --warp-ref (a date such as
@@ -180,6 +193,29 @@ Warp (at the end of every run; --no-warp turns it off)
     again from the start (--warp-ref keeps the old reference). It runs even
     when some datasets failed, on the ones that are finished.
     --warp-only does just this step.
+    Common colour stretch: so the warped previews (and the GIFs) can be
+    compared in brightness, they share one stretch per band. Each preview's
+    own stretch is worked out as py/raster_plot.py does it (per band, the
+    values 1.5% from each end of the sorted valid values: min, max; kept in
+    <name>/<rgb|angle>/scene_stretch.json with the number of valid pixels,
+    N). For each polarisation mode (quad, dual) and preview (rgb, angle),
+    per band:  common min = weighted median of the previews' mins,
+               common max = weighted median of the previews' maxes,
+    weighted by N (previews with N = 0 left out). When the weight splits
+    exactly between two values (e.g. an even number of equally weighted
+    previews) the median is their geometric mean, sqrt(a*b): consistent in
+    linear and dB; for the angle of C12 (or a value <= 0) it is (a + b) / 2.
+    Every warped PNG of that mode and preview is plotted with these values
+    (written to its <stack>_rgb_scaling_*.txt files, which raster_plot.py
+    reads). One dataset alone keeps its own stretch; a new dataset changes
+    the common values, so the PNGs of its mode are plotted again (the RGB
+    stacks are reused) and the GIF made again. The previews outside
+    ./warp/ keep their own (per-scene) stretch.
+    --regen-png plots every PNG in ./warp/ again (regular and angle), with
+    the common stretch worked out afresh, then makes the PNG copies and the
+    GIFs again; nothing else runs (no SNAP, no resampling). It stops with a
+    message if ./warp/ is not complete and up to date (run without
+    --regen-png first). It keeps the reference in ./warp/reference.txt.
 
 Usage (run from the folder that holds the dataset folders)
     python3 alos4_process.py                    # all defaults
@@ -191,6 +227,7 @@ Usage (run from the folder that holds the dataset folders)
     python3 alos4_process.py --redo
     python3 alos4_process.py --no-warp          # skip the warp at the end
     python3 alos4_process.py --warp-only --warp-ref 20250622
+    python3 alos4_process.py --regen-png        # plot the ./warp/ PNGs again
     python3 alos4_process.py -h                 # all options
 
 Needs (as the older rcm scripts do): wps-research/py on the same checkout
@@ -208,6 +245,7 @@ import time
 import math
 import shutil
 import struct
+import hashlib
 import contextlib
 import signal
 import argparse
@@ -227,7 +265,7 @@ import misc                                   # wps-research/py/misc.py
 from misc import find_snap, err
 import numpy as np
 
-SCRIPT_VERSION = '20261109'
+SCRIPT_VERSION = '20261117'
 
 VOL_PREFIXES = ('VOL-ALOS2', 'VOL-ALOS4')
 SAOCOM_PREFIXES = ('S1A_', 'S1B_')                # SAOCOM-1A / -1B product files (.xemt)
@@ -1541,18 +1579,68 @@ def png_labels(prov, warp_ref=None):
     return title, ' | '.join(parts)
 
 
-def rgb_files(folder, name):
-    rgb = os.path.join(folder, 'rgb')
-    stack = os.path.join(rgb, name + '_rgb.bin')
+# Preview variants: 'rgb' (quad: T22, T33, T11; dual: C11, C22, |C12|) and,
+# dual-pol in ./warp/ only, 'angle' (C11, C22, polar angle of C12)
+PREVIEW_VARIANTS = {'rgb': ('rgb', '_rgb'), 'angle': ('angle', '_angle')}
+# Recorded with each preview; previews made with another plot setup are
+# plotted again (only the PNG: the RGB stack is reused).
+PLOT_STYLE = 'black figure and savefig background (matplotlibrc), v1'
+# Newer matplotlib versions (e.g. 3.11, as on the Mac) no longer set a black
+# savefig background in the dark_background style raster_plot.py uses, so
+# the PNG came out white with its (white) title and labels invisible. This
+# file, written next to the stack while raster_plot.py runs (matplotlib
+# reads a matplotlibrc in the current folder first), makes it black again.
+MPL_RC = ('figure.facecolor: black\nfigure.edgecolor: black\n'
+          'savefig.facecolor: black\nsavefig.edgecolor: black\n')
+# A warped preview's own colour stretch (see scene_stretch), kept next to its stack
+SCENE_STRETCH = 'scene_stretch.json'
+STRETCH_PERCENT = 1.5               # as py/raster_plot.py: cut at each end, per band
+
+
+def preview_band_names(mode, variant='rgb'):
+    if mode == 'quad':
+        return ['T22', 'T33', 'T11']
+    return ['C11', 'C22', 'arg(C12)' if variant == 'angle' else '|C12|']
+
+
+def preview_variants(mode):
+    """The previews made in ./warp/: the angle version for dual-pol only."""
+    return ['rgb', 'angle'] if mode == 'dual' else ['rgb']
+
+
+def rgb_files(folder, name, variant='rgb'):
+    sub, suffix = PREVIEW_VARIANTS[variant]
+    rgb = os.path.join(folder, sub)
+    stack = os.path.join(rgb, name + suffix + '.bin')
     return rgb, stack, stack + '_1_2_3_rgb.png'
 
 
-def rgb_ok(folder, name, title, caption):
-    """True if the RGB stack and its PNG exist, with these labels."""
-    rgb, stack, png = rgb_files(folder, name)
-    if not all(os.path.isfile(f) for f in (stack, stack[:-4] + '.hdr', png)):
+def stack_ok(stack):
+    """True if the RGB stack and its header exist and the sizes agree."""
+    try:
+        h = read_envi_header(stack[:-4] + '.hdr')
+        return os.path.getsize(stack) == (int(h['samples']) * int(h['lines']) *
+                                          int(h['bands']) * 4)
+    except (OSError, KeyError, ValueError):
         return False
-    for fn, want in (('title_string.txt', title), ('copyright_string.txt', caption)):
+
+
+def rgb_ok(folder, name, title, caption, variant='rgb', stretch=None):
+    """True if the RGB stack and its PNG exist, with these labels and the
+    current plot setup (and, if given, plotted with this stretch: per band
+    (min, max))."""
+    rgb, stack, png = rgb_files(folder, name, variant)
+    if not (os.path.isfile(png) and stack_ok(stack)):
+        return False
+    for i, lo_hi in enumerate(stretch or []):
+        try:
+            with open('%s_rgb_scaling_%d.txt' % (stack, i)) as f:
+                if [float(x) for x in f.read().strip().split(',')] != list(lo_hi):
+                    return False
+        except (OSError, ValueError):
+            return False
+    for fn, want in (('title_string.txt', title), ('copyright_string.txt', caption),
+                     ('plot_style.txt', PLOT_STYLE)):
         try:
             with open(os.path.join(rgb, fn), encoding='utf-8') as f:
                 if f.read().strip() != want:
@@ -1581,25 +1669,44 @@ def bands_ok(folder, mode, extra=()):
     return True
 
 
-def make_rgb(folder, name, mode, ctx, log, title, caption):
-    """rgb/<name>_rgb.bin (+ .hdr) and its PNG, from the matrix bands in
-    folder, labelled with title and caption. Built in a staging folder and
-    swapped in when complete. Returns the PNG path."""
+def make_rgb(folder, name, mode, ctx, log, title, caption, variant='rgb', plot=True,
+             stretch=None):
+    """<variant>/<name><suffix>.bin (+ .hdr) and its PNG, from the matrix
+    bands in folder, labelled with title and caption. Built in a staging
+    folder and swapped in when complete. An existing complete RGB stack is
+    reused (with its colour-stretch files), so only the PNG is plotted
+    again. plot=False: the RGB stack only. stretch: per band (min, max) to
+    plot with (written to the colour-stretch files) instead of the stack's
+    own. Returns the PNG path."""
     for n in os.listdir(folder):                 # left by a stopped run
         if n.startswith(PARTIAL):
             remove_path(os.path.join(folder, n))
-    final_rgb, _, final_png = rgb_files(folder, name)
-    rgb = os.path.join(folder, '%srgb.%d' % (PARTIAL, os.getpid()))
+    final_rgb, final_stack, final_png = rgb_files(folder, name, variant)
+    rgb = os.path.join(folder, '%s%s.%d' % (PARTIAL, variant, os.getpid()))
     os.makedirs(rgb)
     py, tools, env = ctx['python'], ctx['tools'], ctx['env']
-    stack = name + '_rgb.bin'
+    stack = os.path.basename(final_stack)
 
     def run(cmd, what):
         if run_logged(cmd, log, cwd=rgb, env=env) != 0:
             raise Failure('preview: %s failed (see %s)' % (what, LOG_NAME))
 
     try:
-        _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption)
+        reuse = stack_ok(final_stack)
+        if reuse:
+            keep = [stack] + ([] if stretch else
+                              [stack + '_rgb_scaling_%d.txt' % i for i in range(3)])
+            for n in keep:
+                src = os.path.join(final_rgb, n)
+                if os.path.isfile(src):
+                    try:
+                        os.link(src, os.path.join(rgb, n))
+                    except OSError:
+                        shutil.copy2(src, os.path.join(rgb, n))
+            if os.path.isfile(os.path.join(final_rgb, SCENE_STRETCH)):   # made from the stack
+                shutil.copy2(os.path.join(final_rgb, SCENE_STRETCH), os.path.join(rgb, SCENE_STRETCH))
+        _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption, variant, reuse,
+                  plot, stretch)
     except BaseException:
         remove_path(rgb)
         raise
@@ -1608,25 +1715,38 @@ def make_rgb(folder, name, mode, ctx, log, title, caption):
     return final_png
 
 
-def _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption):
+def _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption, variant, reuse,
+              plot=True, stretch=None):
     write_text(os.path.join(rgb, 'title_string.txt'), title + '\n')
     write_text(os.path.join(rgb, 'copyright_string.txt'), caption + '\n')
+    write_text(os.path.join(rgb, 'plot_style.txt'), PLOT_STYLE + '\n')
 
-    if mode == 'quad':
-        inputs = ['../T22.bin', '../T33.bin', '../T11.bin']
-        names = ['T22', 'T33', 'T11']
-    else:
-        run([tools['convert_iq_to_cplx'], '../C12_real.bin', '../C12_imag.bin', 'C12.bin'],
-            'convert_iq_to_cplx')
-        run([tools['abs'], 'C12.bin'], 'abs')
-        inputs = ['../C11.bin', '../C22.bin', 'C12.bin_abs.bin']
-        names = ['C11', 'C22', '|C12|']
-    run([py, tools['raster_stack.py']] + inputs + [stack], 'raster_stack.py')
+    names = preview_band_names(mode, variant)
+    hdr0 = os.path.join(folder, names[0] + '.hdr')          # T22.hdr or C11.hdr
+    first = read_envi_header(hdr0)
+    if not reuse:
+        if mode == 'quad':
+            inputs = ['../T22.bin', '../T33.bin', '../T11.bin']
+        elif variant == 'angle':
+            # polar angle of C12 (radians, -pi..pi); NaN stays NaN
+            w, h = int(first['samples']), int(first['lines'])
+            re = load_band(os.path.join(folder, 'C12_real.bin'), w, h)
+            im = load_band(os.path.join(folder, 'C12_imag.bin'), w, h)
+            save_band(np.arctan2(im, re).astype(np.float32), os.path.join(rgb, 'C12_angle.bin'))
+            write_text(os.path.join(rgb, 'C12_angle.hdr'), '\n'.join([
+                'ENVI', 'samples = %d' % w, 'lines = %d' % h, 'bands = 1',
+                'header offset = 0', 'file type = ENVI Standard', 'data type = 4',
+                'interleave = bsq', 'byte order = 0', 'band names = {arg(C12)}']) + '\n')
+            inputs = ['../C11.bin', '../C22.bin', 'C12_angle.bin']
+        else:
+            run([tools['convert_iq_to_cplx'], '../C12_real.bin', '../C12_imag.bin', 'C12.bin'],
+                'convert_iq_to_cplx')
+            run([tools['abs'], 'C12.bin'], 'abs')
+            inputs = ['../C11.bin', '../C22.bin', 'C12.bin_abs.bin']
+        run([py, tools['raster_stack.py']] + inputs + [stack], 'raster_stack.py')
     # A clean header, keeping the map information. misc.band_names() (used
     # by raster_plot.py) takes every line after "band names" as a band name,
     # so the band names go last, one per line.
-    hdr0 = os.path.join(folder, names[0] + '.hdr')          # T22.hdr or C11.hdr
-    first = read_envi_header(hdr0)
     lines = ['ENVI', 'samples = ' + first['samples'], 'lines = ' + first['lines'],
              'bands = 3', 'header offset = 0', 'file type = ENVI Standard',
              'data type = 4', 'interleave = bsq', 'byte order = 0']
@@ -1635,13 +1755,25 @@ def _make_rgb(folder, rgb, stack, mode, py, tools, run, title, caption):
                   if ln.lower().startswith(('map info', 'coordinate system string'))]
     lines += ['band names = {' + names[0] + ',', names[1] + ',', names[2] + '}']
     write_text(os.path.join(rgb, stack[:-4] + '.hdr'), '\n'.join(lines) + '\n')
-    run([py, tools['raster_plot.py'], stack, '1', '2', '3', '1'], 'raster_plot.py')
-    png = os.path.join(rgb, stack + '_1_2_3_rgb.png')
-    if not (os.path.isfile(os.path.join(rgb, stack)) and os.path.isfile(png)):
-        raise Failure('preview: RGB stack or PNG not written (see %s)' % LOG_NAME)
-    if mode == 'dual':                          # helper files for |C12|
-        for n in ('C12.bin', 'C12.hdr', 'C12.bin.hdr', 'C12.bin_abs.bin', 'C12.bin_abs.hdr'):
-            remove_path(os.path.join(rgb, n))
+    if not plot:
+        if not os.path.isfile(os.path.join(rgb, stack)):
+            raise Failure('preview: RGB stack not written (see %s)' % LOG_NAME)
+    else:
+        for i, (lo, hi) in enumerate(stretch or []):      # raster_plot.py uses these
+            write_text(os.path.join(rgb, '%s_rgb_scaling_%d.txt' % (stack, i)),
+                       '%r,%r' % (float(lo), float(hi)))
+        rc = os.path.join(rgb, 'matplotlibrc')
+        write_text(rc, MPL_RC)
+        try:
+            run([py, tools['raster_plot.py'], stack, '1', '2', '3', '1'], 'raster_plot.py')
+        finally:
+            remove_path(rc)
+        png = os.path.join(rgb, stack + '_1_2_3_rgb.png')
+        if not (os.path.isfile(os.path.join(rgb, stack)) and os.path.isfile(png)):
+            raise Failure('preview: RGB stack or PNG not written (see %s)' % LOG_NAME)
+    for n in ('C12.bin', 'C12.hdr', 'C12.bin.hdr', 'C12.bin_abs.bin', 'C12.bin_abs.hdr',
+              'C12_angle.bin', 'C12_angle.hdr'):     # helper files for the third band
+        remove_path(os.path.join(rgb, n))
 
 
 def nan_mask_and_save(folder, mode, w, h, trim=0, inc_path=None, inc_big_endian=True):
@@ -2055,6 +2187,10 @@ def parse_args():
                         '20250622_ALOS4_quad (default: the earliest)')
     p.add_argument('--warp-bilinear', action='store_true',
                    help='warp with bilinear instead of nearest-neighbour resampling')
+    p.add_argument('--regen-png', action='store_true',
+                   help='only plot every PNG in ./warp/ again (regular and angle, with the '
+                        'common colour stretch worked out afresh) and make the GIFs again; '
+                        'nothing else runs. Needs a complete, up-to-date ./warp/')
     a = p.parse_args()
     if a.jobs < 1:
         p.error('--jobs must be 1 or more')
@@ -2071,6 +2207,10 @@ def parse_args():
         p.error('--redo and --delete-intermediates-only do not go together')
     if a.no_warp and a.warp_only:
         p.error('--no-warp and --warp-only do not go together')
+    for flag, on in (('--no-warp', a.no_warp), ('--redo', a.redo),
+                     ('--delete-intermediates-only', a.delete_intermediates_only)):
+        if a.regen_png and on:
+            p.error('--regen-png and %s do not go together' % flag)
     return a
 
 
@@ -2137,9 +2277,11 @@ def warp_same_grid(gt, wkt, ref_gt, ref_wkt):
     return True
 
 
-def warp_outputs(ref_choice, bilinear, tools, env):
+def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
     """Copy the reference export and resample every other finished export
-    onto its grid, in ./warp/. Returns a list of (name, problem)."""
+    onto its grid, in ./warp/, then plot the PNGs with the common colour
+    stretch. regen (--regen-png): only plot every PNG again and make the
+    GIFs again. Returns a list of (name, problem)."""
     print('\nwarp: putting every finished output on one common grid in %s/' % WARP_DIR)
     entries, unfinished = warp_collect()
     if unfinished:
@@ -2165,6 +2307,34 @@ def warp_outputs(ref_choice, bilinear, tools, env):
 
     out = os.path.abspath(WARP_DIR)
     rt = os.path.join(out, 'reference.txt')
+
+    def source_key_of(e):
+        """What identifies the source data (older exports: when it was made)."""
+        prov = read_json(os.path.join(e['dir'], 'processing.json')) or {}
+        return prov, json.dumps(prov.get('from_product') or prov.get('made'), sort_keys=True)
+
+    def warped_source_ok(e, source_key):
+        w = read_json(os.path.join(out, e['name'], 'warp.json')) or {}
+        return (w.get('source_key') or json.dumps(w.get('source_made'))) == source_key, w
+
+    if regen:                                    # only the PNGs: check what they need
+        old = open(rt).read().split() if os.path.isfile(rt) else []
+        if not old:
+            return [('warp', '--regen-png: no %s/reference.txt: run the warp step first '
+                     '(without --regen-png)' % WARP_DIR)]
+        if not ref_choice:                       # keep the reference warp/ was made with
+            ref = ([e for e in entries if e['name'] == old[0]] or [ref])[0]
+        if ref['name'] != old[0]:
+            return [('warp', '--regen-png: %s/ was made with reference %s, not %s: run the '
+                     'warp step first (without --regen-png)' % (WARP_DIR, old[0], ref['name']))]
+        bad = [e['name'] for e in entries
+               if not (warped_source_ok(e, source_key_of(e)[1])[0] and
+                       bands_ok(os.path.join(out, e['name']), e['mode'], ['warp.json']))]
+        if bad:
+            return [('warp', '--regen-png: missing, incomplete or out of date in %s/: %s; run '
+                     'the warp step first (without --regen-png); nothing was changed' % (
+                         WARP_DIR, ', '.join(bad)))]
+        print('--regen-png: plotting every PNG in %s/ again (nothing else runs)' % WARP_DIR)
     if os.path.isfile(rt):
         old = open(rt).read().split()
         if old and old[0] != ref['name']:
@@ -2202,22 +2372,21 @@ def warp_outputs(ref_choice, bilinear, tools, env):
     done, failed = [], []
     for e in entries:
         target = os.path.join(out, e['name'])
-        prov = read_json(os.path.join(e['dir'], 'processing.json')) or {}
-        # what identifies the source data (older exports: when it was made)
-        source_key = json.dumps(prov.get('from_product') or prov.get('made'), sort_keys=True)
+        prov, source_key = source_key_of(e)
         title, caption = png_labels(prov, warp_ref=ref['name'])
+        e['title'], e['caption'] = title, caption
         if os.path.isdir(target):
-            w = read_json(os.path.join(target, 'warp.json')) or {}
-            same = ((w.get('source_key') or json.dumps(w.get('source_made'))) == source_key
-                    and w.get('resampling') == resampling)
+            same, w = warped_source_ok(e, source_key)
+            same = same and (regen or w.get('resampling') == resampling)
             if same and bands_ok(target, e['mode'], ['warp.json']):
                 try:
-                    if rgb_ok(target, e['name'], title, caption):
-                        print('  %-24s already done' % e['name'])
-                    else:
-                        print('  %-24s RGB preview / PNG missing or out of date: making '
-                              'only that' % e['name'])
-                        make_rgb(target, e['name'], e['mode'], ctx, log, title, caption)
+                    for v in preview_variants(e['mode']):
+                        if not stack_ok(rgb_files(target, e['name'], v)[1]):
+                            print('  %-24s %s stack missing or incomplete: making only that' %
+                                  (e['name'], 'RGB' if v == 'rgb' else 'angle'))
+                            make_rgb(target, e['name'], e['mode'], ctx, log, title, caption, v,
+                                     plot=False)
+                    print('  %-24s warped bands already done' % e['name'])
                     done.append(e)
                 except (Failure, OSError) as x:
                     failed.append((e['name'], str(x)))
@@ -2251,7 +2420,10 @@ def warp_outputs(ref_choice, bilinear, tools, env):
                     raise Failure('raster_project_onto.py failed for %s (see %s/%s)' % (
                         ', '.join(bad), WARP_DIR, WARP_LOG))
             n_valid, n_all = nan_mask_and_save(staging, e['mode'], ref_w, ref_h)
-            png = make_rgb(staging, e['name'], e['mode'], ctx, log, title, caption)
+            for v in preview_variants(e['mode']):     # PNGs: after the common stretch
+                make_rgb(staging, e['name'], e['mode'], ctx, log, title, caption, v,
+                         plot=False)
+            png = rgb_files(staging, e['name'])[2]
             write_json(os.path.join(staging, 'warp.json'), {
                 'script': 'alos4_process.py ' + SCRIPT_VERSION, 'made': now_str(),
                 'source': os.path.relpath(e['dir']), 'source_key': source_key,
@@ -2273,8 +2445,71 @@ def warp_outputs(ref_choice, bilinear, tools, env):
             remove_path(staging)
             raise
 
+    # Common colour stretch, per polarisation mode and preview (rgb, angle),
+    # per band: weighted medians of the previews' own mins and maxes (see the
+    # docstring); then every PNG not plotted with it is plotted (again)
+    own = {}
+    for e in list(done):
+        try:
+            for v in preview_variants(e['mode']):
+                own[(e['name'], v)] = scene_stretch(os.path.join(out, e['name']), e['name'],
+                                                    v, force=regen)
+        except (Failure, OSError, ValueError, KeyError) as x:
+            done.remove(e)
+            failed.append((e['name'], 'colour stretch: %s' % x))
+            print('  %-24s FAILED: colour stretch: %s' % (e['name'], x))
+    common, record = {}, {}
+    for mode in ('quad', 'dual'):
+        members = [e['name'] for e in done if e['mode'] == mode]
+        if not members:
+            continue
+        for v in preview_variants(mode):
+            names = preview_band_names(mode, v)
+            bands = []
+            for i in range(3):
+                vals = [own[(n, v)][i] for n in members if own[(n, v)][i][2] > 0]
+                geometric = names[i] != 'arg(C12)'   # an angle: (a + b) / 2
+                if vals:
+                    bands.append((weighted_median([(x[0], x[2]) for x in vals], geometric),
+                                  weighted_median([(x[1], x[2]) for x in vals], geometric)))
+                else:
+                    bands.append((0.0, 1.0))         # no valid pixels anywhere: black
+            common[(mode, v)] = bands
+            record['%s %s' % (mode, v)] = {
+                'band_names': names, 'common_min_max': bands,
+                'own_min_max_valid': {n: own[(n, v)][:] for n in members}}
+    stretch_json = {
+        'about': 'colour stretch shared by the warped previews of each polarisation mode '
+                 'and preview: per band, the weighted median (weights: valid pixels) of '
+                 'the previews\' own mins and of their maxes (own: as py/raster_plot.py, '
+                 '%g%% cut at each end); a weight split exactly between two values gives '
+                 'their geometric mean (arithmetic for arg(C12) or values <= 0)'
+                 % STRETCH_PERCENT,
+        'groups': record}
+    if read_json(os.path.join(out, 'common_stretch.json')) != json.loads(json.dumps(stretch_json)):
+        write_json(os.path.join(out, 'common_stretch.json'), stretch_json)
+    n_plotted = 0
+    for e in list(done):
+        target = os.path.join(out, e['name'])
+        try:
+            for v in preview_variants(e['mode']):
+                s = common[(e['mode'], v)]
+                if regen or not rgb_ok(target, e['name'], e['title'], e['caption'], v, s):
+                    print('  %-24s %s PNG: plotting with the common stretch' % (
+                        e['name'], 'RGB' if v == 'rgb' else 'angle'), flush=True)
+                    make_rgb(target, e['name'], e['mode'], ctx, log, e['title'], e['caption'],
+                             v, stretch=s)
+                    n_plotted += 1
+        except (Failure, OSError) as x:
+            done.remove(e)
+            failed.append((e['name'], str(x)))
+            print('  %-24s FAILED: %s' % (e['name'], x))
+    if not n_plotted and done:
+        print('  PNGs up to date (common colour stretch)')
+
     # PNG copies and one animation per polarisation mode (the colours differ)
-    # (each made only if missing or older than what it is made from)
+    # (a copy is made only if missing or older than its PNG; a GIF only if
+    # missing or its frames changed)
     def stale(f, sources):
         return (not os.path.isfile(f) or
                 any(os.path.getmtime(s) > os.path.getmtime(f) for s in sources))
@@ -2282,22 +2517,30 @@ def warp_outputs(ref_choice, bilinear, tools, env):
     for e in done:
         png = rgb_files(os.path.join(out, e['name']), e['name'])[2]
         copy = os.path.join(out, e['name'] + '.png')
-        if os.path.isfile(png) and stale(copy, [png]):
+        if os.path.isfile(png) and (regen or stale(copy, [png])):
             shutil.copy2(png, copy)
+        if e['mode'] == 'dual':                  # C12 polar-angle version, in angle/
+            png = rgb_files(os.path.join(out, e['name']), e['name'], 'angle')[2]
+            copy = os.path.join(out, 'angle', e['name'] + '_angle.png')
+            if os.path.isfile(png) and (regen or stale(copy, [png])):
+                os.makedirs(os.path.dirname(copy), exist_ok=True)
+                shutil.copy2(png, copy)
     convert = shutil.which('convert') or shutil.which('magick')
     for mode in ('quad', 'dual'):
         pngs = [os.path.join(out, e['name'] + '.png') for e in done
                 if e['mode'] == mode and os.path.isfile(os.path.join(out, e['name'] + '.png'))]
         gif = os.path.join(out, 'sequence_%s.gif' % mode)
-        frames_txt = os.path.join(out, 'sequence_%s.txt' % mode)    # the frames, in order
-        frames = '\n'.join(os.path.basename(p) for p in pngs) + '\n'
         if len(pngs) < 2:
             continue
+        # the frames, in order, with a checksum of each: the GIF is made again
+        # only if it is missing or a frame was added, removed or changed
+        frames_txt = os.path.join(out, 'sequence_%s.txt' % mode)
+        frames = ''.join('%s %s\n' % (os.path.basename(p), file_md5(p)) for p in pngs)
         try:
             same_frames = open(frames_txt).read() == frames
         except OSError:
             same_frames = False
-        if same_frames and not stale(gif, pngs):
+        if same_frames and os.path.isfile(gif) and not regen:
             continue
         if not convert:
             print('ImageMagick (convert) not found: no %s' % os.path.basename(gif))
@@ -2317,6 +2560,71 @@ def warp_outputs(ref_choice, bilinear, tools, env):
     return failed
 
 
+def scene_stretch(folder, name, variant, force=False):
+    """A warped preview's own colour stretch, per band [min, max, N], worked
+    out as py/raster_plot.py does it: the band's valid (finite) values,
+    sorted; min and max are the ones at floor(N * 0.015) and
+    floor(N * 0.985), N = the number of valid values ([None, None, 0] if
+    there are none). Kept in scene_stretch.json next to the stack and
+    worked out again if the stack changed (or force)."""
+    rgb, stack, _ = rgb_files(folder, name, variant)
+    st = os.stat(stack)
+    key = [st.st_size, st.st_mtime_ns]
+    cache = os.path.join(rgb, SCENE_STRETCH)
+    c = read_json(cache)
+    if (not force and c and c.get('stack_size_mtime') == key and
+            c.get('percent') == STRETCH_PERCENT and len(c.get('bands') or []) == 3):
+        return c['bands']
+    h = read_envi_header(stack[:-4] + '.hdr')
+    w, n_lines = int(h['samples']), int(h['lines'])
+    if st.st_size != w * n_lines * 3 * 4:
+        raise Failure('%s has %d bytes, expected %d (3 bands of %d x %d float32)' % (
+            os.path.basename(stack), st.st_size, w * n_lines * 3 * 4, w, n_lines))
+    frac = STRETCH_PERCENT / 100.
+    bands = []
+    for i in range(3):
+        v = np.fromfile(stack, dtype='<f4', count=w * n_lines, offset=i * w * n_lines * 4)
+        v = v[np.isfinite(v)]
+        n = int(v.size)
+        if n == 0:
+            bands.append([None, None, 0])
+            continue
+        v.sort()
+        bands.append([float(v[int(math.floor(float(n) * frac))]),
+                      float(v[int(math.floor(float(n) * (1. - frac)))]), n])
+    write_json(cache, {'about': 'this preview\'s own colour stretch, per band [min, max, '
+                                'valid pixels], as py/raster_plot.py works it out',
+                       'percent': STRETCH_PERCENT, 'stack': os.path.basename(stack),
+                       'stack_size_mtime': key, 'bands': bands})
+    return bands
+
+
+def weighted_median(pairs, geometric):
+    """Weighted median of (value, weight) pairs, weights > 0 (integers). If
+    the weight splits exactly between two values, their geometric mean
+    sqrt(a*b) (geometric and both > 0) or else (a + b) / 2; with equal
+    weights this is the ordinary median."""
+    pairs = sorted(pairs)
+    total = sum(wt for _, wt in pairs)
+    c = 0
+    for i, (v, wt) in enumerate(pairs):
+        c += wt
+        if 2 * c > total:
+            return v
+        if 2 * c == total:
+            u = pairs[i + 1][0]
+            return math.sqrt(v * u) if (geometric and v > 0 and u > 0) else (v + u) / 2.
+    raise ValueError('weighted_median: no values')
+
+
+def file_md5(path):
+    m = hashlib.md5()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            m.update(block)
+    return m.hexdigest()
+
+
 def run_warp(a):
     """The warp step with the tools it needs; returns a list of problems."""
     tools, env, missing = find_tools()
@@ -2327,7 +2635,7 @@ def run_warp(a):
     if missing:
         return [('warp', 'missing tools: %s' % ', '.join(missing))]
     try:
-        return warp_outputs(a.warp_ref, a.warp_bilinear, tools, env)
+        return warp_outputs(a.warp_ref, a.warp_bilinear, tools, env, a.regen_png)
     except Failure as e:
         return [('warp', str(e))]
 
@@ -2360,7 +2668,7 @@ def main():
                 ', %s mode, read via PALSAR-2 format' % ds['p3']['mode']
                 if ds.get('convert') else ''))
 
-    if a.warp_only:
+    if a.warp_only or a.regen_png:
         problems = run_warp(a)
         for n, m in problems:
             print('FAILED %s: %s' % (n, m))
