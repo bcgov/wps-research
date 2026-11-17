@@ -246,6 +246,7 @@ import math
 import shutil
 import struct
 import hashlib
+import warnings
 import contextlib
 import signal
 import argparse
@@ -2246,12 +2247,21 @@ def warp_collect():
 
 
 def warp_grid(path):
+    # No gdal.UseExceptions() here: it imports osgeo.gdal_array, which prints a
+    # long "A module that was compiled using NumPy 1.x cannot be run in NumPy
+    # 2.x" message when GDAL was built against NumPy 1.x and NumPy 2.x is
+    # installed (e.g. MacPorts GDAL on a Mac). Only the grid is read, so no
+    # arrays are needed; without exceptions a failed Open returns None.
     from osgeo import gdal
-    gdal.UseExceptions()
-    try:
-        g = gdal.Open(path)
-    except RuntimeError as e:
-        raise Failure('GDAL cannot open %s (%s)' % (path, e))
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FutureWarning)   # GDAL >= 3.9: note on exceptions
+        try:
+            g = gdal.Open(path)
+        except RuntimeError as e:
+            raise Failure('GDAL cannot open %s (%s)' % (path, e))
+    if g is None:
+        raise Failure('GDAL cannot open %s (%s)' % (
+            path, gdal.GetLastErrorMsg() or 'no reason given'))
     return g.GetGeoTransform(), g.GetProjection(), g.RasterXSize, g.RasterYSize
 
 
@@ -2260,11 +2270,16 @@ def warp_same_grid(gt, wkt, ref_gt, ref_wkt):
     from osgeo import osr
     if not wkt or not ref_wkt:
         return False
-    a, b = osr.SpatialReference(), osr.SpatialReference()
-    a.ImportFromWkt(wkt)
-    b.ImportFromWkt(ref_wkt)
-    if not a.IsSame(b):
-        return False
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FutureWarning)   # as in warp_grid
+        a, b = osr.SpatialReference(), osr.SpatialReference()
+        try:
+            if a.ImportFromWkt(wkt) != 0 or b.ImportFromWkt(ref_wkt) != 0:
+                return False
+        except RuntimeError:
+            return False
+        if not a.IsSame(b):
+            return False
     px, py = ref_gt[1], ref_gt[5]
     if gt[2] != 0 or gt[4] != 0 or ref_gt[2] != 0 or ref_gt[4] != 0:
         return False
@@ -2650,7 +2665,9 @@ def main():
               ', '.join(ignored))
     if not datasets:
         err('no dataset folders (with a VOL-ALOS2*, VOL-ALOS4* or SAOCOM S1A_/S1B_*.xemt '
-            'file inside) here')
+            'file inside) here' + (
+                '; run it from the folder that holds %s/ and the dataset folders' % WARP_DIR
+                if os.path.basename(os.getcwd()) == WARP_DIR else ''))
 
     runnable, results = [], []
     for ds in datasets:
