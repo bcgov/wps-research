@@ -248,6 +248,11 @@ Warp (at the end of every run; --no-warp turns it off)
     GIFs again; nothing else runs (no SNAP, no resampling). It stops with a
     message if ./warp/ is not complete and up to date (run without
     --regen-png first). It keeps the reference in ./warp/reference.txt.
+    Resumable: its progress is kept in ./warp/regen_png_progress.json, so
+    if it is stopped, the same command carries on (stretch values and PNGs
+    already redone, and still up to date, are not redone; the PNG copies
+    and GIFs are made again). The file is deleted when it has finished
+    (delete it by hand to start a stopped --regen-png from the beginning).
 
 Usage (run from the folder that holds the dataset folders)
     python3 alos4_process.py                    # all defaults
@@ -2286,6 +2291,7 @@ def parse_args():
 WARP_DIR = 'warp'
 WARP_LOG = 'alos4_warp.log'
 GIF_DELAY = 111                                 # hundredths of a second per frame
+REGEN_PROGRESS = 'regen_png_progress.json'      # --regen-png: what is redone so far
 
 
 def warp_collect():
@@ -2415,6 +2421,19 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
                      'the warp step first (without --regen-png); nothing was changed' % (
                          WARP_DIR, ', '.join(bad)))]
         print('--regen-png: plotting every PNG in %s/ again (nothing else runs)' % WARP_DIR)
+    # --regen-png progress (resumable): scenes whose stretch values and PNGs
+    # (name + variant) were redone; deleted when --regen-png has finished
+    progress_f = os.path.join(out, REGEN_PROGRESS)
+    progress = (read_json(progress_f) if regen else None) or {}
+    if regen and progress:
+        print('--regen-png: carrying on from a stopped run (%d PNG(s) already redone)' %
+              len(progress.get('plotted') or []))
+    progress = {'about': '--regen-png progress: deleted when it has finished',
+                'started': progress.get('started') or now_str(),
+                'stretch_done': list(progress.get('stretch_done') or []),
+                'plotted': list(progress.get('plotted') or [])}
+    if regen:
+        write_json(progress_f, progress)
     if os.path.isfile(rt):
         old = open(rt).read().split()
         if old and old[0] != ref['name']:
@@ -2530,11 +2549,12 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
     own = {}
     for e in list(done):
         try:
+            fresh = regen and e['name'] not in progress['stretch_done']   # redo the values
             for v in preview_variants(e['mode']):
                 own[(e['name'], v)] = scene_stretch(os.path.join(out, e['name']), e['name'],
-                                                    v, force=regen)
+                                                    v, force=fresh)
             if e['mode'] == 'dual':              # Faraday rotation indicator in the title
-                rho = hh_hv_coherence(os.path.join(out, e['name']), force=regen)
+                rho = hh_hv_coherence(os.path.join(out, e['name']), force=fresh)
                 if rho is not None and rho >= FARADAY_HIGH_RHO:
                     e['title'] += FARADAY_FLAG
             elif e['mission'] in ('ALOS2', 'ALOS4'):    # quad-pol: from the original data
@@ -2549,6 +2569,9 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
                         e['name'], x))
                 if omega is not None and abs(omega) >= FARADAY_HIGH_DEG:
                     e['title'] += FARADAY_FLAG
+            if fresh:
+                progress['stretch_done'].append(e['name'])
+                write_json(progress_f, progress)
         except (Failure, OSError, ValueError, KeyError) as x:
             done.remove(e)
             failed.append((e['name'], 'colour stretch / indicator: %s' % x))
@@ -2590,7 +2613,10 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
         try:
             for v in preview_variants(e['mode']):
                 s = common[(e['mode'], v)]
-                if regen or not rgb_ok(target, e['name'], e['title'], e['caption'], v, s):
+                ok = rgb_ok(target, e['name'], e['title'], e['caption'], v, s)
+                key = '%s %s' % (e['name'], v)
+                # --regen-png: every PNG, except those it already redid (if still up to date)
+                if (regen and not (ok and key in progress['plotted'])) or not ok:
                     print('  %-24s %s PNG: plotting with the common stretch' % (
                         label, 'RGB' if v == 'rgb' else 'angle'), flush=True)
                     label = ''
@@ -2600,6 +2626,9 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
                     make_rgb(target, e['name'], e['mode'], ctx, log, e['title'], e['caption'],
                              v, stretch=s)
                     n_plotted += 1
+                    if regen and key not in progress['plotted']:
+                        progress['plotted'].append(key)
+                        write_json(progress_f, progress)
         except (Failure, OSError) as x:
             done.remove(e)
             failed.append((e['name'], str(x)))
@@ -2626,6 +2655,7 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
                 os.makedirs(os.path.dirname(copy), exist_ok=True)
                 shutil.copy2(png, copy)
     convert = shutil.which('convert') or shutil.which('magick')
+    gif_failed = False
     for mode in ('quad', 'dual'):
         pngs = [os.path.join(out, e['name'] + '.png') for e in done
                 if e['mode'] == mode and os.path.isfile(os.path.join(out, e['name'] + '.png'))]
@@ -2653,8 +2683,14 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
             print('%s: %d frames' % (os.path.relpath(gif), len(pngs)))
         else:
             remove_path(tmp)
+            gif_failed = True
             print('making %s failed (see %s/%s)' % (os.path.basename(gif), WARP_DIR, WARP_LOG))
     log.close()
+    if regen:
+        if failed or gif_failed:
+            print('--regen-png: not finished (see above); run it again to carry on')
+        else:
+            remove_path(progress_f)             # finished
     print('warp: %d on the grid of %s in %s/%s' % (
         len(done), ref['name'], WARP_DIR, ', %d failed' % len(failed) if failed else ''))
     return failed
@@ -2889,7 +2925,12 @@ def main():
                 if ds.get('convert') else ''))
 
     if a.warp_only or a.regen_png:
-        problems = run_warp(a)
+        catch_stop_signals()
+        try:
+            problems = run_warp(a)
+        except KeyboardInterrupt:
+            print('\ninterrupted: run the same command again to carry on')
+            return 130
         for n, m in problems:
             print('FAILED %s: %s' % (n, m))
         return 1 if problems else 0
