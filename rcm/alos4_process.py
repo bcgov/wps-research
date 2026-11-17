@@ -2594,6 +2594,9 @@ def warp_outputs(ref_choice, bilinear, tools, env, regen=False):
                     print('  %-24s %s PNG: plotting with the common stretch' % (
                         label, 'RGB' if v == 'rgb' else 'angle'), flush=True)
                     label = ''
+                    if regen:                    # old title / caption files go first
+                        for n in ('title_string.txt', 'copyright_string.txt'):
+                            remove_path(os.path.join(rgb_files(target, e['name'], v)[0], n))
                     make_rgb(target, e['name'], e['mode'], ctx, log, e['title'], e['caption'],
                              v, stretch=s)
                     n_plotted += 1
