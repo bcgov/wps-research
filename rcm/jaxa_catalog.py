@@ -65,7 +65,7 @@ STATUS COLUMN (one per product; damaged zips are also listed at the end of a run
 MERGE MODE (--merge)
   For combining catalogues made on different machines / file systems: copy
   each machine's JAXA_products_catalogue.csv into its own subfolder of one
-  folder (any depth, e.g. heartofgold/, laptop/usb1/), cd to that folder
+  folder (any depth, e.g. machine1/, laptop/usb1/), cd to that folder
   and run with --merge.
   * Exits with an error if JAXA_products_catalogue.csv already exists in
     the present folder, since that is where the merged CSV is written.
@@ -165,7 +165,7 @@ WHAT IT DOES
 SITE NAMES
   Taken from folder names "<year>_<name>" in the paths of all copies of a
   scene on all machines, e.g. JAXA_COLLECT/2021_sparks_lake -> Sparks Lake
-  (2021). Generic folders (2025_JAXA_DATA, 2023_EODMS_data_from_Hao, ...) are
+  (2021). Generic folders (2025_JAXA_DATA, 2023_EODMS_data_from_partner, ...) are
   skipped via SITE_STOPWORDS. Folders named otherwise can be mapped to a
   site name in FOLDER_SITE_NAMES (e.g. PALSAR_SF -> SanFransisco). An area with no site folder is named
   "UNRESOLVED (<its most common folder name>)"; one with several names lists
@@ -2048,7 +2048,7 @@ def write_shapefile(path, fields, features, points=False):
 def site_names_in_path(path):
     """Site names from folder names like 2021_sparks_lake or
     2017_ELEPHANT_HILL (SITE_FOLDER_REGEX), skipping generic folders such as
-    2025_JAXA_DATA or 2023_EODMS_data_from_Hao (SITE_STOPWORDS).
+    2025_JAXA_DATA or 2023_EODMS_data_from_partner (SITE_STOPWORDS).
     Returns [(display name, year), ...]."""
     out = []
     named = {k.lower(): v for k, v in FOLDER_SITE_NAMES.items()}
