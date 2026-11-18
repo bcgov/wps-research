@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-20261102 t3_ratio_scan.py -- find the pre/post T3 pair whose post/pre ratio gives the
+t3_ratio_scan.py -- find the pre/post T3 pair whose post/pre ratio gives the
 best contrast for a set of polygons (e.g. fire perimeters), then write that
 ratio image plus a PNG with the polygons drawn on it.
 
@@ -392,49 +392,205 @@ def srgb_to_lab(rgb):
                      200 * (f[..., 1] - f[..., 2])], axis=-1)
 
 
-def pick_line_colour(pixels, rng, n_samples=20000, kL=2.0, pct=5):
-    """Pick the one colour that stands out most against `pixels` (the image
-    colours under and next to the polygon outlines).
-    Candidates: 17x17x17 grid over the RGB cube. Distance: CIELAB with the
-    lightness difference weighted x2 (thin lines are seen mostly through
-    lightness contrast). Objective: the 5th percentile of the distance over
-    the pixels, i.e. the line contrasts with ~95% of what it is drawn over;
-    the candidate with the largest value wins."""
-    if len(pixels) > n_samples:
-        pixels = pixels[rng.choice(len(pixels), n_samples, replace=False)]
-    lab_p = srgb_to_lab(pixels.astype(np.float64))
-    lv = np.linspace(0.0, 1.0, 17)
+def ciede2000(lab1, lab2, kL=1.0):
+    """CIEDE2000 colour difference (broadcasting). kL < 1 weights lightness
+    differences more strongly."""
+    L1, a1, b1 = lab1[..., 0], lab1[..., 1], lab1[..., 2]
+    L2, a2, b2 = lab2[..., 0], lab2[..., 1], lab2[..., 2]
+    C1, C2 = np.hypot(a1, b1), np.hypot(a2, b2)
+    Cb7 = ((C1 + C2) / 2) ** 7
+    G = 0.5 * (1 - np.sqrt(Cb7 / (Cb7 + 25.0 ** 7)))
+    a1p, a2p = (1 + G) * a1, (1 + G) * a2
+    C1p, C2p = np.hypot(a1p, b1), np.hypot(a2p, b2)
+    h1 = np.degrees(np.arctan2(b1, a1p)) % 360
+    h2 = np.degrees(np.arctan2(b2, a2p)) % 360
+    zero = (C1p * C2p) == 0
+    dh = h2 - h1
+    dh = np.where(dh > 180, dh - 360, np.where(dh < -180, dh + 360, dh))
+    dh = np.where(zero, 0, dh)
+    dL, dC = L2 - L1, C2p - C1p
+    dH = 2 * np.sqrt(C1p * C2p) * np.sin(np.radians(dh / 2))
+    Lb, Cbp = (L1 + L2) / 2, (C1p + C2p) / 2
+    hs = h1 + h2
+    hb = np.where(np.abs(h1 - h2) > 180, (hs + 360) / 2, hs / 2)
+    hb = np.where(zero, hs, hb)
+    T = (1 - 0.17 * np.cos(np.radians(hb - 30)) + 0.24 * np.cos(np.radians(2 * hb))
+         + 0.32 * np.cos(np.radians(3 * hb + 6)) - 0.20 * np.cos(np.radians(4 * hb - 63)))
+    SL = 1 + 0.015 * (Lb - 50) ** 2 / np.sqrt(20 + (Lb - 50) ** 2)
+    SC = 1 + 0.045 * Cbp
+    SH = 1 + 0.015 * Cbp * T
+    Cbp7 = Cbp ** 7
+    RT = (-2 * np.sqrt(Cbp7 / (Cbp7 + 25.0 ** 7))
+          * np.sin(np.radians(60 * np.exp(-((hb - 275) / 25) ** 2))))
+    return np.sqrt((dL / (kL * SL)) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2
+                   + RT * (dC / SC) * (dH / SH))
+
+
+def pick_line_colour(pixel_sets, rng, n_samples=4000, kL=0.5, pct=5):
+    """Pick ONE outline colour that stands out against every image in
+    pixel_sets (each = the colours under and next to the outlines, no-data
+    black included).
+      candidates : 13 x 13 x 13 grid over the RGB cube
+      difference : CIEDE2000 with lightness weighted x2 (kL = 0.5), because
+                   thin lines are seen mainly through lightness contrast
+      per image  : 5th percentile of the difference (line contrasts with
+                   ~95% of the pixels it crosses)
+      objective  : the worst image's value (same colour on every figure)
+    Returns colour (rgb 0..1) and its objective value."""
+    lv = np.linspace(0.0, 1.0, 13)
     cand = np.stack(np.meshgrid(lv, lv, lv, indexing="ij"), -1).reshape(-1, 3)
     lab_c = srgb_to_lab(cand)
-    w = np.array([kL, 1.0, 1.0])
-    score = np.empty(len(cand))
-    for i in range(0, len(cand), 64):
-        d = np.sqrt((((lab_c[i:i + 64, None, :] - lab_p[None, :, :]) * w) ** 2).sum(-1))
-        score[i:i + 64] = np.percentile(d, pct, axis=1)
-    j = int(np.argmax(score))
-    return cand[j], score[j]
+    worst = np.full(len(cand), np.inf)
+    for pix in pixel_sets:
+        if len(pix) > n_samples:
+            pix = pix[rng.choice(len(pix), n_samples, replace=False)]
+        lab_p = srgb_to_lab(pix.astype(np.float64))
+        sc = np.empty(len(cand))
+        for i in range(0, len(cand), 32):
+            d = ciede2000(lab_c[i:i + 32, None, :], lab_p[None, :, :], kL)
+            sc[i:i + 32] = np.percentile(d, pct, axis=1)
+        worst = np.minimum(worst, sc)
+    j = int(np.argmax(worst))
+    return cand[j], worst[j]
 
 
-def make_png(path, rgb, extent, rings, colour, lw_px, title_lines):
+def stretch(bands, lims=None):
+    """Bands (list of 2-D dB arrays) -> RGB 0..1, per-band 2-98% stretch
+    (or given limits); NaN anywhere -> black. Returns rgb, limits."""
+    if lims is None:
+        lims = []
+        for d in bands:
+            v = d[np.isfinite(d)]
+            if v.size == 0:
+                err("an image band has no valid pixels")
+            lo, hi = np.percentile(v, [2, 98])
+            lims.append((lo, max(hi, lo + 1e-6)))
+    rgb = np.zeros(bands[0].shape + (3,), np.float32)
+    nodata = np.zeros(bands[0].shape, bool)
+    for i, (d, (lo, hi)) in enumerate(zip(bands, lims)):
+        rgb[..., i] = np.clip((d - lo) / (hi - lo), 0, 1)
+        nodata |= ~np.isfinite(d)
+    rgb[nodata] = 0.0
+    return rgb, lims
+
+
+def sensor_name(folder):
+    """Readable sensor / mode from a folder name like 20260705_ALOS4_quad."""
+    u = folder.upper()
+    s = ("ALOS-4 PALSAR-3" if "ALOS4" in u else
+         "ALOS-2 PALSAR-2" if "ALOS2" in u else
+         "SAOCOM" if "SAOCOM" in u else "")
+    m = "quad-pol" if "QUAD" in u else ("dual-pol" if "DUAL" in u else "")
+    return " ".join(x for x in (s, m) if x)
+
+
+def nice_date(d):
+    return "%d %s %d" % (d.day, d.strftime("%b"), d.year)
+
+
+# colours used on the (black) figure background
+FG = "#ffffff"
+FG_DIM = "#b8b8b8"
+BAND_COL = {"T22": "#ff6b6b", "T33": "#5ee05e", "T11": "#6fa0ff"}
+BAND_TXT = {"T22": "T22 double-bounce", "T33": "T33 volume", "T11": "T11 surface"}
+
+
+def figure_layout(W, n_caption_lines):
+    """Pixel sizes shared by all figures so their image areas line up."""
+    s = {"title": W * 0.024, "sub": W * 0.0155, "cap": W * 0.0128}
+    pad = W * 0.012
+    s["header"] = int(round(pad * 1.2 + s["title"] * 1.45 + 2 * s["sub"] * 1.55))
+    s["footer"] = int(round(pad * 1.6 + n_caption_lines * s["cap"] * 1.5))
+    s["pad"] = pad
+    return s
+
+
+def wrap_caption(paragraphs, W, cap_px):
+    import textwrap
+    width = max(40, int(W / (0.53 * cap_px)))
+    out = []
+    for p, style in paragraphs:
+        for ln in textwrap.wrap(p, width) or [""]:
+            out.append((ln, style))
+    return out
+
+
+def render_figure(path, rgb, extent, rings, colour, lw_px, title, subtitle,
+                  caption, lay, scalebar_m):
+    """Black-background figure: title + subtitle + RGB legend on top, image,
+    wrapped caption below. Identical sizes for all figures (same lay)."""
     plt, LineCollection = import_matplotlib()
     H, W = rgb.shape[:2]
-    dpi = 100
-    maxchars = max(len(s) for s in title_lines)
-    fs = float(np.clip(0.95 * W * 72.0 / (0.6 * maxchars * dpi), 7, 18))
-    line_px = fs * 1.45 * dpi / 72.0
-    top = int(np.ceil(line_px * (len(title_lines) + 0.6)))
-    fig = plt.figure(figsize=(W / dpi, (H + top) / dpi), dpi=dpi)
-    ax = fig.add_axes([0, 0, 1, H / float(H + top)])
+    dpi = 100.0
+    pt = 72.0 / dpi                                  # points per pixel
+    Htot = H + lay["header"] + lay["footer"]
+    fig = plt.figure(figsize=(W / dpi, Htot / dpi), dpi=dpi, facecolor="black")
+    ax = fig.add_axes([0, lay["footer"] / Htot, 1, H / Htot])
+    ax.set_facecolor("black")
     ax.imshow(rgb, extent=extent, interpolation="nearest", aspect="auto")
+    # outline: thin casing (black or white, whichever contrasts with the
+    # chosen colour) under the chosen colour, so it reads on any background
+    lum = float(np.dot(colour, [0.2126, 0.7152, 0.0722]))
+    casing = "black" if lum > 0.35 else "white"
+    ax.add_collection(LineCollection(rings, colors=casing,
+                                     linewidths=(lw_px + 2.0) * pt,
+                                     joinstyle="round", capstyle="round"))
     ax.add_collection(LineCollection(rings, colors=[tuple(colour)],
-                                     linewidths=lw_px * 72.0 / dpi))
+                                     linewidths=lw_px * pt,
+                                     joinstyle="round", capstyle="round"))
     ax.set_xlim(extent[0], extent[1])
     ax.set_ylim(extent[2], extent[3])
     ax.set_axis_off()
-    for i, s in enumerate(title_lines):
-        y = 1.0 - (0.3 + i + 0.5) * line_px / (H + top)
-        fig.text(0.5, y, s, ha="center", va="center", fontsize=fs)
-    fig.savefig(path, dpi=dpi, facecolor="white")
+    if scalebar_m:
+        x_span = extent[1] - extent[0]
+        y_span = extent[3] - extent[2]
+        x0 = extent[0] + 0.04 * x_span
+        y0 = extent[2] + 0.035 * y_span
+        h = 0.008 * y_span
+        ax.add_patch(plt.Rectangle((x0, y0), scalebar_m, h, facecolor="white",
+                                   edgecolor="black", linewidth=1.0, zorder=5))
+        km = scalebar_m / 1000.0
+        ax.text(x0 + scalebar_m / 2, y0 + h * 1.8,
+                ("%g km" % km), color="white", ha="center", va="bottom",
+                fontsize=lay["sub"] * pt, fontweight="bold", zorder=5,
+                path_effects=[__import__("matplotlib.patheffects", fromlist=["x"])
+                              .withStroke(linewidth=3, foreground="black")])
+
+    def ytop(px_from_top):
+        return 1.0 - px_from_top / Htot
+
+    y = lay["pad"] * 0.8
+    fig.text(0.5, ytop(y + lay["title"] * 0.7), title, color=FG, ha="center",
+             va="center", fontsize=lay["title"] * pt, fontweight="bold")
+    y += lay["title"] * 1.45
+    fig.text(0.5, ytop(y + lay["sub"] * 0.75), subtitle, color=FG_DIM,
+             ha="center", va="center", fontsize=lay["sub"] * pt)
+    y += lay["sub"] * 1.55
+    # coloured RGB legend, laid out piece by piece and centred
+    pieces = [("R = ", FG_DIM), (BAND_TXT["T22"], BAND_COL["T22"]),
+              ("      G = ", FG_DIM), (BAND_TXT["T33"], BAND_COL["T33"]),
+              ("      B = ", FG_DIM), (BAND_TXT["T11"], BAND_COL["T11"])]
+    r = fig.canvas.get_renderer()
+    texts, widths = [], []
+    for s, c in pieces:
+        t = fig.text(0, ytop(y + lay["sub"] * 0.75), s, color=c, ha="left",
+                     va="center", fontsize=lay["sub"] * pt,
+                     fontweight="bold" if c != FG_DIM else "normal")
+        texts.append(t)
+        widths.append(t.get_window_extent(r).width)
+    x = (W - sum(widths)) / 2.0
+    for t, w in zip(texts, widths):
+        t.set_x(x / W)
+        x += w
+    # caption
+    y = H + lay["header"] + lay["pad"] * 0.8
+    for ln, style in caption:
+        fig.text(lay["pad"] / W, ytop(y + lay["cap"] * 0.75), ln,
+                 color=FG if style == "main" else FG_DIM, ha="left",
+                 va="center", fontsize=lay["cap"] * pt,
+                 family="monospace" if style == "id" else None)
+        y += lay["cap"] * 1.5
+    fig.savefig(path, dpi=dpi, facecolor="black")
     plt.close(fig)
 
 
@@ -629,7 +785,7 @@ def main():
 
     # ---- 7. ratio.bin / ratio.hdr ---------------------------------------------
     k = max(1, int(np.ceil(max(nx, ny) / float(a.png_max))))
-    disp = []
+    disp, disp_pre, disp_post = [], [], []
     with open("ratio.bin", "wb") as f:
         for b in ORDER:
             p0 = grids[pre][b]["ds"].GetRasterBand(1).ReadAsArray().astype(np.float32)
@@ -643,6 +799,11 @@ def main():
                 db = 10.0 * np.log10(r)
             db[~np.isfinite(db)] = np.nan
             disp.append(block_mean(db, k).astype(np.float32))
+            # pre / post power for the Pauli RGB figures (block mean of power, then dB)
+            for store, arr in ((disp_pre, p0), (disp_post, p1)):
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    pw = np.where(np.isfinite(arr) & (arr > 0), arr, np.nan)
+                    store.append((10.0 * np.log10(block_mean(pw, k))).astype(np.float32))
             del p0, p1, r, ok, db
     if os.path.exists("ratio.bin.aux.xml"):     # stale GDAL stats from an old ratio.bin
         os.remove("ratio.bin.aux.xml")
@@ -677,53 +838,115 @@ def main():
     chk = None
     print("wrote ratio.bin, ratio.hdr  (bands: %s)" % ", ".join(band_names))
 
-    # ---- 8. ratio.png -----------------------------------------------------------
+    # ---- 8. PNGs: ratio.png, ratio_pre.png, ratio_post.png ----------------------
+    # all three share one layout (same pixel size, same image position) so they
+    # overlay exactly on consecutive slides
     dh, dw = disp[0].shape
-    rgb = np.zeros((dh, dw, 3), np.float32)
-    nodata = np.zeros((dh, dw), bool)
-    for i, d in enumerate(disp):
-        v = d[np.isfinite(d)]
-        if v.size == 0:
-            err("ratio band %s has no valid pixels" % ORDER[i])
+    rgb_ratio, lim_ratio = stretch(disp)
+    # pre and post Pauli RGB share one stretch, so equal colours = equal power
+    lim_pp = []
+    for i in range(3):
+        v = np.concatenate([d[i][np.isfinite(d[i])] for d in (disp_pre, disp_post)])
         lo, hi = np.percentile(v, [2, 98])
-        if hi <= lo:
-            hi = lo + 1e-6
-        rgb[..., i] = np.clip((d - lo) / (hi - lo), 0, 1)
-        nodata |= ~np.isfinite(d)
-    rgb[nodata] = 0.0                                   # no data -> black
+        lim_pp.append((lo, max(hi, lo + 1e-6)))
+    rgb_pre, _ = stretch(disp_pre, lim_pp)
+    rgb_post, _ = stretch(disp_post, lim_pp)
 
     gt_d = (gt[0], gt[1] * k, 0.0, gt[3], 0.0, gt[5] * k)
     extent = (gt[0], gt[0] + dw * k * gt[1], gt[3] + dh * k * gt[5], gt[3])
     rings = rings_xy(polys)
-    lw_px = float(np.clip(dw / 900.0, 1.5, 4.0))
+    lw_px = float(np.clip(dw / 300.0, 3.0, 8.0))
     lds, llyr = mem_layer(dst_srs, [line_geom(xy) for xy in rings])
     line_ds = burn(llyr, dw, dh, gt_d, wkt, all_touched=True)
     under = line_ds.GetRasterBand(1).ReadAsArray() > 0
     line_ds = None
-    under = dilate(under, int(np.ceil(lw_px / 2.0)) + 1)
-    pix = rgb[under] if under.any() else rgb.reshape(-1, 3)
-    colour, cscore = pick_line_colour(pix, rng)
+    under = dilate(under, int(np.ceil(lw_px / 2.0)) + 2)
+    sets = [im[under] if under.any() else im.reshape(-1, 3)
+            for im in (rgb_ratio, rgb_pre, rgb_post)]
+    colour, cscore = pick_line_colour(sets, rng)
     hexcol = "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in colour)
-    print("outline colour %s (contrast score %.1f, from %d pixels along the "
-          "outlines)" % (hexcol, cscore, len(pix)))
+    print("outline colour %s (CIEDE2000 contrast %.1f, worst of the 3 figures)"
+          % (hexcol, cscore))
 
-    rank_txt = "rank %d of %d pairs%s" % (best["rank"], len(results),
-                                          " (chosen with --pair)" if a.pair else "")
-    title = [
-        "T3 ratio post/pre    R = T22   G = T33   B = T11    "
-        "(10·log10 ratio, per-band 2–98% stretch)",
-        "pre: %s (%s)     post: %s (%s)     Δt = %d days"
-        % (pre, dates[pre].isoformat(), post, dates[post].isoformat(), best["days"]),
-        "%s: %d polygons on image, outline %s (auto max-contrast)"
-        % (shp_name, n_on, hexcol),
-        "JM = %.3f (0–2)   polygon coverage = %.0f%%   score = %.3f   %s   "
-        "[background: %s]"
-        % (best["jm"], 100 * best["coverage"], best["score"], rank_txt, bg_desc),
-        "ratio.bin  =  python t3_ratio.py %s %s" % (pre, post),
+    # scale bar (projected CRS in metres only): ~1/5 of the image width
+    scalebar_m = None
+    if dst_srs is not None and dst_srs.IsProjected() and \
+            abs(dst_srs.GetLinearUnits() - 1.0) < 1e-9:
+        target = abs(extent[1] - extent[0]) / 5.0
+        nice = [n * 10 ** e for e in range(0, 7) for n in (1, 2, 5)]
+        scalebar_m = max([n for n in nice if n <= target] or [nice[0]])
+
+    sens_pre, sens_post = sensor_name(pre), sensor_name(post)
+    sens = sens_pre if sens_pre == sens_post else "%s → %s" % (sens_pre, sens_post)
+    lband = "L-band " if all(s.startswith(("ALOS", "SAOCOM")) for s in (sens_pre, sens_post)) else ""
+    n_imgs = len(names)
+    rank_txt = "rank %d of %d date pairs" % (best["rank"], len(results))
+    poly_txt = ("Outlines: %d polygon%s from %s (one colour for all, chosen "
+                "automatically for maximum contrast)."
+                % (n_on, "" if n_on == 1 else "s", shp_name))
+    if a.pair:
+        sel_txt = ("Pair chosen manually (--pair); its separability score is "
+                   "%s." % rank_txt)
+    else:
+        sel_txt = ("Pair chosen automatically: of all %d date pairs from %d "
+                   "images, this pre/post pair gives the strongest contrast "
+                   "between the ratio inside the outlines and a %s around "
+                   "them." % (len(results), n_imgs,
+                              ("%g–%g m ring" % (a.gap, maxd)) if a.ring > 0
+                              else "background beyond %g m" % a.gap))
+    stats_txt = ("Separability: Jeffries–Matusita distance JM = %.2f (0 = "
+                 "same, 2 = fully separable) × %.0f%% of outlined area imaged "
+                 "= score %.2f (%s)."
+                 % (best["jm"], 100 * best["coverage"], best["score"], rank_txt))
+    rng_txt = ", ".join("%s %+.1f to %+.1f dB" % (b, lo, hi)
+                        for b, (lo, hi) in zip(ORDER, lim_ratio))
+    ids_txt = "pre: %s    post: %s" % (pre, post)
+
+    cap_ratio = [
+        (sel_txt + " " + stats_txt, "main"),
+        ("Display: 10·log10(post/pre) per band, 2–98%% stretch (%s). A brighter "
+         "channel = a larger post/pre ratio in that band (e.g. less green = "
+         "lost volume scattering). Black = no data. %s" % (rng_txt, poly_txt), "dim"),
+        (ids_txt, "id"),
     ]
-    make_png("ratio.png", rgb, extent, rings, colour, lw_px, title)
-    print("wrote ratio.png (%d x %d image%s), ratio_scan.csv"
-          % (dw, dh, (", %dx%d block mean" % (k, k)) if k > 1 else ""))
+    pp_rng = ", ".join("%s %.1f to %.1f dB" % (b, lo, hi)
+                       for b, (lo, hi) in zip(ORDER, lim_pp))
+
+    def cap_pp(which):
+        return [
+            ("%s image of the change ratio pair (%s → %s, %d days apart; "
+             "%s, JM = %.2f)."
+             % (which, nice_date(dates[pre]), nice_date(dates[post]),
+                best["days"], rank_txt, best["jm"]), "main"),
+            ("Display: Pauli power in dB, 2–98%% stretch shared by the pre and "
+             "post images, so equal colours mean equal backscatter (%s). Black "
+             "= no data. %s" % (pp_rng, poly_txt), "dim"),
+            (ids_txt, "id"),
+        ]
+
+    figs = [
+        ("ratio.png", rgb_ratio,
+         "%sPolSAR change: %s → %s" % (lband, nice_date(dates[pre]),
+                                     nice_date(dates[post])),
+         "Post / pre ratio of Pauli T3 powers  ·  %s  ·  %d days" % (sens, best["days"]),
+         cap_ratio),
+        ("ratio_pre.png", rgb_pre,
+         "Pre: %s" % nice_date(dates[pre]),
+         "Pauli RGB  ·  %s  ·  %s" % (sens_pre, pre), cap_pp("Pre")),
+        ("ratio_post.png", rgb_post,
+         "Post: %s" % nice_date(dates[post]),
+         "Pauli RGB  ·  %s  ·  %s" % (sens_post, post), cap_pp("Post")),
+    ]
+    probe = figure_layout(dw, 0)
+    wrapped = [wrap_caption(f[4], dw, probe["cap"]) for f in figs]
+    lay = figure_layout(dw, max(len(w) for w in wrapped))
+    for (path, rgb, title, sub, _), cap in zip(figs, wrapped):
+        render_figure(path, rgb, extent, rings, colour, lw_px, title, sub, cap,
+                      lay, scalebar_m)
+    print("wrote ratio.png, ratio_pre.png, ratio_post.png (%d x %d px each, "
+          "image %d x %d%s), ratio_scan.csv"
+          % (dw, dh + lay["header"] + lay["footer"], dw, dh,
+             (", %dx%d block mean" % (k, k)) if k > 1 else ""))
 
 
 if __name__ == "__main__":
