@@ -39,11 +39,19 @@ What it does
                               T22, T33, T11 post/pre (same output as
                               t3_ratio.py for that pair); header map info /
                               CRS copied from the inputs
-       ratio.png              RGB = T22, T33, T11 ratio in dB, per-band 2-98%
-                              stretch; polygons outlined in ONE colour picked
-                              from the image data for maximum contrast (see
-                              pick_line_colour); title names the pre/post
-                              folders and dates
+       ratio.png              change figure: post/pre ratio, RGB = T22, T33,
+                              T11 in dB (per-band 2-98% stretch)
+       ratio_pre.png          pre image, Pauli RGB (T22, T33, T11 in dB)
+       ratio_post.png         post image, same stretch as the pre image
+                              All three PNGs have identical pixel size and
+                              image position (they overlay on consecutive
+                              slides), are clipped to the rectangle holding
+                              image data, black background, one-line title
+                              (yyyymmdd dates), two-line caption (colour
+                              encoding + selection result), a scale bar,
+                              and the polygons outlined in ONE bright colour
+                              on a black casing, picked from the image data
+                              for maximum contrast (see pick_line_colour)
        ratio_scan.csv         scores for every pair, best first
 
 Pixels where pre <= 0 or either value is not finite are NaN in ratio.bin.
@@ -428,9 +436,11 @@ def ciede2000(lab1, lab2, kL=1.0):
 
 def pick_line_colour(pixel_sets, rng, n_samples=4000, kL=0.5, pct=5):
     """Pick ONE outline colour that stands out against every image in
-    pixel_sets (each = the colours under and next to the outlines, no-data
-    black included).
-      candidates : 13 x 13 x 13 grid over the RGB cube
+    pixel_sets (each = the imaged colours under and next to the outlines;
+    no-data pixels are left out because the outline is always drawn bright
+    on a black casing, which reads on the black no-data/background).
+      candidates : 13 x 13 x 13 grid over the RGB cube, bright ones only
+                   (CIELAB L* >= 45)
       difference : CIEDE2000 with lightness weighted x2 (kL = 0.5), because
                    thin lines are seen mainly through lightness contrast
       per image  : 5th percentile of the difference (line contrasts with
@@ -440,6 +450,8 @@ def pick_line_colour(pixel_sets, rng, n_samples=4000, kL=0.5, pct=5):
     lv = np.linspace(0.0, 1.0, 13)
     cand = np.stack(np.meshgrid(lv, lv, lv, indexing="ij"), -1).reshape(-1, 3)
     lab_c = srgb_to_lab(cand)
+    keep = lab_c[:, 0] >= 45.0
+    cand, lab_c = cand[keep], lab_c[keep]
     worst = np.full(len(cand), np.inf)
     for pix in pixel_sets:
         if len(pix) > n_samples:
@@ -484,42 +496,30 @@ def sensor_name(folder):
     return " ".join(x for x in (s, m) if x)
 
 
-def nice_date(d):
-    return "%d %s %d" % (d.day, d.strftime("%b"), d.year)
-
-
 # colours used on the (black) figure background
 FG = "#ffffff"
 FG_DIM = "#b8b8b8"
 BAND_COL = {"T22": "#ff6b6b", "T33": "#5ee05e", "T11": "#6fa0ff"}
-BAND_TXT = {"T22": "T22 double-bounce", "T33": "T33 volume", "T11": "T11 surface"}
 
 
-def figure_layout(W, n_caption_lines):
-    """Pixel sizes shared by all figures so their image areas line up."""
-    s = {"title": W * 0.024, "sub": W * 0.0155, "cap": W * 0.0128}
-    pad = W * 0.012
-    s["header"] = int(round(pad * 1.2 + s["title"] * 1.45 + 2 * s["sub"] * 1.55))
-    s["footer"] = int(round(pad * 1.6 + n_caption_lines * s["cap"] * 1.5))
-    s["pad"] = pad
+def figure_layout(W, titles):
+    """Pixel sizes shared by all figures so their image areas line up.
+    Title font shrinks if needed so the longest title fits on one line."""
+    title = min(W * 0.03, 0.95 * W / (0.6 * max(len(s) for s in titles)))
+    s = {"title": title, "cap": min(W * 0.018, title * 0.8)}
+    s["pad"] = W * 0.012
+    s["header"] = int(round(s["pad"] * 1.4 + s["title"] * 1.3))
+    s["footer"] = int(round(s["pad"] * 1.6 + 2 * s["cap"] * 1.55))
     return s
 
 
-def wrap_caption(paragraphs, W, cap_px):
-    import textwrap
-    width = max(40, int(W / (0.53 * cap_px)))
-    out = []
-    for p, style in paragraphs:
-        for ln in textwrap.wrap(p, width) or [""]:
-            out.append((ln, style))
-    return out
-
-
-def render_figure(path, rgb, extent, rings, colour, lw_px, title, subtitle,
-                  caption, lay, scalebar_m):
-    """Black-background figure: title + subtitle + RGB legend on top, image,
-    wrapped caption below. Identical sizes for all figures (same lay)."""
+def render_figure(path, rgb, extent, rings, colour, lw_px, title, caption,
+                  lay, scalebar_m):
+    """Black-background figure: one-line title, image clipped to the data,
+    two-line caption (line 1 = colour encoding, line 2 = selection).
+    Identical sizes for all figures (same lay)."""
     plt, LineCollection = import_matplotlib()
+    import matplotlib.patheffects as pe
     H, W = rgb.shape[:2]
     dpi = 100.0
     pt = 72.0 / dpi                                  # points per pixel
@@ -528,12 +528,9 @@ def render_figure(path, rgb, extent, rings, colour, lw_px, title, subtitle,
     ax = fig.add_axes([0, lay["footer"] / Htot, 1, H / Htot])
     ax.set_facecolor("black")
     ax.imshow(rgb, extent=extent, interpolation="nearest", aspect="auto")
-    # outline: thin casing (black or white, whichever contrasts with the
-    # chosen colour) under the chosen colour, so it reads on any background
-    lum = float(np.dot(colour, [0.2126, 0.7152, 0.0722]))
-    casing = "black" if lum > 0.35 else "white"
-    ax.add_collection(LineCollection(rings, colors=casing,
-                                     linewidths=(lw_px + 2.0) * pt,
+    # outline: black casing under the (bright) chosen colour
+    ax.add_collection(LineCollection(rings, colors="black",
+                                     linewidths=(lw_px + max(2.0, 0.5 * lw_px)) * pt,
                                      joinstyle="round", capstyle="round"))
     ax.add_collection(LineCollection(rings, colors=[tuple(colour)],
                                      linewidths=lw_px * pt,
@@ -542,54 +539,40 @@ def render_figure(path, rgb, extent, rings, colour, lw_px, title, subtitle,
     ax.set_ylim(extent[2], extent[3])
     ax.set_axis_off()
     if scalebar_m:
-        x_span = extent[1] - extent[0]
-        y_span = extent[3] - extent[2]
-        x0 = extent[0] + 0.04 * x_span
-        y0 = extent[2] + 0.035 * y_span
-        h = 0.008 * y_span
-        ax.add_patch(plt.Rectangle((x0, y0), scalebar_m, h, facecolor="white",
+        xs, ys = extent[1] - extent[0], extent[3] - extent[2]
+        bx, by, h = extent[0] + 0.04 * xs, extent[2] + 0.035 * ys, 0.008 * ys
+        ax.add_patch(plt.Rectangle((bx, by), scalebar_m, h, facecolor="white",
                                    edgecolor="black", linewidth=1.0, zorder=5))
-        km = scalebar_m / 1000.0
-        ax.text(x0 + scalebar_m / 2, y0 + h * 1.8,
-                ("%g km" % km), color="white", ha="center", va="bottom",
-                fontsize=lay["sub"] * pt, fontweight="bold", zorder=5,
-                path_effects=[__import__("matplotlib.patheffects", fromlist=["x"])
-                              .withStroke(linewidth=3, foreground="black")])
+        ax.text(bx + scalebar_m / 2, by + h * 1.8, "%g km" % (scalebar_m / 1000.0),
+                color="white", ha="center", va="bottom", fontsize=lay["cap"] * pt,
+                fontweight="bold", zorder=5,
+                path_effects=[pe.withStroke(linewidth=3, foreground="black")])
 
-    def ytop(px_from_top):
+    def yfrac(px_from_top):
         return 1.0 - px_from_top / Htot
 
-    y = lay["pad"] * 0.8
-    fig.text(0.5, ytop(y + lay["title"] * 0.7), title, color=FG, ha="center",
-             va="center", fontsize=lay["title"] * pt, fontweight="bold")
-    y += lay["title"] * 1.45
-    fig.text(0.5, ytop(y + lay["sub"] * 0.75), subtitle, color=FG_DIM,
-             ha="center", va="center", fontsize=lay["sub"] * pt)
-    y += lay["sub"] * 1.55
-    # coloured RGB legend, laid out piece by piece and centred
-    pieces = [("R = ", FG_DIM), (BAND_TXT["T22"], BAND_COL["T22"]),
-              ("      G = ", FG_DIM), (BAND_TXT["T33"], BAND_COL["T33"]),
-              ("      B = ", FG_DIM), (BAND_TXT["T11"], BAND_COL["T11"])]
+    fig.text(0.5, yfrac(lay["pad"] * 0.7 + lay["title"] * 0.65), title, color=FG,
+             ha="center", va="center", fontsize=lay["title"] * pt, fontweight="bold")
     r = fig.canvas.get_renderer()
-    texts, widths = [], []
-    for s, c in pieces:
-        t = fig.text(0, ytop(y + lay["sub"] * 0.75), s, color=c, ha="left",
-                     va="center", fontsize=lay["sub"] * pt,
-                     fontweight="bold" if c != FG_DIM else "normal")
-        texts.append(t)
-        widths.append(t.get_window_extent(r).width)
-    x = (W - sum(widths)) / 2.0
-    for t, w in zip(texts, widths):
-        t.set_x(x / W)
-        x += w
-    # caption
     y = H + lay["header"] + lay["pad"] * 0.8
-    for ln, style in caption:
-        fig.text(lay["pad"] / W, ytop(y + lay["cap"] * 0.75), ln,
-                 color=FG if style == "main" else FG_DIM, ha="left",
-                 va="center", fontsize=lay["cap"] * pt,
-                 family="monospace" if style == "id" else None)
-        y += lay["cap"] * 1.5
+    for line in caption:
+        yy = yfrac(y + lay["cap"] * 0.75)
+        if isinstance(line, str):
+            fig.text(0.5, yy, line, color=FG_DIM, ha="center", va="center",
+                     fontsize=lay["cap"] * pt)
+        else:                                        # coloured pieces, centred
+            texts, widths = [], []
+            for s, c in line:
+                tx = fig.text(0, yy, s, color=c, ha="left", va="center",
+                              fontsize=lay["cap"] * pt,
+                              fontweight="normal" if c == FG_DIM else "bold")
+                texts.append(tx)
+                widths.append(tx.get_window_extent(r).width)
+            x = (W - sum(widths)) / 2.0
+            for tx, w in zip(texts, widths):
+                tx.set_x(x / W)
+                x += w
+        y += lay["cap"] * 1.55
     fig.savefig(path, dpi=dpi, facecolor="black")
     plt.close(fig)
 
@@ -852,17 +835,29 @@ def main():
     rgb_pre, _ = stretch(disp_pre, lim_pp)
     rgb_post, _ = stretch(disp_post, lim_pp)
 
-    gt_d = (gt[0], gt[1] * k, 0.0, gt[3], 0.0, gt[5] * k)
-    extent = (gt[0], gt[0] + dw * k * gt[1], gt[3] + dh * k * gt[5], gt[3])
+    # clip all three figures to the rectangle that holds image data
+    has = np.zeros((dh, dw), bool)
+    for d in disp + disp_pre + disp_post:
+        has |= np.isfinite(d)
+    rows, cols = np.flatnonzero(has.any(axis=1)), np.flatnonzero(has.any(axis=0))
+    r0, r1, c0, c1 = int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
+    rgb_ratio, rgb_pre, rgb_post = [im[r0:r1, c0:c1] for im in (rgb_ratio, rgb_pre, rgb_post)]
+    dh, dw = int(r1 - r0), int(c1 - c0)
+    x0, y0 = gt[0] + c0 * k * gt[1], gt[3] + r0 * k * gt[5]
+    gt_d = (x0, gt[1] * k, 0.0, y0, 0.0, gt[5] * k)
+    extent = (x0, x0 + dw * k * gt[1], y0 + dh * k * gt[5], y0)
     rings = rings_xy(polys)
-    lw_px = float(np.clip(dw / 300.0, 3.0, 8.0))
+    lw_px = float(np.clip(dw / 190.0, 4.0, 12.0))
     lds, llyr = mem_layer(dst_srs, [line_geom(xy) for xy in rings])
     line_ds = burn(llyr, dw, dh, gt_d, wkt, all_touched=True)
     under = line_ds.GetRasterBand(1).ReadAsArray() > 0
     line_ds = None
     under = dilate(under, int(np.ceil(lw_px / 2.0)) + 2)
-    sets = [im[under] if under.any() else im.reshape(-1, 3)
-            for im in (rgb_ratio, rgb_pre, rgb_post)]
+    sets = []
+    for im in (rgb_ratio, rgb_pre, rgb_post):
+        valid = im.any(axis=2)                           # not no-data black
+        m = under & valid
+        sets.append(im[m] if m.sum() >= 50 else im[valid])
     colour, cscore = pick_line_colour(sets, rng)
     hexcol = "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in colour)
     print("outline colour %s (CIEDE2000 contrast %.1f, worst of the 3 figures)"
@@ -878,76 +873,36 @@ def main():
 
     sens_pre, sens_post = sensor_name(pre), sensor_name(post)
     sens = sens_pre if sens_pre == sens_post else "%s → %s" % (sens_pre, sens_post)
-    lband = "L-band " if all(s.startswith(("ALOS", "SAOCOM")) for s in (sens_pre, sens_post)) else ""
-    n_imgs = len(names)
-    rank_txt = "rank %d of %d date pairs" % (best["rank"], len(results))
-    poly_txt = ("Outlines: %d polygon%s from %s (one colour for all, chosen "
-                "automatically for maximum contrast)."
-                % (n_on, "" if n_on == 1 else "s", shp_name))
-    if a.pair:
-        sel_txt = ("Pair chosen manually (--pair); its separability score is "
-                   "%s." % rank_txt)
-    else:
-        sel_txt = ("Pair chosen automatically: of all %d date pairs from %d "
-                   "images, this pre/post pair gives the strongest contrast "
-                   "between the ratio inside the outlines and a %s around "
-                   "them." % (len(results), n_imgs,
-                              ("%g–%g m ring" % (a.gap, maxd)) if a.ring > 0
-                              else "background beyond %g m" % a.gap))
-    stats_txt = ("Separability: Jeffries–Matusita distance JM = %.2f (0 = "
-                 "same, 2 = fully separable) × %.0f%% of outlined area imaged "
-                 "= score %.2f (%s)."
-                 % (best["jm"], 100 * best["coverage"], best["score"], rank_txt))
-    rng_txt = ", ".join("%s %+.1f to %+.1f dB" % (b, lo, hi)
-                        for b, (lo, hi) in zip(ORDER, lim_ratio))
-    ids_txt = "pre: %s    post: %s" % (pre, post)
-
-    cap_ratio = [
-        (sel_txt + " " + stats_txt, "main"),
-        ("Display: 10·log10(post/pre) per band, 2–98%% stretch (%s). A brighter "
-         "channel = a larger post/pre ratio in that band (e.g. less green = "
-         "lost volume scattering). Black = no data. %s" % (rng_txt, poly_txt), "dim"),
-        (ids_txt, "id"),
-    ]
-    pp_rng = ", ".join("%s %.1f to %.1f dB" % (b, lo, hi)
-                       for b, (lo, hi) in zip(ORDER, lim_pp))
-
-    def cap_pp(which):
-        return [
-            ("%s image of the change ratio pair (%s → %s, %d days apart; "
-             "%s, JM = %.2f)."
-             % (which, nice_date(dates[pre]), nice_date(dates[post]),
-                best["days"], rank_txt, best["jm"]), "main"),
-            ("Display: Pauli power in dB, 2–98%% stretch shared by the pre and "
-             "post images, so equal colours mean equal backscatter (%s). Black "
-             "= no data. %s" % (pp_rng, poly_txt), "dim"),
-            (ids_txt, "id"),
-        ]
-
+    d_pre, d_post = dates[pre].strftime("%Y%m%d"), dates[post].strftime("%Y%m%d")
+    sel = ("selected pair" if a.pair else
+           "best of %d date pairs" % len(results))
+    stats = "%s: JM = %.2f (0–2), %.0f%% of polygon area imaged" % (
+        sel, best["jm"], 100 * best["coverage"])
+    key_ratio = [("R ", FG_DIM), ("T22", BAND_COL["T22"]), (" double-bounce   ", FG_DIM),
+                 ("G ", FG_DIM), ("T33", BAND_COL["T33"]), (" volume   ", FG_DIM),
+                 ("B ", FG_DIM), ("T11", BAND_COL["T11"]), (" surface", FG_DIM),
+                 ("      (post / pre, dB)", FG_DIM)]
+    key_pauli = key_ratio[:-1] + [("      (Pauli, dB)", FG_DIM)]
     figs = [
         ("ratio.png", rgb_ratio,
-         "%sPolSAR change: %s → %s" % (lband, nice_date(dates[pre]),
-                                     nice_date(dates[post])),
-         "Post / pre ratio of Pauli T3 powers  ·  %s  ·  %d days" % (sens, best["days"]),
-         cap_ratio),
-        ("ratio_pre.png", rgb_pre,
-         "Pre: %s" % nice_date(dates[pre]),
-         "Pauli RGB  ·  %s  ·  %s" % (sens_pre, pre), cap_pp("Pre")),
-        ("ratio_post.png", rgb_post,
-         "Post: %s" % nice_date(dates[post]),
-         "Pauli RGB  ·  %s  ·  %s" % (sens_post, post), cap_pp("Post")),
+         "%s → %s  post/pre ratio  ·  %s" % (d_pre, d_post, sens),
+         [key_ratio, stats]),
+        ("ratio_pre.png", rgb_pre, "%s  pre  ·  %s" % (d_pre, sens_pre),
+         [key_pauli, "pre image of the %s → %s pair (%s)" % (d_pre, d_post, sel)]),
+        ("ratio_post.png", rgb_post, "%s  post  ·  %s" % (d_post, sens_post),
+         [key_pauli, "post image of the %s → %s pair (%s)" % (d_pre, d_post, sel)]),
     ]
-    probe = figure_layout(dw, 0)
-    wrapped = [wrap_caption(f[4], dw, probe["cap"]) for f in figs]
-    lay = figure_layout(dw, max(len(w) for w in wrapped))
-    for (path, rgb, title, sub, _), cap in zip(figs, wrapped):
-        render_figure(path, rgb, extent, rings, colour, lw_px, title, sub, cap,
+    lay = figure_layout(dw, [f[2] for f in figs])
+    for path, rgb, title, cap in figs:
+        render_figure(path, rgb, extent, rings, colour, lw_px, title, cap,
                       lay, scalebar_m)
     print("wrote ratio.png, ratio_pre.png, ratio_post.png (%d x %d px each, "
-          "image %d x %d%s), ratio_scan.csv"
+          "image clipped to data: %d x %d%s), ratio_scan.csv"
           % (dw, dh + lay["header"] + lay["footer"], dw, dh,
              (", %dx%d block mean" % (k, k)) if k > 1 else ""))
 
 
 if __name__ == "__main__":
     main()
+
+
